@@ -1,26 +1,30 @@
 // ==============================
 // セーブ
 // ==============================
-const KEY = "bunny_farm_save_v2";
+const KEY = "bunny_farm_save_v3_upgrades";
 
 function loadSave() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) return { coins: 0, bunnyCount: 3 };
+    if (!raw) return { coins: 0, bunnyCount: 3, idleLv: 0, luckLv: 0 };
     const p = JSON.parse(raw);
     return {
       coins: Number(p.coins) || 0,
-      bunnyCount: Math.max(1, Number(p.bunnyCount) || 3)
+      bunnyCount: Math.max(1, Number(p.bunnyCount) || 3),
+      idleLv: Math.max(0, Math.floor(Number(p.idleLv) || 0)),
+      luckLv: Math.max(0, Math.floor(Number(p.luckLv) || 0))
     };
   } catch {
-    return { coins: 0, bunnyCount: 3 };
+    return { coins: 0, bunnyCount: 3, idleLv: 0, luckLv: 0 };
   }
 }
 
 function saveData() {
   localStorage.setItem(KEY, JSON.stringify({
     coins: game.coins,
-    bunnyCount
+    bunnyCount,
+    idleLv,
+    luckLv
   }));
 }
 
@@ -30,13 +34,26 @@ function saveData() {
 const coinValue = document.getElementById("coinValue");
 const petBtn = document.getElementById("petBtn");
 const resetBtn = document.getElementById("resetBtn");
+
 const shopBtn = document.getElementById("shopBtn");
 const shopModal = document.getElementById("shopModal");
 const shopCloseBtn = document.getElementById("shopCloseBtn");
+
 const buyBunnyBtn = document.getElementById("buyBunnyBtn");
+const buyIdleBtn = document.getElementById("buyIdleBtn");
+const buyLuckBtn = document.getElementById("buyLuckBtn");
+
 const shopCoins = document.getElementById("shopCoins");
 const shopCount = document.getElementById("shopCount");
-const shopPrice = document.getElementById("shopPrice");
+const shopBunnyPrice = document.getElementById("shopBunnyPrice");
+
+const shopIdleNow = document.getElementById("shopIdleNow");
+const shopIdleLv = document.getElementById("shopIdleLv");
+const shopIdlePrice = document.getElementById("shopIdlePrice");
+
+const shopLuckNow = document.getElementById("shopLuckNow");
+const shopLuckLv = document.getElementById("shopLuckLv");
+const shopLuckPrice = document.getElementById("shopLuckPrice");
 
 const field = document.getElementById("field");
 const bunnyLayer = document.getElementById("bunnyLayer");
@@ -48,24 +65,51 @@ const hud = document.getElementById("hud");
 // ==============================
 const save = loadSave();
 const game = { coins: save.coins };
+
 let bunnyCount = save.bunnyCount;
+
+// 強化状態
+let idleLv = save.idleLv; // 放置短縮レベル
+let luckLv = save.luckLv; // レア率レベル
 
 // クリックドロップ制限
 let lastClickDropAt = 0;
 
 // ==============================
-// コインレア定義
+// 強化：放置短縮（秒）
+// ==============================
+// 基本20秒 → レベルで短縮（下限5秒）
+function getIdleIntervalSec() {
+  const base = 20;
+  const reduced = idleLv * 2; // 1Lvで -2秒
+  return Math.max(5, base - reduced);
+}
+
+// ==============================
+// 強化：レア率UP（倍率）
+// ==============================
+// レベルで「放置時間を水増し」して tier 判定する
+// 例：1.00 → 1.12 → 1.25 …（上限2.00）
+function getLuckMultiplier() {
+  const mul = 1 + luckLv * 0.12;
+  return Math.min(2.0, mul);
+}
+
+// ==============================
+// コインレア定義（minは“放置秒”）
 // ==============================
 const TIERS = [
-  { emoji: "🪙", value: 1, min: 0, className: "" },
-  { emoji: "🥈", value: 3, min: 60, className: "silver" },
-  { emoji: "🥇", value: 8, min: 180, className: "gold" },
+  { emoji: "🪙", value: 1,  min: 0,   className: "" },
+  { emoji: "🥈", value: 3,  min: 60,  className: "silver" },
+  { emoji: "🥇", value: 8,  min: 180, className: "gold" },
   { emoji: "🌈", value: 20, min: 420, className: "rainbow" }
 ];
 
 function getTier(idleSec) {
+  // レア率UP：放置秒を倍率で水増し
+  const boosted = idleSec * getLuckMultiplier();
   for (let i = TIERS.length - 1; i >= 0; i--) {
-    if (idleSec >= TIERS[i].min) return TIERS[i];
+    if (boosted >= TIERS[i].min) return TIERS[i];
   }
   return TIERS[0];
 }
@@ -74,7 +118,7 @@ function getTier(idleSec) {
 // HUD更新
 // ==============================
 function updateHUD() {
-  coinValue.textContent = game.coins;
+  coinValue.textContent = String(game.coins);
   saveData();
 }
 
@@ -129,7 +173,7 @@ function dropCoin(bunny, tier) {
 
   createCoin(startX, startY, drop, tier, () => {
     bunny.lastInteract = Date.now();
-  });
+  }, frect, hrect);
 }
 
 // ==============================
@@ -137,22 +181,23 @@ function dropCoin(bunny, tier) {
 // ==============================
 function dropCoinAt(x, y, tier) {
   const frect = field.getBoundingClientRect();
-  const drop = Math.min(170, Math.max(90, frect.height - (y + 90)));
+  const hrect = hud.getBoundingClientRect();
 
-  createCoin(x - 32, y - 32, drop, tier);
+  const startX = x - 32;
+  const startY = y - 32;
+  const drop = Math.min(170, Math.max(90, frect.height - (startY + 90)));
+
+  createCoin(startX, startY, drop, tier, null, frect, hrect);
 }
 
 // ==============================
 // コイン共通生成
 // ==============================
-function createCoin(x, y, drop, tier, onCollect) {
-  const frect = field.getBoundingClientRect();
-  const hrect = hud.getBoundingClientRect();
-
+function createCoin(x, y, drop, tier, onCollect, frect, hrect) {
   const c = document.createElement("div");
   c.className = `coin ${tier.className}`;
   c.textContent = tier.emoji;
-  c.dataset.value = tier.value;
+  c.dataset.value = String(tier.value);
 
   c.style.left = `${x}px`;
   c.style.top = `${y}px`;
@@ -174,6 +219,7 @@ function createCoin(x, y, drop, tier, onCollect) {
     setTimeout(() => {
       game.coins += Number(c.dataset.value);
       updateHUD();
+      spark(`+${c.dataset.value}`, tx, ty);
       c.remove();
       if (onCollect) onCollect();
     }, 280);
@@ -194,13 +240,26 @@ function createCoin(x, y, drop, tier, onCollect) {
   setTimeout(() => c.remove(), 30000);
 }
 
+function spark(text, x, y) {
+  const d = document.createElement("div");
+  d.className = "coinSpark";
+  d.textContent = text;
+  d.style.left = `${Math.max(6, x - 10)}px`;
+  d.style.top = `${Math.max(6, y - 20)}px`;
+  coinLayer.appendChild(d);
+  setTimeout(() => d.remove(), 650);
+}
+
 // ==============================
-// 放置ドロップ
+// 放置ドロップ（放置短縮反映）
 // ==============================
 setInterval(() => {
   const now = Date.now();
+  const interval = getIdleIntervalSec();
+
   bunnies.forEach(b => {
-    if ((now - b.lastDrop) / 1000 >= 20) {
+    const since = (now - b.lastDrop) / 1000;
+    if (since >= interval) {
       const idle = (now - b.lastInteract) / 1000;
       dropCoin(b, getTier(idle));
       b.lastDrop = now;
@@ -224,7 +283,7 @@ field.addEventListener("pointerdown", (e) => {
   const x = e.clientX - frect.left;
   const y = e.clientY - frect.top;
 
-  dropCoinAt(x, y, getTier(0));
+  dropCoinAt(x, y, getTier(0)); // クリックは基本銅（レア率UPは “放置”に効く想定）
 });
 
 // ==============================
@@ -237,8 +296,7 @@ function tick(dt) {
     if (b.x < 0 || b.x > w - BUNNY_W) b.dir *= -1;
     b.t += dt * 6;
     const bob = Math.abs(Math.sin(b.t)) * 4;
-    b.el.style.transform =
-      `translate(${b.x}px, ${-bob}px) scaleX(${b.dir})`;
+    b.el.style.transform = `translate(${b.x}px, ${-bob}px) scaleX(${b.dir})`;
   });
 }
 
@@ -266,19 +324,46 @@ resetBtn.onclick = () => {
 };
 
 // ==============================
-// ショップ
+// ショップ：価格
 // ==============================
 function bunnyPrice() {
   return 100 + Math.max(0, bunnyCount - 3) * 80;
 }
 
-function updateShop() {
-  shopCoins.textContent = game.coins;
-  shopCount.textContent = bunnyCount;
-  shopPrice.textContent = bunnyPrice();
-  buyBunnyBtn.disabled = game.coins < bunnyPrice();
+function idlePrice() {
+  // レベルが上がるほど高い（上限は勝手に止めない、下限秒で実質頭打ち）
+  return 150 + idleLv * 120;
 }
 
+function luckPrice() {
+  return 200 + luckLv * 160;
+}
+
+// ==============================
+// ショップ：UI更新
+// ==============================
+function updateShop() {
+  shopCoins.textContent = String(game.coins);
+
+  shopCount.textContent = String(bunnyCount);
+  shopBunnyPrice.textContent = String(bunnyPrice());
+
+  shopIdleNow.textContent = String(getIdleIntervalSec());
+  shopIdleLv.textContent = String(idleLv);
+  shopIdlePrice.textContent = String(idlePrice());
+
+  shopLuckNow.textContent = getLuckMultiplier().toFixed(2);
+  shopLuckLv.textContent = String(luckLv);
+  shopLuckPrice.textContent = String(luckPrice());
+
+  buyBunnyBtn.disabled = game.coins < bunnyPrice();
+  buyIdleBtn.disabled = game.coins < idlePrice() || getIdleIntervalSec() <= 5;
+  buyLuckBtn.disabled = game.coins < luckPrice() || getLuckMultiplier() >= 2.0;
+}
+
+// ==============================
+// ショップ：開閉
+// ==============================
 shopBtn.onclick = () => {
   updateShop();
   shopModal.classList.remove("hidden");
@@ -288,14 +373,48 @@ shopCloseBtn.onclick = () => {
   shopModal.classList.add("hidden");
 };
 
+// 背景タップで閉じる
+shopModal.addEventListener("pointerdown", (e) => {
+  if (e.target === shopModal) shopModal.classList.add("hidden");
+});
+
+// ==============================
+// ショップ：購入
+// ==============================
 buyBunnyBtn.onclick = () => {
   const price = bunnyPrice();
   if (game.coins < price) return;
+
   game.coins -= price;
   bunnyCount++;
   initBunnies();
   updateHUD();
   updateShop();
+  spark("+うさぎ", 40, 40);
+};
+
+buyIdleBtn.onclick = () => {
+  const price = idlePrice();
+  if (game.coins < price) return;
+  if (getIdleIntervalSec() <= 5) return;
+
+  game.coins -= price;
+  idleLv++;
+  updateHUD();
+  updateShop();
+  spark("放置短縮+", 40, 70);
+};
+
+buyLuckBtn.onclick = () => {
+  const price = luckPrice();
+  if (game.coins < price) return;
+  if (getLuckMultiplier() >= 2.0) return;
+
+  game.coins -= price;
+  luckLv++;
+  updateHUD();
+  updateShop();
+  spark("レア率+", 40, 100);
 };
 
 // ==============================
