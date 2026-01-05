@@ -37,6 +37,9 @@
 
   const coinValueEl = document.getElementById("coinValue");
   const shopBtn = document.getElementById("shopBtn");
+  const candyBtn = document.getElementById("candyBtn");
+  const departBtn = document.getElementById("departBtn");
+  const resetBtn = document.getElementById("resetBtn");
 
   /* =========================
    * STATE
@@ -44,8 +47,10 @@
   let coins = 0;
   const bunnies = [];
   const coinsOnField = [];
+  const candies = [];
 
   let lastFrame = performance.now();
+  let candyArmed = false;
 
   /* =========================
    * AUDIO
@@ -115,10 +120,10 @@
       this.y = yStart;
       this.yFloor = yFloor;
 
-      this.vx = (Math.random() * 2 - 1) * (20 + tier * 6);
-      this.vy = 80 + Math.random() * 260;
+      this.vx = (Math.random() * 2 - 1) * (40 + tier * 10);
+      this.vy = -(420 + Math.random() * 200);
       this.gravity = 2200;
-      this.bounce = 0.28 + Math.random() * 0.1;
+      this.bounce = 0.28 + Math.random() * 0.14;
 
       this.el = document.createElement("img");
       this.el.className = "coin";
@@ -137,7 +142,6 @@
       updateHud();
       playSE(seCoin);
       this.el.remove();
-
       const i = coinsOnField.indexOf(this);
       if (i >= 0) coinsOnField.splice(i, 1);
     }
@@ -173,85 +177,63 @@
   }
 
   function gaugeToTier(g) {
-    return clamp(Math.ceil(g * 4), 1, 4);
+    return clamp(Math.ceil(clamp(g, 0, 1) * 4), 1, 4);
   }
 
   /* =========================
-   * ★大量レイン版
+   * ★大量・混合・うさぎ足元から
    * ========================= */
- function gaugeToTier(g) {
-  return clamp(Math.ceil(clamp(g, 0, 1) * 4), 1, 4);
-}
+  function spawnCoinsByGauge(bunny, gauge01) {
+    const maxTier = gaugeToTier(gauge01);
+    const countByTier = [0, 10, 18, 28, 44];
+    const count = countByTier[maxTier];
 
-// ★大量・混合・うさぎから落ちる（バラ撒き）
-function spawnCoinsByGauge(bunny, gauge01) {
-  const maxTier = gaugeToTier(gauge01);
+    const weights = {
+      1: [0, 1],
+      2: [0, 1, 2],
+      3: [0, 1, 2, 3],
+      4: [0, 1, 2, 3, 6],
+    };
 
-  // 大量（好みに応じてさらに増やしてOK）
-  const countByTier = [0, 10, 18, 28, 44]; // tier4は44枚
-  const count = countByTier[maxTier];
-
-  // tier混合の重み（上のtierほど出やすい）
-  const weightsByMax = {
-    1: [0, 1],
-    2: [0, 1, 2],
-    3: [0, 1, 2, 3],
-    4: [0, 1, 2, 3, 6],
-  };
-
-  function pickTierMixed(maxT) {
-    const w = weightsByMax[maxT];
-    let sum = 0;
-    for (let t = 1; t <= maxT; t++) sum += w[t];
-    let roll = Math.random() * sum;
-    for (let t = 1; t <= maxT; t++) {
-      roll -= w[t];
-      if (roll <= 0) return t;
-    }
-    return maxT;
-  }
-
-  const fr = fieldRect();
-  const gY = groundY();
-
-  // うさぎ位置（足元寄り）
-  const r = bunny.wrap.getBoundingClientRect();
-  const baseX = (r.left - fr.left) + r.width * 0.5;
-  const baseY = (r.top - fr.top) + r.height * 0.78;
-
-  // 散りの強さ
-  const spreadX = 60 + maxTier * 30;
-  const upKick = 420 + maxTier * 90; // 上に跳ねる強さ
-
-  for (let i = 0; i < count; i++) {
-    const delay = i * (10 + Math.random() * 14); // 連射っぽく
-
-    setTimeout(() => {
-      const tier = pickTierMixed(maxTier);
-      const value = coinValueFromTier(tier);
-
-      // うさぎの足元付近から少し散らす
-      const x = baseX + (Math.random() * 2 - 1) * spreadX;
-      const startY = Math.min(gY - 10, baseY + (Math.random() * 2 - 1) * 14);
-
-      const c = new Coin(x, startY, gY - 2, tier, value, false);
-
-      // ★「落とすときはねる」：最初に上方向へピョン
-      c.vy = -(upKick * (0.65 + Math.random() * 0.55));
-      c.vx = (Math.random() * 2 - 1) * (40 + tier * 10);
-
-      // ★地面で軽く弾む（雨粒っぽさ）
-      c.bounce = 0.28 + Math.random() * 0.14;
-
-      coinsOnField.push(c);
-
-      // ちょいキラ
-      if (tier >= 3 && Math.random() < 0.25) {
-        spawnSparks(x, gY - 40, 3, 30, false);
+    function pickTier() {
+      const w = weights[maxTier];
+      let sum = 0;
+      for (let t = 1; t <= maxTier; t++) sum += w[t];
+      let r = Math.random() * sum;
+      for (let t = 1; t <= maxTier; t++) {
+        r -= w[t];
+        if (r <= 0) return t;
       }
-    }, delay);
+      return maxTier;
+    }
+
+    const fr = fieldRect();
+    const gY = groundY();
+    const r = bunny.wrap.getBoundingClientRect();
+    const baseX = (r.left - fr.left) + r.width * 0.5;
+    const baseY = (r.top - fr.top) + r.height * 0.78;
+
+    const spreadX = 60 + maxTier * 30;
+    const upKick = 420 + maxTier * 90;
+
+    for (let i = 0; i < count; i++) {
+      const delay = i * (10 + Math.random() * 14);
+      setTimeout(() => {
+        const tier = pickTier();
+        const value = coinValueFromTier(tier);
+
+        const x = baseX + (Math.random() * 2 - 1) * spreadX;
+        const startY = Math.min(gY - 10, baseY + (Math.random() * 2 - 1) * 14);
+
+        const c = new Coin(x, startY, gY - 2, tier, value);
+        coinsOnField.push(c);
+
+        if (tier >= 3 && Math.random() < 0.25) {
+          spawnSparks(x, gY - 40, 3, 30, false);
+        }
+      }, delay);
+    }
   }
-}
 
   /* =========================
    * BUNNY
@@ -322,9 +304,7 @@ function spawnCoinsByGauge(bunny, gauge01) {
         return;
       }
 
-      const g = this.gauge;
-      spawnCoinsByGauge(this, g);
-
+      spawnCoinsByGauge(this, this.gauge);
       this.gauge = 0;
       this.charged = false;
       this.gaugePeriod = 8 + Math.random() * 8;
@@ -333,13 +313,11 @@ function spawnCoinsByGauge(bunny, gauge01) {
 
     update(dt) {
       this.updateGauge(dt);
-
       this.x += this.dir * this.baseSpeed * (this.isBaby ? BABY_SPEED_MUL : 1) * dt;
 
       const fr = fieldRect();
-      const bunnySize = 140;
       if (this.x <= 0) this.dir = 1;
-      if (this.x >= fr.width - bunnySize) this.dir = -1;
+      if (this.x >= fr.width - 140) this.dir = -1;
 
       this.wrap.classList.toggle("flip", this.dir < 0);
       this.wrap.style.left = `${this.x}px`;
