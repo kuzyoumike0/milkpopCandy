@@ -323,14 +323,14 @@ html,body{
   }
 }
 
-/* saku を左右に1枚ずつ置く */
+/* saku を左右に1枚ずつ・下に配置 */
 .saku-single{
   position: fixed;
-  top: 0;
-  height: 50vh;
+  bottom: 0;              /* ★下に固定 */
+  height: 40px;          /* ★高すぎないように */
   width: auto;
   pointer-events: none;
-  z-index: 4;
+  z-index: 3;             /* ★うさぎより下 */
   opacity: 0.9;
 }
 
@@ -342,4 +342,3 @@ html,body{
   right: 0;
   transform: scaleX(-1);
 }
-
