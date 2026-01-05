@@ -1,3 +1,6 @@
+
+const hud = document.getElementById("hud");
+
 // ===== 保存 =====
 const KEY = "web_bunny_save_v2";
 
