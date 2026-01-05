@@ -13,14 +13,25 @@
   <div id="app">
 
     <header id="hud">
+      <!-- ✅ 既存の表示（#coinValue）を維持 -->
       <div id="coin">🪙 <span id="coinValue">0</span></div>
+
+      <!-- ✅ app.jsが #coin-counter を見てる場合に備えて互換要素を追加（非表示） -->
+      <div id="coin-counter" style="display:none;">0</div>
+
       <button id="petBtn">なでる</button>
       <button id="shopBtn">ショップ</button>
       <button id="resetBtn">リセット</button>
     </header>
 
     <main id="field">
-      <div id="bunnyLayer"></div>
+      <!-- ✅ うさぎ表示レイヤ -->
+      <div id="bunnyLayer">
+        <!-- ★ここが重要：クリック判定用の .rabbit を実体として置く -->
+        <img src="./bunny.png" alt="うさぎ" class="rabbit" draggable="false">
+      </div>
+
+      <!-- ✅ コインを置くレイヤ（今後使うなら） -->
       <div id="coinLayer"></div>
     </main>
 
