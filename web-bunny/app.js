@@ -621,6 +621,10 @@
     const x = clamp(e.clientX - fr.left, 30, fr.width - 30);
 
     candies.push(new Candy(x, 10000));
+if (coins < COST.CANDY) {
+  flashButtonText(candyBtn, "コイン不足…");
+  return; // setCandyMode(false) しない
+}
 
   });
 
