@@ -621,7 +621,7 @@
     const x = clamp(e.clientX - fr.left, 30, fr.width - 30);
 
     candies.push(new Candy(x, 10000));
-    setCandyMode(false);
+
   });
 
   /* ===== Depart (HUD button) ===== */
