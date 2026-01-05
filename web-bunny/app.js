@@ -101,19 +101,49 @@ function dropCoin(value) {
   coin.dataset.value = String(value);
 
   // 回収
-  const collect = () => {
+    const collect = () => {
     const v = Number(coin.dataset.value || "1");
-    state.bankCoins += v;
-    renderCoins();
 
-    // 演出：+n
-    const cx = parseFloat(coin.style.left) + 10;
-    const cy = parseFloat(coin.style.top) + dropDist - 10;
-    spark(`+${v}`, cx, cy);
+    // すでに回収中なら二重発火防止
+    if (coin.classList.contains("collecting")) return;
+    coin.classList.add("collecting");
 
-    coin.remove();
-    touch();
+    // コイン中心（field内座標）
+    const coinX = parseFloat(coin.style.left) + 28;
+    const coinY = parseFloat(coin.style.top) + 28 + dropDist; // 落下後の位置っぽく
+
+    // HUDのコイン表示あたりへ飛ばす（画面座標→field内座標に変換）
+    const frect = field.getBoundingClientRect();
+    const hrect = hud.getBoundingClientRect();
+
+    // HUD左側あたり（coin表示付近）をゴールにする
+    const targetScreenX = hrect.left + 30;
+    const targetScreenY = hrect.top + hrect.height / 2;
+
+    const targetX = targetScreenX - frect.left;
+    const targetY = targetScreenY - frect.top;
+
+    // 変位（現在→ゴール）
+    const dx = targetX - coinX;
+    const dy = targetY - coinY;
+
+    // 飛ぶ（translate＋縮小）
+    coin.style.transform = `translate(${dx}px, ${dy}px) scale(0.35)`;
+    coin.style.opacity = "0.2";
+
+    // 到着したら加算して消す
+    setTimeout(() => {
+      state.bankCoins += v;
+      renderCoins();
+
+      // +n演出（HUD付近に出す）
+      spark(`+${v}`, Math.max(8, targetX - 10), Math.max(8, targetY - 20));
+
+      coin.remove();
+      touch();
+    }, 420);
   };
+
 
   coin.addEventListener("pointerdown", (e) => {
     e.preventDefault();
