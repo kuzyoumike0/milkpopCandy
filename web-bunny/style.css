@@ -285,3 +285,9 @@ button:disabled{ opacity:.55; cursor:not-allowed; }
   from{ transform: translate(0,0); opacity:1; }
   to{ transform: translate(var(--dx), var(--dy)); opacity:0; }
 }
+
+#hud .hasTip .tip{
+  max-width: 320px;
+  white-space: normal;
+}
+
