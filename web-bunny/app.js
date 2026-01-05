@@ -6,6 +6,7 @@
     bunny: "./assets/bunny.png",
     bunny2: "./assets/bunny2.png",
     bunny3: "./assets/bunny3.png",
+    bunny4: "./assets/bunny4.png",
     babyBunny: "./assets/babybunny.png",
     hart: "./assets/hart.png",
     candy: "./assets/candy.png",
@@ -41,8 +42,9 @@
   // お迎え価格（固定）
   const SHOP_PRICE = {
     normal: 25,
-    bunny2: 80,
     bunny3: 200,
+    bunny4: 400,
+    bunny2: 10000,
   };
 
   // キャンディ（任意で残す：ボタンが無い場合は無効）
@@ -628,6 +630,7 @@
         ${shopCardHtml("normal", "ふつう", "assets/bunny.png", "基本のうさぎ。低確率でレア成長するかも。")}
         ${shopCardHtml("bunny2", "bunny2", "assets/bunny2.png", "黄金タイプ")}
         ${shopCardHtml("bunny3", "bunny3", "assets/bunny3.png", "毒タイプ")}
+        ${shopCardHtml("bunny3", "bunny3", "assets/bunny3.png", "水タイプ")}
       </div>
 
       <div style="margin-top:10px;font-size:12px;opacity:.85;">
@@ -658,11 +661,13 @@
         normal: modal.querySelector("#price_normal"),
         bunny2: modal.querySelector("#price_bunny2"),
         bunny3: modal.querySelector("#price_bunny3"),
+        bunny4: modal.querySelector("#price_bunny4"),
       },
       buyBtns: {
         normal: modal.querySelector('[data-buy-kind="normal"]'),
         bunny2: modal.querySelector('[data-buy-kind="bunny2"]'),
         bunny3: modal.querySelector('[data-buy-kind="bunny3"]'),
+        bunny4: modal.querySelector('[data-buy-kind="bunny4"]'),
       },
     };
 
