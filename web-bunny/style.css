@@ -239,3 +239,12 @@ button.iconBtn{
   opacity:.8;
   line-height:1.5;
 }
+/* coinLayer自体はクリックを透過（下のうさぎを押せるようにする） */
+#coinLayer{
+  pointer-events: none;
+}
+
+/* ただしコイン本体は回収できるようにする */
+.coin{
+  pointer-events: auto;
+}
