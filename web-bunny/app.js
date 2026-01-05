@@ -1003,4 +1003,29 @@
   }
 
   init();
+
+  function showFarewellMessage(kind) {
+  const texts = [
+    "またどこかで会えるよ。",
+    "ありがとう。元気でね。",
+    "やさしい時間をありがとう。",
+    "旅立ちは、はじまり。",
+    "ずっと忘れないよ。",
+  ];
+
+  const def = BUNNY_DEFS[kind];
+  const name = def?.label ?? "うさぎ";
+  const msg = `${name} は旅立っていった…`;
+
+  const el = document.createElement("div");
+  el.className = "farewellMsg";
+  el.textContent = msg + " " + texts[Math.floor(Math.random() * texts.length)];
+
+  document.body.appendChild(el);
+
+  setTimeout(() => {
+    try { el.remove(); } catch {}
+  }, 2600);
+}
+
 })();
