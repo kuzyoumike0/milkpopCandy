@@ -327,7 +327,7 @@ html,body{
 .saku-single{
   position: fixed;
   bottom: 0;              /* ★下に固定 */
-  height: 40px;          /* ★高すぎないように */
+  height: 120px;          /* ★高すぎないように */
   width: auto;
   pointer-events: none;
   z-index: 3;             /* ★うさぎより下 */
