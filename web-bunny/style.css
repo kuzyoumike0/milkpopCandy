@@ -23,6 +23,7 @@ html,body{
   gap:10px;
 }
 
+/* ===== HUD ===== */
 #hud{
   display:flex;
   align-items:center;
@@ -54,6 +55,7 @@ button{
 }
 button:active{ transform: translateY(1px); }
 
+/* ===== フィールド ===== */
 #field{
   position:relative;
   flex:1;
@@ -64,127 +66,7 @@ button:active{ transform: translateY(1px); }
   min-height: 360px;
 }
 
-#bunny{
-  position:absolute;
-  bottom: 18px;
-  left: 20px;
-  width: 160px;
-  height: 160px;
-  display:flex;
-  align-items:flex-end;
-  justify-content:center;
-  user-select:none;
-  -webkit-user-select:none;
-  touch-action:none;
-  will-change: transform;
-}
-
-#bunny img{
-  width: 160px;
-  height: 160px;
-  image-rendering:auto;
-  pointer-events:none;
-}
-
-#floating{
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  overflow:hidden;
-}
-
-.floatText{
-  position:absolute;
-  font-weight:800;
-  background:#ffffffcc;
-  padding:6px 10px;
-  border-radius: 999px;
-  box-shadow: 0 8px 20px rgba(0,0,0,.12);
-  animation: pop 900ms ease-out forwards;
-}
-@keyframes pop{
-  0%{ transform: translateY(0) scale(.9); opacity:0; }
-  20%{ opacity:1; }
-  100%{ transform: translateY(-60px) scale(1); opacity:0; }
-}
-
-#hint{
-  font-size:12px;
-  opacity:.7;
-  padding: 0 4px;
-}
-
-
-/* ===== コイン演出 ===== */
-.coin {
-  position: absolute;
-  width: 56px;
-  height: 56px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  font-size: 26px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 10px 24px rgba(0,0,0,.16);
-  user-select: none;
-  -webkit-user-select: none;
-  cursor: pointer;
-  touch-action: manipulation;
-  pointer-events: auto;
-
-  /* 落下中は若干ふわふわ */
-  animation: coinFall var(--fall, 700ms) cubic-bezier(.2,.8,.2,1) forwards;
-}
-
-.coin:active {
-  transform: scale(0.96);
-}
-
-@keyframes coinFall {
-  0%   { transform: translateY(-30px) scale(0.92); opacity: 0; }
-  10%  { opacity: 1; }
-  100% { transform: translateY(var(--drop, 140px)) scale(1.0); opacity: 1; }
-}
-
-.coinSpark {
-  position: absolute;
-  font-weight: 900;
-  padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.9);
-  box-shadow: 0 10px 22px rgba(0,0,0,.14);
-  animation: spark 650ms ease-out forwards;
-  pointer-events: none;
-}
-
-@keyframes spark {
-  0%   { transform: translateY(0) scale(.95); opacity: 0; }
-  15%  { opacity: 1; }
-  100% { transform: translateY(-50px) scale(1); opacity: 0; }
-}
-
-/* ===== HUDへ吸い込み ===== */
-.coin.collecting {
-  animation: none !important; /* 落下アニメを止める */
-  transition:
-    transform 420ms cubic-bezier(.2,.9,.2,1),
-    opacity 420ms ease-out;
-  will-change: transform, opacity;
-}
-
-/* ===== レアコイン見た目 ===== */
-.coin.silver { filter: drop-shadow(0 10px 18px rgba(0,0,0,.16)); }
-.coin.gold   { filter: drop-shadow(0 10px 18px rgba(0,0,0,.18)); }
-.coin.rainbow{
-  filter: drop-shadow(0 12px 20px rgba(0,0,0,.20));
-  animation: coinFall var(--fall, 700ms) cubic-bezier(.2,.8,.2,1) forwards, rainbow 900ms linear infinite;
-}
-@keyframes rainbow {
-  0% { filter: hue-rotate(0deg)   drop-shadow(0 12px 20px rgba(0,0,0,.20)); }
-  100% { filter: hue-rotate(360deg) drop-shadow(0 12px 20px rgba(0,0,0,.20)); }
-}
-
-/* ===== 複数うさぎ用 ===== */
+/* ===== うさぎ ===== */
 #bunnyLayer{
   position:absolute;
   inset:0;
@@ -193,21 +75,94 @@ button:active{ transform: translateY(1px); }
 
 .bunny{
   position:absolute;
-  bottom: 18px;
-  width: 160px;
-  height: 160px;
+  bottom:18px;
+  width:160px;
+  height:160px;
   display:flex;
   align-items:flex-end;
   justify-content:center;
-  user-select:none;
-  -webkit-user-select:none;
-  touch-action:none;
+  pointer-events:auto;
   will-change: transform;
-  pointer-events:auto; /* タップ/クリックできる */
 }
 
 .bunny img{
   width:160px;
   height:160px;
   pointer-events:none;
+}
+
+/* ===== コイン ===== */
+#coinLayer{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+}
+
+.coin{
+  position:absolute;
+  width:64px;
+  height:64px;
+  border-radius:999px;
+  display:grid;
+  place-items:center;
+  font-size:30px;
+  background:rgba(255,255,255,0.92);
+  box-shadow:0 10px 24px rgba(0,0,0,.16);
+  cursor:pointer;
+  pointer-events:auto;
+  animation: coinFall var(--fall,700ms) cubic-bezier(.2,.8,.2,1) forwards;
+}
+
+@keyframes coinFall{
+  0%{ transform:translateY(-30px) scale(.9); opacity:0; }
+  15%{ opacity:1; }
+  100%{ transform:translateY(var(--drop,140px)) scale(1); opacity:1; }
+}
+
+/* ===== レア ===== */
+.coin.silver{ filter: brightness(1.05); }
+.coin.gold{ filter: brightness(1.15); }
+.coin.rainbow{
+  animation:
+    coinFall var(--fall,700ms) cubic-bezier(.2,.8,.2,1) forwards,
+    rainbow 900ms linear infinite;
+}
+
+@keyframes rainbow{
+  from{ filter:hue-rotate(0deg); }
+  to{ filter:hue-rotate(360deg); }
+}
+
+/* ===== 吸い込み ===== */
+.coin.collecting{
+  animation:none!important;
+  transition:
+    transform 280ms cubic-bezier(.2,.9,.2,1),
+    opacity 280ms ease-out;
+  will-change: transform, opacity;
+}
+
+/* ===== +表示 ===== */
+.coinSpark{
+  position:absolute;
+  font-weight:900;
+  padding:6px 10px;
+  border-radius:999px;
+  background:rgba(255,255,255,0.9);
+  box-shadow:0 10px 22px rgba(0,0,0,.14);
+  animation:spark 650ms ease-out forwards;
+  pointer-events:none;
+}
+
+@keyframes spark{
+  0%{ transform:translateY(0) scale(.95); opacity:0; }
+  15%{ opacity:1; }
+  100%{ transform:translateY(-50px) scale(1); opacity:0; }
+}
+
+/* ===== ヒント ===== */
+#hint{
+  font-size:12px;
+  opacity:.7;
+  padding:0 4px;
 }
