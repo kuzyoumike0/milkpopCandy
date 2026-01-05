@@ -1,18 +1,3 @@
-/* Bunny牧場 - app.js
-   仕様:
-   - 初期うさぎ2
-   - 左右歩行（うさぎごとに個体差ランダム）
-   - 放置(2.2〜5.0秒/匹)でコイン落下
-   - クリック(1秒に1回/匹)でもコイン落下、SE poyo
-   - coin1〜4 は「そのうさぎを最後にクリックしてからの放置時間」で決定
-   - コイン回収: クリック or ホバー、SE coin
-   - コインは重なる（静止時は同一地点でもOK）
-   - 落下→床で小バウンド（上から落ちる見せ方）
-   - ショップでうさぎ購入（価格上昇）
-   - 所持コイン/うさぎ数 localStorage 保存
-   - うさぎ増加で自動整列 / 混雑時は速度・歩行幅を自動調整
-*/
-
 (() => {
   const ASSETS = {
     bunny: "./assets/bunny.png",
@@ -95,20 +80,18 @@
     bunnyValueEl.textContent = String(bunnies.length);
   }
 
-  // うさぎ価格: base 25, 2匹目までは初期。3匹目以降から上昇
   function getBunnyPrice(nextIndex /* 0-based */) {
-    const extra = Math.max(0, nextIndex - 1); // 2匹目=idx1までを初期扱い
+    const extra = Math.max(0, nextIndex - 1);
     const base = 25;
     const growth = 1.28;
     return Math.floor(base * Math.pow(growth, extra));
   }
 
-  // 放置時間(最後のクリックからの秒数)でコイン種を決定
   function coinTierFromIdleSeconds(idleSec) {
-    if (idleSec >= 90) return 4;  // coin4
-    if (idleSec >= 45) return 3;  // coin3
-    if (idleSec >= 18) return 2;  // coin2
-    return 1;                     // coin1
+    if (idleSec >= 90) return 4;
+    if (idleSec >= 45) return 3;
+    if (idleSec >= 18) return 2;
+    return 1;
   }
 
   function coinValueFromTier(tier) {
@@ -129,8 +112,7 @@
   }
 
   function randomAutoIntervalMs() {
-    // 2.2〜5.0秒
-    return 2200 + Math.random() * 2800;
+    return 2200 + Math.random() * 2800; // 2.2〜5.0秒
   }
 
   // -----------------------
@@ -141,11 +123,20 @@
   class Bunny {
     constructor() {
       this.id = bunnyIdSeq++;
+
+      // ★親wrap（位置・反転担当）
+      this.wrap = document.createElement("div");
+      this.wrap.className = "bunnyWrap";
+
+      // ★子img（上下揺れ担当）
       this.el = document.createElement("img");
       this.el.className = "bunny walk";
       this.el.src = ASSETS.bunny;
       this.el.alt = "bunny";
       this.el.draggable = false;
+
+      this.wrap.appendChild(this.el);
+      bunnyLayer.appendChild(this.wrap);
 
       // layout
       this.x = 0;
@@ -153,16 +144,17 @@
       this.homeX = 0;
 
       // 個体差（うさぎごとにランダム）
-      this.dir = Math.random() < 0.5 ? -1 : 1;           // 初期方向
-      this.baseSpeed = 28 + Math.random() * 42;          // 28〜70 px/s
-      this.roamRange = 60 + Math.random() * 180;         // 60〜240 px
-      this.turnChancePerSec = 0.10 + Math.random() * 0.55;   // 0.10〜0.65 /秒
-      this.pauseChancePerSec = 0.03 + Math.random() * 0.20;  // たまに止まる
+      // ★動きが分かりやすいように少し速め
+      this.dir = Math.random() < 0.5 ? -1 : 1;
+      this.baseSpeed = 55 + Math.random() * 65;     // 55〜120 px/s
+      this.roamRange = 90 + Math.random() * 260;    // 90〜350 px
+      this.turnChancePerSec = 0.08 + Math.random() * 0.35;
+      this.pauseChancePerSec = 0.02 + Math.random() * 0.12;
       this.pauseLeft = 0;
 
-      // idle tracking（放置判定）
-      this.lastClickAt = Date.now();     // wall-clock
-      this.lastClickSpawnAt = 0;         // performance.now
+      // idle tracking
+      this.lastClickAt = Date.now();
+      this.lastClickSpawnAt = 0;
 
       // auto drop schedule
       this.nextAutoAt = nowMs() + randomAutoIntervalMs();
@@ -172,22 +164,17 @@
         e.stopPropagation();
         this.tryClickDrop();
       });
-
-      bunnyLayer.appendChild(this.el);
     }
 
     setHome(x, y) {
       this.homeX = x;
       this.y = y;
-      // 初期だけhomeへ寄せる
-      if (this.x === 0 && this.y === 0) {
-        this.x = x;
-      }
+      if (this.x === 0 && this.y === 0) this.x = x;
     }
 
     tryClickDrop() {
       const t = nowMs();
-      if (t - this.lastClickSpawnAt < 1000) return; // 1秒制限/匹
+      if (t - this.lastClickSpawnAt < 1000) return;
 
       this.lastClickSpawnAt = t;
       this.lastClickAt = Date.now();
@@ -208,7 +195,7 @@
         spawnCoinAtBunny(this, "auto");
       }
 
-      // 混雑時は速度/歩行幅を自動で落とす
+      // 混雑時調整
       const crowd = bunnies.length;
       const speedMul = crowd <= 6 ? 1 : Math.max(0.32, 1 / Math.sqrt(crowd / 6));
       const rangeMul = crowd <= 6 ? 1 : Math.max(0.28, 1 / (crowd / 6));
@@ -216,38 +203,33 @@
       const spd = this.baseSpeed * speedMul;
       const roam = this.roamRange * rangeMul;
 
-      // たまに立ち止まる（個体差）
+      // pause
       if (this.pauseLeft > 0) {
         this.pauseLeft -= dt;
       } else {
-        // 低確率で停止（0.2〜1.2秒）
         if (Math.random() < this.pauseChancePerSec * dt) {
-          this.pauseLeft = 0.2 + Math.random() * 1.0;
+          this.pauseLeft = 0.15 + Math.random() * 0.9;
         }
-
-        // ふらっと方向転換（壁に当たってなくても反転）
         if (Math.random() < this.turnChancePerSec * dt) {
           this.dir *= -1;
         }
-
-        // 左右移動
         this.x += this.dir * spd * dt;
       }
 
-      // 往復範囲（homeX中心）
+      // bounds (homeX中心で往復)
       const minX = this.homeX - roam;
       const maxX = this.homeX + roam;
 
       if (this.x < minX) { this.x = minX; this.dir = 1; }
       if (this.x > maxX) { this.x = maxX; this.dir = -1; }
 
-      // 向き反転
-      if (this.dir < 0) this.el.classList.add("flip");
-      else this.el.classList.remove("flip");
+      // flip（親に付与）
+      if (this.dir < 0) this.wrap.classList.add("flip");
+      else this.wrap.classList.remove("flip");
 
-      // render
-      this.el.style.left = `${this.x}px`;
-      this.el.style.top = `${this.y}px`;
+      // render（親を動かす）
+      this.wrap.style.left = `${this.x}px`;
+      this.wrap.style.top = `${this.y}px`;
     }
   }
 
@@ -263,12 +245,11 @@
       this.el.alt = `coin${tier}`;
       this.el.draggable = false;
 
-      // physics
       this.x = x;
       this.y = yStart;
       this.yFloor = yFloor;
 
-      this.vx = (Math.random() * 2 - 1) * 10; // slight drift
+      this.vx = (Math.random() * 2 - 1) * 10;
       this.vy = 0;
       this.gravity = 2100;
       this.bounce = 0.38;
@@ -327,7 +308,6 @@
         }
       }
 
-      // keep inside field width
       const fr = fieldRect();
       this.x = clamp(this.x, 22, fr.width - 22);
 
@@ -356,15 +336,12 @@
     const fr = fieldRect();
     const gY = groundY();
 
-    const bRect = bunny.el.getBoundingClientRect();
+    // ★ wrapのrectで中心を取る（サイズ変更に強い）
+    const bRect = bunny.wrap.getBoundingClientRect();
     const bXCenter = (bRect.left - fr.left) + bRect.width * 0.5;
 
     const floorY = gY - 2;
-
-    // start above (落下)
     const startY = floorY - 140 - Math.random() * 70;
-
-    // slight jitter（重なりつつも自然に）
     const x = bXCenter + (Math.random() * 2 - 1) * 10;
 
     const c = new Coin(x, startY, floorY, tier, value);
@@ -388,8 +365,8 @@
     const fr = fieldRect();
     const gY = groundY();
 
-    // 実DOMのサイズを参照（CSSでサイズ変えても追従）
-    const probe = bunnies[0]?.el?.getBoundingClientRect();
+    // wrapのサイズを参照（CSSの--bunnySizeに追従）
+    const probe = bunnies[0]?.wrap?.getBoundingClientRect();
     const bunnyW = probe?.width || 140;
     const bunnyH = probe?.height || 140;
 
@@ -465,7 +442,6 @@
   // Init
   // -----------------------
   function init() {
-    // SW
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
     }
@@ -502,7 +478,6 @@
       coins = 0;
       bunnyCount = 2;
 
-      // field coins remove without adding
       for (const c of coinsOnField) c.el.remove();
       coinsOnField.length = 0;
       coinLayer.innerHTML = "";
