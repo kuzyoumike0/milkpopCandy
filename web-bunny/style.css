@@ -125,7 +125,7 @@ button.iconBtn{
   position:absolute;
   inset:0;
   z-index:15;
-  pointer-events:none;
+  pointer-events:none; /* 下のうさぎクリックは通す */
 }
 
 #decorFront{ position:absolute; inset:0; z-index:30; pointer-events:none; }
@@ -218,13 +218,11 @@ button.iconBtn{
   display:block;
   transform-origin: 50% 100%;
 }
-
 .bunny.walk{ animation: bunny-walk-bob 0.35s ease-in-out infinite alternate; }
 @keyframes bunny-walk-bob{
   from{ transform: translateY(0); }
   to{ transform: translateY(3px); }
 }
-
 .bunny.hop{ animation: bunny-hop 220ms ease-out; }
 @keyframes bunny-hop{
   0%   { transform: translateY(0) scale(1,1); }
@@ -233,25 +231,8 @@ button.iconBtn{
   100% { transform: translateY(0) scale(1,1); }
 }
 
-/* ゲージ */
-.bunnyGauge{
-  position:absolute;
-  left:10px;
-  right:10px;
-  top:-10px;
-  height:10px;
-  border-radius:999px;
-  background: rgba(255,255,255,.85);
-  box-shadow: 0 8px 18px rgba(0,0,0,.10);
-  overflow:hidden;
-  border:1px solid rgba(255,135,184,.35);
-}
-.bunnyGaugeFill{
-  height:100%;
-  width:0%;
-  border-radius:999px;
-  background: linear-gradient(90deg, #ffb6d3, #ff87b8);
-}
+/* ★ゲージは表示しない（内部で貯めるだけ） */
+.bunnyGauge{ display:none !important; }
 
 /* ハート（満タン時：常時表示＋ぷるぷる） */
 .bunnyHeart{
@@ -274,11 +255,7 @@ button.iconBtn{
   50%  { transform: translateX(-50%) translateY(-3px) scale(1.06); }
   100% { transform: translateX(-50%) translateY(0) scale(1.00); }
 }
-
-/* クリック消費時：ポップして消える */
-.bunnyHeart.show{
-  animation: heart-pop 650ms ease-out forwards;
-}
+.bunnyHeart.show{ animation: heart-pop 650ms ease-out forwards; }
 @keyframes heart-pop{
   0%   { opacity:0; transform: translateX(-50%) translateY(10px) scale(.8); }
   20%  { opacity:1; transform: translateX(-50%) translateY(0) scale(1.05); }
@@ -299,34 +276,35 @@ button.iconBtn{
   pointer-events:auto;
 }
 
+/* ★満タン演出：キラキラ粒子（JSで生成するdiv） */
+.spark{
+  position:absolute;
+  width:10px;
+  height:10px;
+  border-radius:999px;
+  pointer-events:none;
+  opacity:0;
+  filter: blur(.1px);
+}
+.spark.show{
+  animation: spark-pop 520ms ease-out forwards;
+}
+@keyframes spark-pop{
+  0%   { opacity:0; transform: translate(0,0) scale(.6); }
+  20%  { opacity:1; }
+  100% { opacity:0; transform: translate(var(--dx), var(--dy)) scale(1.15); }
+}
+
 /* Modal */
 .hidden{ display:none !important; }
-
-#modalBackdrop{
-  position:absolute;
-  inset:0;
-  background: rgba(0,0,0,.28);
-  z-index:60;
-}
+#modalBackdrop{ position:absolute; inset:0; background: rgba(0,0,0,.28); z-index:60; }
 #shopModal{
-  position:absolute;
-  left:50%;
-  top:50%;
-  transform: translate(-50%, -50%);
+  position:absolute; left:50%; top:50%; transform: translate(-50%, -50%);
   width:min(520px, calc(100vw - 26px));
-  background:#fff;
-  border-radius:20px;
-  box-shadow: var(--shadow);
-  z-index:70;
-  overflow:hidden;
+  background:#fff; border-radius:20px; box-shadow: var(--shadow);
+  z-index:70; overflow:hidden;
 }
-.modalHeader{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:14px 14px;
-  border-bottom:1px solid rgba(0,0,0,.06);
-}
+.modalHeader{ display:flex; align-items:center; justify-content:space-between; padding:14px 14px; border-bottom:1px solid rgba(0,0,0,.06); }
 .modalTitle{ font-size:18px; font-weight:900; }
 .modalBody{ padding:14px; }
 .shopCard{
