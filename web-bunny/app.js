@@ -19,7 +19,7 @@
     ],
   };
 
-  // ★うさぎ定義（増やすならここだけ）
+  /* ===== Bunny Definitions ===== */
   const BUNNY_DEFS = {
     bunny1: {
       label: "bunny1",
@@ -60,14 +60,14 @@
 
   const BABY_DURATION_MS = 3 * 60 * 1000;
   const BABY_SPEED_MUL = 0.65;
-
-  const REA_EVOLVE_RATE = 0.01; // ★突然変異率
+  const REA_EVOLVE_RATE = 0.01;
   const UNLOCK_BUNNY4_NEED = 10;
 
   const LS = {
     coins: "wb_coins",
     bunnies: "wb_bunnies",
     ach: "wb_ach",
+    dex: "wb_dex", // ★図鑑
   };
 
   /* =========================
@@ -81,12 +81,15 @@
   const shopBtn = document.getElementById("shopBtn");
   const departBtn = document.getElementById("departBtn");
   const resetBtn = document.getElementById("resetBtn");
+  const rankBtn = document.getElementById("rankBtn");
 
   /* =========================
    * STATE
    * ========================= */
   let coins = loadCoins();
   let ach = loadAch();
+  let dex = loadDex();
+
   const bunnies = [];
   const coinsOnField = [];
 
@@ -126,6 +129,17 @@
   }
   function saveAch() {
     localStorage.setItem(LS.ach, JSON.stringify(ach));
+  }
+
+  function loadDex() {
+    try {
+      return JSON.parse(localStorage.getItem(LS.dex)) || {};
+    } catch {
+      return {};
+    }
+  }
+  function saveDex() {
+    localStorage.setItem(LS.dex, JSON.stringify(dex));
   }
 
   function loadBunnyMeta() {
@@ -243,6 +257,12 @@
       this.kind = kind;
       this.isBaby = Date.now() - bornAt < BABY_DURATION_MS;
 
+      // ★図鑑登録
+      if (!dex[this.kind]) {
+        dex[this.kind] = true;
+        saveDex();
+      }
+
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
 
@@ -282,6 +302,10 @@
 
       if (Math.random() < REA_EVOLVE_RATE) {
         this.kind = "reabunny";
+        if (!dex.reabunny) {
+          dex.reabunny = true;
+          saveDex();
+        }
       }
 
       this.syncSprite();
@@ -324,12 +348,62 @@
   }
 
   /* =========================
-   * SHOP
+   * DEX MODAL
+   * ========================= */
+  function openDex() {
+    let backdrop = document.getElementById("dexBackdrop");
+    if (!backdrop) {
+      backdrop = document.createElement("div");
+      backdrop.id = "dexBackdrop";
+      backdrop.className = "modalBackdrop";
+      document.body.appendChild(backdrop);
+    }
+
+    let modal = document.getElementById("dexModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "dexModal";
+      modal.className = "modal";
+      backdrop.appendChild(modal);
+    }
+
+    const cards = Object.keys(BUNNY_DEFS).map(kind => {
+      const known = !!dex[kind];
+      const def = BUNNY_DEFS[kind];
+      return `
+        <div class="dexCard ${known ? "" : "unknown"}">
+          <img src="${known ? def.img : "./assets/unknown.png"}">
+          <div class="dexName">${known ? def.label : "？？？"}</div>
+          <div class="dexDesc">
+            ${known ? def.desc : "まだ出会っていません"}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    modal.innerHTML = `
+      <div class="modalHeader">
+        <div class="modalTitle">📖 Bunny図鑑</div>
+        <button class="modalClose" id="closeDexBtn">×</button>
+      </div>
+      <div class="dexGrid">${cards}</div>
+    `;
+
+    modal.querySelector("#closeDexBtn").onclick = () => {
+      backdrop.remove();
+    };
+  }
+
+  if (rankBtn) {
+    rankBtn.addEventListener("click", openDex);
+  }
+
+  /* =========================
+   * SHOP / DEPART / RESET
    * ========================= */
   function getShopKinds() {
-    const list = ["bunny1", "bunny3", "bunny4", "bunny5"];
     if (!ach.unlock_bunny4) return ["bunny1", "bunny3"];
-    return list;
+    return ["bunny1", "bunny3", "bunny4", "bunny5"];
   }
 
   function buyBunny(kind) {
@@ -402,56 +476,4 @@
   }
 
   init();
-  function openDex() {
-  let backdrop = document.getElementById("dexBackdrop");
-  if (!backdrop) {
-    backdrop = document.createElement("div");
-    backdrop.id = "dexBackdrop";
-    backdrop.className = "hidden";
-    document.body.appendChild(backdrop);
-  }
-
-  let modal = document.getElementById("dexModal");
-  if (!modal) {
-    modal = document.createElement("div");
-    modal.id = "dexModal";
-    modal.className = "modal";
-    backdrop.appendChild(modal);
-  }
-
-  const cards = Object.keys(BUNNY_DEFS).map((kind) => {
-    const known = !!dex[kind];
-    const def = BUNNY_DEFS[kind];
-    return `
-      <div class="dexCard ${known ? "" : "unknown"}">
-        <img src="${known ? def.img : "./assets/unknown.png"}">
-        <div class="dexName">${known ? def.label : "？？？"}</div>
-        <div class="dexDesc">
-          ${known ? def.desc : "まだ出会っていません"}
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  modal.innerHTML = `
-    <div class="modalHeader">
-      <div class="modalTitle">📖 Bunny図鑑</div>
-      <button class="modalClose" id="closeDexBtn">×</button>
-    </div>
-    <div class="dexGrid">
-      ${cards}
-    </div>
-  `;
-
-  modal.querySelector("#closeDexBtn").onclick = () => {
-    backdrop.classList.add("hidden");
-  };
-  backdrop.onclick = (e) => {
-    if (e.target === backdrop) backdrop.classList.add("hidden");
-  };
-
-  backdrop.classList.remove("hidden");
-}
-
-  
 })();
