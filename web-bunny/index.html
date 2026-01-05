@@ -12,52 +12,52 @@
 <body>
   <div id="app">
     <header id="hud">
-      <div id="coinHud">🪙 <span id="coinValue">0</span></div>
-      <div class="hudRight">
+      <div id="leftHud">
+        <div id="coinHud">🪙 <span id="coinValue">0</span></div>
+        <div id="bunnyHud">🐰 <span id="bunnyValue">0</span></div>
+      </div>
+
+      <div id="rightHud">
         <button id="shopBtn">ショップ</button>
-        <button id="resetBtn" class="ghost">リセット</button>
+        <button id="resetBtn">リセット</button>
       </div>
     </header>
 
-    <main id="field" aria-label="bunny field">
+    <main id="field" aria-label="牧場">
       <div id="bunnyLayer"></div>
       <div id="coinLayer"></div>
-      <div id="ground"></div>
-    </main>
-  </div>
 
-  <!-- Shop Modal -->
-  <div id="modalBackdrop" class="hidden"></div>
-  <section id="shopModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="shopTitle">
-    <div class="modalHeader">
-      <h2 id="shopTitle">ショップ</h2>
-      <button id="closeShopBtn" class="ghost">×</button>
-    </div>
-    <div class="modalBody">
-      <div class="shopCard">
-        <div class="shopCardTitle">うさぎを増やす</div>
-        <div class="shopCardDesc">うさぎが1匹増えます（放置コインも増えるよ）</div>
-        <div class="shopCardRow">
-          <div>価格：<span id="bunnyPrice">50</span> 🪙</div>
-          <button id="buyBunnyBtn">購入</button>
+      <div id="ground">
+        <div id="groundLine"></div>
+      </div>
+    </main>
+
+    <!-- SHOP MODAL -->
+    <div id="modalBackdrop" class="hidden"></div>
+    <div id="shopModal" class="hidden" role="dialog" aria-modal="true" aria-label="ショップ">
+      <div class="modalHeader">
+        <div class="modalTitle">ショップ</div>
+        <button id="closeShopBtn" class="iconBtn" aria-label="閉じる">✕</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="shopCard">
+          <div class="shopItemTitle">うさぎを購入</div>
+          <div class="shopItemDesc">うさぎが1匹増えます（価格は徐々に上昇）</div>
+
+          <div class="shopRow">
+            <div class="shopPrice">価格：<span id="bunnyPrice">0</span> 🪙</div>
+            <button id="buyBunnyBtn" class="primary">購入</button>
+          </div>
+
+          <div class="shopHint">
+            放置が長いほど coin4 が出やすくなります（最後にそのうさぎをクリックしてからの時間で判定）
+          </div>
         </div>
       </div>
-
-      <div class="shopInfo">
-        <div>現在のうさぎ：<span id="bunnyCount">2</span>匹</div>
-        <div class="note">コインは「クリック」または「カーソルを合わせる（ホバー）」で回収できます。</div>
-      </div>
     </div>
-  </section>
+  </div>
 
   <script src="./app.js"></script>
-  <script>
-    // SW
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("./sw.js").catch(() => {});
-      });
-    }
-  </script>
 </body>
 </html>
