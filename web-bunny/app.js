@@ -3,10 +3,6 @@
    * ASSETS / CONST
    * ========================= */
   const ASSETS = {
-    bunny: "./assets/bunny.png",
-    bunny2: "./assets/bunny2.png",
-    bunny3: "./assets/bunny3.png",
-    bunny4: "./assets/bunny4.png",
     babyBunny: "./assets/babybunny.png",
     hart: "./assets/hart.png",
     candy: "./assets/candy.png",
@@ -19,13 +15,45 @@
       "./assets/coin2.png",
       "./assets/coin3.png",
       "./assets/coin4.png",
+      
     ],
   };
 
-  // baby → 3分で成長
-  const BABY_DURATION_MS = 3 * 60 * 1000;
+  // ★うさぎ定義（増やすならここに追加するだけ）
+  const BUNNY_DEFS = {
+    bunny1: {
+      label: "ふつう",
+      img: "./assets/bunny.png",
+      price: 25,
+      desc: "基本のうさぎ。低確率でレア成長するかも。",
+    },
+    bunny2: {
+      label: "bunny2",
+      img: "./assets/bunny2.png",
+      price: 50000,
+      desc: "黄金タイプ",
+    },
+    bunny3: {
+      label: "bunny3",
+      img: "./assets/bunny3.png",
+      price: 200,
+      desc: "毒タイプ",
+    },
+    bunny4: {
+      label: "bunny4",
+      img: "./assets/bunny4.png",
+      price: 400,
+      desc: "実績解除でショップに出現する幻のうさぎ。",
+    },
+     bunny5: {
+      label: "bunny5",
+      img: "./assets/bunny5.png",
+      price: 800,
+      desc: "正月タイプ",
+    },
+  };
 
-  // babyの速度は遅い
+  const BABY_DURATION_MS = 3 * 60 * 1000; // 3分
   const BABY_SPEED_MUL = 0.68;
 
   // baby行列（追従）
@@ -36,30 +64,24 @@
   // 進化演出（虹）
   const EVOLVE_SPARK_COUNT = 14;
 
-  // 低確率レア進化（通常購入の子だけ対象）
+  // 低確率レア進化：bunny1 の baby のみ -> bunny2
   const RARE_EVOLVE_TO_BUNNY2_RATE = 0.05;
 
-  // お迎え価格（固定）
-  const SHOP_PRICE = {
-    normal: 25,
-    bunny3: 200,
-    bunny4: 400,
-    bunny2: 10000,
-  };
+  // 実績：同時うさぎ数
+  const UNLOCK_BUNNY4_NEED = 10;
 
-  // キャンディ（任意で残す：ボタンが無い場合は無効）
+  // optional
   const CANDY_COST = 10;
-
-  // 旅立ち（ボタンが無い場合は無効）
   const DEPART_COST = 10;
 
   const LS = {
-    coins: "wb_coins_v3",
-    bunnies: "wb_bunnies_v3", // [{bornAt, kind}]
+    coins: "wb_coins_v4",
+    bunnies: "wb_bunnies_v4", // [{bornAt, kind}]
+    ach: "wb_ach_v1",
   };
 
   /* =========================
-   * DOM (optional safe)
+   * DOM
    * ========================= */
   const field = document.getElementById("field");
   const bunnyLayer = document.getElementById("bunnyLayer");
@@ -105,10 +127,14 @@
   }
 
   /* =========================
-   * STATE / STORAGE
+   * UTILS / STORAGE
    * ========================= */
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const rand = (a, b) => a + Math.random() * (b - a);
+
+  function safeKind(k) {
+    return BUNNY_DEFS[k] ? k : "bunny1";
+  }
 
   function loadCoins() {
     const n = parseInt(localStorage.getItem(LS.coins) || "0", 10);
@@ -118,6 +144,18 @@
     localStorage.setItem(LS.coins, String(coins));
   }
 
+  function loadAch() {
+    try {
+      const a = JSON.parse(localStorage.getItem(LS.ach) || "{}");
+      return a && typeof a === "object" ? a : {};
+    } catch {
+      return {};
+    }
+  }
+  function saveAch() {
+    localStorage.setItem(LS.ach, JSON.stringify(ach));
+  }
+
   function loadBunnyMeta() {
     try {
       const arr = JSON.parse(localStorage.getItem(LS.bunnies) || "null");
@@ -125,7 +163,7 @@
       return arr
         .map((x) => ({
           bornAt: Number(x?.bornAt) || Date.now() - BABY_DURATION_MS - 9999,
-          kind: x?.kind === "bunny2" || x?.kind === "bunny3" ? x.kind : "normal",
+          kind: safeKind(x?.kind),
         }))
         .filter(Boolean);
     } catch {
@@ -137,22 +175,6 @@
     localStorage.setItem(LS.bunnies, JSON.stringify(arr));
   }
 
-  let coins = loadCoins();
-
-  // うさぎ一覧（保存復元）
-  const bunnies = [];
-  const coinsOnField = [];
-  const candies = [];
-
-  // UI state
-  let lastFrame = performance.now();
-  let candyArmed = false;
-
-  function updateHud() {
-    if (coinValueEl) coinValueEl.textContent = String(coins);
-    updateShopTipPrice(); // hoverの価格色を最新化
-  }
-
   function fieldRect() {
     return field.getBoundingClientRect();
   }
@@ -162,6 +184,45 @@
     if (!gl) return fr.height - 60;
     const gr = gl.getBoundingClientRect();
     return gr.top - fr.top;
+  }
+
+  let coins = loadCoins();
+  let ach = loadAch();
+
+  const bunnies = [];
+  const coinsOnField = [];
+  const candies = [];
+
+  let lastFrame = performance.now();
+  let candyArmed = false;
+
+  function updateHud() {
+    if (coinValueEl) coinValueEl.textContent = String(coins);
+    updateShopTip(); // hover表示を最新化
+  }
+
+  /* =========================
+   * ACHIEVEMENTS
+   * ========================= */
+  function unlock(id) {
+    if (ach[id]) return false;
+    ach[id] = true;
+    saveAch();
+    return true;
+  }
+
+  function checkUnlocks() {
+    // ★条件：同時うさぎ数 >= 10 で bunny4 解放
+    if (!ach.unlock_bunny4 && bunnies.length >= UNLOCK_BUNNY4_NEED) {
+      const newly = unlock("unlock_bunny4");
+      if (newly) {
+        try {
+          alert("実績解除！ bunny4 がショップに出現しました 🐰✨");
+        } catch {}
+        refreshShopUI?.();
+      }
+    }
+    updateShopTip();
   }
 
   /* =========================
@@ -209,7 +270,7 @@
       this.y = yStart;
       this.yFloor = yFloor;
 
-      // “落とすときコインが跳ねる” 初速
+      // ★「落とすときコインが跳ねる」初速
       this.vx = (Math.random() * 2 - 1) * (40 + tier * 10);
       this.vy = -(420 + Math.random() * 200);
       this.gravity = 2200;
@@ -261,11 +322,11 @@
     }
   }
 
-  // ★混合大量を「うさぎから」落とす（雨みたいに）
+  // ★混合大量を「うさぎから」落とす（雨みたいに連射）
   function spawnCoinsByGauge(bunny, gauge01) {
     const maxTier = gaugeToTier(gauge01);
 
-    // 大量（必要ならさらに増やしてOK）
+    // 大量（好みで増やしてOK）
     const countByTier = [0, 10, 18, 28, 44];
     const count = countByTier[maxTier];
 
@@ -292,14 +353,13 @@
     const fr = fieldRect();
     const gY = groundY();
     const r = bunny.wrap.getBoundingClientRect();
-
     const baseX = (r.left - fr.left) + r.width * 0.5;
     const baseY = (r.top - fr.top) + r.height * 0.78;
 
     const spreadX = 60 + maxTier * 30;
 
     for (let i = 0; i < count; i++) {
-      const delay = i * (10 + Math.random() * 14); // “雨”っぽい連射
+      const delay = i * (10 + Math.random() * 14);
       setTimeout(() => {
         const tier = pickTierMixed(maxTier);
         const value = coinValueFromTier(tier);
@@ -310,7 +370,6 @@
         const c = new Coin(x, startY, gY - 2, tier, value);
         coinsOnField.push(c);
 
-        // ちょいキラ（高tier）
         if (tier >= 3 && Math.random() < 0.25) {
           spawnSparks(x, gY - 40, 3, 30, false);
         }
@@ -336,13 +395,10 @@
    * BUNNY
    * ========================= */
   class Bunny {
-    constructor(bornAt, kind = "normal") {
+    constructor(bornAt, kind = "bunny1") {
       this.bornAt = bornAt;
-      this.kind = kind; // "normal" | "bunny2" | "bunny3"
+      this.kind = safeKind(kind);
       this.isBaby = (Date.now() - bornAt) < BABY_DURATION_MS;
-
-      // レア進化フラグ（通常購入の子のみ）
-      this.didRareEvolve = false;
 
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
@@ -365,12 +421,10 @@
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
 
-      // adult gauge (0-1)
       this.gauge = 0;
       this.gaugePeriod = 8 + Math.random() * 8;
       this.charged = false;
 
-      // baby follow
       this.vx = 0;
 
       this.syncSprite();
@@ -383,9 +437,7 @@
     }
 
     getAdultSprite() {
-      if (this.kind === "bunny2") return ASSETS.bunny2;
-      if (this.kind === "bunny3") return ASSETS.bunny3;
-      return ASSETS.bunny;
+      return BUNNY_DEFS[this.kind].img;
     }
 
     syncSprite() {
@@ -417,13 +469,11 @@
       if (!this.isBaby) return;
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
-      // 成長
       this.isBaby = false;
 
-      // ★低確率で「通常の子だけ」bunny2へレア進化
-      if (this.kind === "normal" && Math.random() < RARE_EVOLVE_TO_BUNNY2_RATE) {
+      // ★低確率：bunny1 のみ bunny2 にレア成長
+      if (this.kind === "bunny1" && Math.random() < RARE_EVOLVE_TO_BUNNY2_RATE) {
         this.kind = "bunny2";
-        this.didRareEvolve = true;
       }
 
       this.syncSprite();
@@ -435,16 +485,11 @@
       const cy = (r.top - fr.top) + r.height / 2;
       spawnSparks(cx, cy, EVOLVE_SPARK_COUNT, 90, true);
 
-      // レア進化なら追加キラ
-      if (this.didRareEvolve) spawnSparks(cx, cy - 18, 18, 120, true);
-
-      // ゲージ初期化（大人になってからチャージ）
       this.gauge = 0;
       this.charged = false;
       this.gaugePeriod = 8 + Math.random() * 8;
       this.heart.classList.remove("show");
 
-      // 保存更新
       saveBunnyMeta();
     }
 
@@ -471,16 +516,13 @@
     }
 
     tryClickDrop() {
-      // SE
       playSE(this.isBaby ? seBaby : sePoyo);
 
       if (this.isBaby) {
-        // babyは常に coin1 を1枚
         spawnBabyCoinAtBunny(this);
         return;
       }
 
-      // 大人：ゲージ量に応じて混合大量
       spawnCoinsByGauge(this, this.gauge);
 
       // ゲージ消費
@@ -494,7 +536,6 @@
       this.updateEvolve();
       this.updateGauge(dt);
 
-      // 移動
       const fr = fieldRect();
       const bunnySize =
         parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bunnySize")) || 140;
@@ -502,7 +543,6 @@
       const maxX = Math.max(0, fr.width - bunnySize);
 
       if (this.isBaby) {
-        // babyは行列追従
         const leader = this.findLeaderForBaby();
         if (leader) {
           const desiredX = leader.x - leader.dir * BABY_FOLLOW_GAP;
@@ -590,10 +630,34 @@
    * ========================= */
   let shopUi = null;
 
+  function getShopKinds() {
+    const list = ["bunny1", "bunny2", "bunny3"];
+    if (ach.unlock_bunny4) list.push("bunny4");
+    return list;
+  }
+
+  function shopCardHtml(kind, def) {
+    return `
+      <div class="modalSection" style="margin:0;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <img src="${def.img}" alt="${def.label}"
+            style="width:46px;height:46px;object-fit:contain;border-radius:10px;background:rgba(255,255,255,0.7);padding:6px;">
+          <div>
+            <div style="font-weight:900;">${def.label}</div>
+            <div style="font-size:12px;opacity:.9;line-height:1.35;">${def.desc}</div>
+          </div>
+        </div>
+        <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div style="font-weight:900;">価格：<span id="price_${kind}">${def.price}</span>🪙</div>
+          <button data-buy-kind="${kind}">お迎え</button>
+        </div>
+      </div>
+    `;
+  }
+
   function ensureShopModal() {
     if (shopUi) return shopUi;
 
-    // backdrop
     let backdrop = document.getElementById("modalBackdrop");
     if (!backdrop) {
       backdrop = document.createElement("div");
@@ -602,7 +666,6 @@
       document.body.appendChild(backdrop);
     }
 
-    // modal root
     let modal = document.getElementById("shopModal");
     if (!modal) {
       modal = document.createElement("div");
@@ -611,7 +674,7 @@
       backdrop.appendChild(modal);
     }
 
-    // build content
+    const kinds = getShopKinds();
     modal.innerHTML = `
       <div class="modalHeader">
         <div class="modalTitle">🐰 お迎え</div>
@@ -626,11 +689,16 @@
         </div>
       </div>
 
+      <div class="modalSection" style="background: rgba(255,240,200,0.28);">
+        <div style="font-weight:900;margin-bottom:6px;">bunny4 解放条件</div>
+        <div style="font-size:12px;line-height:1.45;opacity:.92;">
+          同時うさぎ数： <b><span id="unlockNowCount">0</span> / ${UNLOCK_BUNNY4_NEED}</b><br/>
+          ${ach.unlock_bunny4 ? "✅ 解放済み（ショップに出現中）" : "🔒 まだ解放されていません"}
+        </div>
+      </div>
+
       <div id="shopGrid" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;">
-        ${shopCardHtml("normal", "ふつう", "assets/bunny.png", "基本のうさぎ。低確率でレア成長するかも。")}
-        ${shopCardHtml("bunny2", "bunny2", "assets/bunny2.png", "黄金タイプ")}
-        ${shopCardHtml("bunny3", "bunny3", "assets/bunny3.png", "毒タイプ")}
-        ${shopCardHtml("bunny3", "bunny3", "assets/bunny3.png", "水タイプ")}
+        ${kinds.map((k) => shopCardHtml(k, BUNNY_DEFS[k])).join("")}
       </div>
 
       <div style="margin-top:10px;font-size:12px;opacity:.85;">
@@ -638,14 +706,12 @@
       </div>
     `;
 
-    // close handlers
     const closeBtn = modal.querySelector("#closeShopBtn");
     closeBtn.addEventListener("click", closeShop);
     backdrop.addEventListener("click", (e) => {
       if (e.target === backdrop) closeShop();
     });
 
-    // buy handlers
     modal.querySelectorAll("[data-buy-kind]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const kind = btn.getAttribute("data-buy-kind");
@@ -657,40 +723,18 @@
       backdrop,
       modal,
       haveEl: modal.querySelector("#shopHaveCoins"),
-      priceEls: {
-        normal: modal.querySelector("#price_normal"),
-        bunny2: modal.querySelector("#price_bunny2"),
-        bunny3: modal.querySelector("#price_bunny3"),
-        bunny4: modal.querySelector("#price_bunny4"),
-      },
-      buyBtns: {
-        normal: modal.querySelector('[data-buy-kind="normal"]'),
-        bunny2: modal.querySelector('[data-buy-kind="bunny2"]'),
-        bunny3: modal.querySelector('[data-buy-kind="bunny3"]'),
-        bunny4: modal.querySelector('[data-buy-kind="bunny4"]'),
-      },
+      unlockCountEl: modal.querySelector("#unlockNowCount"),
+      priceEls: {},
+      buyBtns: {},
     };
 
-    return shopUi;
-  }
+    // capture price/button refs for current kinds
+    for (const k of getShopKinds()) {
+      shopUi.priceEls[k] = modal.querySelector(`#price_${k}`);
+      shopUi.buyBtns[k] = modal.querySelector(`[data-buy-kind="${k}"]`);
+    }
 
-  function shopCardHtml(kind, title, imgPath, desc) {
-    const price = SHOP_PRICE[kind];
-    return `
-      <div class="modalSection" style="margin:0;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <img src="./${imgPath}" alt="${title}" style="width:46px;height:46px;object-fit:contain;border-radius:10px;background:rgba(255,255,255,0.7);padding:6px;">
-          <div>
-            <div style="font-weight:900;">${title}</div>
-            <div style="font-size:12px;opacity:.9;line-height:1.35;">${desc}</div>
-          </div>
-        </div>
-        <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <div style="font-weight:900;">価格：<span id="price_${kind}">${price}</span>🪙</div>
-          <button data-buy-kind="${kind}">お迎え</button>
-        </div>
-      </div>
-    `;
+    return shopUi;
   }
 
   function openShop() {
@@ -705,58 +749,103 @@
   }
 
   function refreshShopUI() {
-    const ui = ensureShopModal();
-    ui.haveEl.textContent = String(coins);
+    // shopKinds can change after unlock -> rebuild if needed
+    const currentKinds = getShopKinds();
+    if (shopUi) {
+      const grid = shopUi.modal.querySelector("#shopGrid");
+      const existingKinds = Array.from(shopUi.modal.querySelectorAll("[data-buy-kind]")).map((b) =>
+        b.getAttribute("data-buy-kind")
+      );
+      const same =
+        existingKinds.length === currentKinds.length &&
+        existingKinds.every((k, i) => k === currentKinds[i]);
 
-    for (const kind of ["normal", "bunny2", "bunny3"]) {
-      const price = SHOP_PRICE[kind];
-      ui.priceEls[kind].textContent = String(price);
-
-      const bad = coins < price;
-      // price text red
-      ui.priceEls[kind].style.color = bad ? "#ff5a5a" : "";
-      // disable button
-      ui.buyBtns[kind].disabled = bad;
-      ui.buyBtns[kind].style.opacity = bad ? "0.55" : "";
+      if (!same) {
+        shopUi = null;
+        ensureShopModal();
+      }
     }
 
-    updateShopTipPrice();
-  }
+    const ui = ensureShopModal();
+    ui.haveEl.textContent = String(coins);
+    if (ui.unlockCountEl) ui.unlockCountEl.textContent = String(bunnies.length);
 
-  // お迎えボタンのホバーtipがある場合、ここで価格と不足色を更新
-  function updateShopTipPrice() {
-    const el = document.getElementById("shopTipPrice");
-    if (!el) return;
-    const price = SHOP_PRICE.normal; // tipは「ふつう」価格表示にしておく（必要ならHTML側で3種に拡張）
-    el.textContent = String(price);
-    el.classList.toggle("priceBad", coins < price);
+    for (const kind of getShopKinds()) {
+      const price = BUNNY_DEFS[kind].price;
+      const bad = coins < price;
+
+      if (ui.priceEls[kind]) {
+        ui.priceEls[kind].textContent = String(price);
+        ui.priceEls[kind].style.color = bad ? "#ff5a5a" : "";
+      }
+      if (ui.buyBtns[kind]) {
+        ui.buyBtns[kind].disabled = bad;
+        ui.buyBtns[kind].style.opacity = bad ? "0.55" : "";
+      }
+    }
+
+    updateShopTip();
   }
 
   function buyBunny(kind) {
-    const price = SHOP_PRICE[kind];
-    if (coins < price) return;
+    kind = safeKind(kind);
 
-    coins -= price;
+    // bunny4 は未解放なら購入不可
+    if (kind === "bunny4" && !ach.unlock_bunny4) return;
+
+    const def = BUNNY_DEFS[kind];
+    if (!def) return;
+
+    if (coins < def.price) return;
+
+    coins -= def.price;
     saveCoins();
+    updateHud();
 
-    // 購入は baby で来る（3分後に kind の見た目になる）
     const b = new Bunny(Date.now(), kind);
     bunnies.push(b);
     saveBunnyMeta();
-    updateHud();
+
+    checkUnlocks();
     refreshShopUI();
+  }
+
+  /* =========================
+   * SHOP HOVER TIP (progress)
+   * ========================= */
+  function updateShopTip() {
+    // 価格（ふつうの価格表示）
+    const priceEl = document.getElementById("shopTipPrice");
+    if (priceEl) {
+      const p = BUNNY_DEFS.bunny1.price;
+      priceEl.textContent = String(p);
+      priceEl.classList.toggle("priceBad", coins < p);
+    }
+
+    // ★進捗表示：現在x/10
+    // 使うにはHTML側で <span id="shopTipProgress"></span> をtip内に置く
+    const progEl = document.getElementById("shopTipProgress");
+    if (progEl) {
+      const now = bunnies.length;
+      progEl.textContent = ach.unlock_bunny4
+        ? "✅ 解放済み"
+        : `bunny4解放：${now}/${UNLOCK_BUNNY4_NEED}`;
+      progEl.style.color = !ach.unlock_bunny4 && now >= UNLOCK_BUNNY4_NEED ? "#8ef7a0" : "";
+    }
   }
 
   /* =========================
    * OPTIONAL BUTTONS
    * ========================= */
   if (shopBtn) {
-    // 表示名はHTML側で「お迎え」にしてOK。JS側はクリックでモーダル。
     shopBtn.addEventListener("click", () => {
       unlockAudioOnce();
       openShop();
     });
-    shopBtn.addEventListener("mouseenter", updateShopTipPrice);
+    shopBtn.addEventListener("mouseenter", () => {
+      updateShopTip();
+      refreshShopUI?.();
+    });
   }
 
   if (candyBtn && field) {
@@ -790,12 +879,12 @@
 
       playSE(seTabidati);
 
-      // 末尾を旅立ち（削除）
       const victim = bunnies.pop();
-      if (victim?.wrap) {
-        victim.wrap.remove();
-      }
+      if (victim?.wrap) victim.wrap.remove();
+
       saveBunnyMeta();
+      checkUnlocks(); // 解放済みなら何もしない
+      refreshShopUI?.();
     });
   }
 
@@ -806,26 +895,28 @@
       coins = 0;
       saveCoins();
 
-      // コイン掃除
       coinsOnField.forEach((c) => c.el?.remove());
       coinsOnField.length = 0;
 
-      // キャンディ掃除
       candies.forEach((c) => c.remove());
       candies.length = 0;
 
-      // うさぎ掃除＆初期2匹
       bunnies.forEach((b) => b.wrap?.remove());
       bunnies.length = 0;
 
+      // 実績は残す（必要ならここで ach を消す）
+      // ach = {}; saveAch();
+
       const now = Date.now();
       bunnies.push(
-        new Bunny(now - BABY_DURATION_MS - 1000, "normal"),
-        new Bunny(now - BABY_DURATION_MS - 2000, "normal")
+        new Bunny(now - BABY_DURATION_MS - 1000, "bunny1"),
+        new Bunny(now - BABY_DURATION_MS - 2000, "bunny1")
       );
 
       saveBunnyMeta();
       updateHud();
+      checkUnlocks();
+      refreshShopUI?.();
     });
   }
 
@@ -833,18 +924,16 @@
    * INIT
    * ========================= */
   function initBunnies() {
-    // 保存があれば復元
     const meta = loadBunnyMeta();
     if (meta && meta.length >= 1) {
       meta.forEach((m) => bunnies.push(new Bunny(m.bornAt, m.kind)));
       return;
     }
 
-    // 初期2匹（大人）
     const now = Date.now();
     bunnies.push(
-      new Bunny(now - BABY_DURATION_MS - 1000, "normal"),
-      new Bunny(now - BABY_DURATION_MS - 2000, "normal")
+      new Bunny(now - BABY_DURATION_MS - 1000, "bunny1"),
+      new Bunny(now - BABY_DURATION_MS - 2000, "bunny1")
     );
     saveBunnyMeta();
   }
@@ -856,7 +945,6 @@
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
-    // candy update
     const now = performance.now();
     for (let i = candies.length - 1; i >= 0; i--) {
       const c = candies[i];
@@ -867,31 +955,29 @@
       }
     }
 
-    // bunny update
     bunnies.forEach((b) => b.update(dt));
-
-    // coin update
     coinsOnField.forEach((c) => c.update(dt));
 
     requestAnimationFrame(tick);
   }
 
   function init() {
+    if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
+      console.error("必要なDOMが見つかりません: field / bunnyLayer / coinLayer / coinValue");
+      return;
+    }
+
     initBunnies();
     updateHud();
+    checkUnlocks();
+
     requestAnimationFrame(tick);
 
-    // resize: groundY変化に追従（yを更新）
     window.addEventListener("resize", () => {
       const gy = groundY();
       bunnies.forEach((b) => (b.y = gy - 120));
+      updateShopTip();
     });
-  }
-
-  // safety checks
-  if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
-    console.error("必要なDOMが見つかりません: field / bunnyLayer / coinLayer / coinValue");
-    return;
   }
 
   init();
