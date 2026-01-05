@@ -343,3 +343,24 @@ html,body{
     opacity:0;
   }
 }
+
+/* saku を左右に1枚ずつ置く */
+.saku-single{
+  position: fixed;
+  top: 0;
+  height: 100vh;
+  width: auto;
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0.9;
+}
+
+.saku-single.left{
+  left: 0;
+}
+
+.saku-single.right{
+  right: 0;
+  transform: scaleX(-1);
+}
+
