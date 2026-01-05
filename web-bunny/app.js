@@ -1,6 +1,7 @@
 (() => {
   const ASSETS = {
     bunny: "./assets/bunny.png",
+    hart: "./assets/hart.png", // ★追加
     coinSE: "./assets/coin.mp3",
     poyoSE: "./assets/poyo.mp3",
     coins: [
@@ -118,6 +119,7 @@
     return Math.floor(base * Math.pow(growth, extra));
   }
 
+  // 放置時間（最後のクリックから）で coin1〜4
   function coinTierFromIdleSeconds(idleSec) {
     if (idleSec >= 90) return 4;
     if (idleSec >= 45) return 3;
@@ -142,8 +144,9 @@
     return groundLine.top - fr.top;
   }
 
-  function randomAutoIntervalMs() {
-    return 2200 + Math.random() * 2800; // 2.2〜5.0秒
+  // ゲージの1周にかかる時間（秒）＝ 2.2〜5.0
+  function randomGaugeSeconds() {
+    return 2.2 + Math.random() * 2.8;
   }
 
   function getEdgeVisibleRatio() {
@@ -164,12 +167,30 @@
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
 
+      // ★ゲージ
+      this.gaugeWrap = document.createElement("div");
+      this.gaugeWrap.className = "bunnyGauge";
+      this.gaugeFill = document.createElement("div");
+      this.gaugeFill.className = "bunnyGaugeFill";
+      this.gaugeWrap.appendChild(this.gaugeFill);
+
+      // ★ハート
+      this.heart = document.createElement("img");
+      this.heart.className = "bunnyHeart";
+      this.heart.src = ASSETS.hart;
+      this.heart.alt = "heart";
+      this.heart.draggable = false;
+
+      // うさぎ本体
       this.el = document.createElement("img");
       this.el.className = "bunny walk";
       this.el.src = ASSETS.bunny;
       this.el.alt = "bunny";
       this.el.draggable = false;
 
+      // レイヤー順：ゲージ→ハート→本体（見た目が自然）
+      this.wrap.appendChild(this.gaugeWrap);
+      this.wrap.appendChild(this.heart);
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
@@ -177,7 +198,7 @@
       this.y = 0;
       this.homeX = 0;
 
-      // 個体差
+      // 個体差（歩行）
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 65;     // 55〜120 px/s
       this.roamRange = 90 + Math.random() * 260;    // 90〜350 px
@@ -185,10 +206,14 @@
       this.pauseChancePerSec = 0.02 + Math.random() * 0.12;
       this.pauseLeft = 0;
 
+      // ★ゲージ（個体）
+      this.gauge = Math.random() * 0.25;   // 少しだけバラす
+      this.gaugePeriod = randomGaugeSeconds(); // 1周の秒数
+      this.lastFullAt = 0;
+
+      // 放置判定（クリックから）
       this.lastClickAt = Date.now();
       this.lastClickSpawnAt = 0;
-
-      this.nextAutoAt = nowMs() + randomAutoIntervalMs();
 
       this.lastHopAt = 0;
 
@@ -198,6 +223,8 @@
         unlockAudioOnce();
         this.tryClickDrop();
       }, { capture: true });
+
+      this.renderGauge();
     }
 
     bunnyW() {
@@ -209,7 +236,6 @@
       const w = this.bunnyW();
       const visible = getEdgeVisibleRatio();
 
-      // “首だけ”見せるために、端は少しだけ外側へ許可
       const minX = -(w * (1 - visible));
       const maxX = fr.width - (w * visible);
 
@@ -221,15 +247,26 @@
 
     hop() {
       const t = nowMs();
-      if (t - this.lastHopAt < 260) return; // 連打防止
+      if (t - this.lastHopAt < 260) return;
       this.lastHopAt = t;
 
       this.el.classList.remove("hop");
-      // reflowで確実に再発火
       void this.el.offsetWidth;
       this.el.classList.add("hop");
     }
 
+    showHeart() {
+      this.heart.classList.remove("show");
+      void this.heart.offsetWidth;
+      this.heart.classList.add("show");
+    }
+
+    renderGauge() {
+      const p = clamp(this.gauge, 0, 1);
+      this.gaugeFill.style.width = `${Math.round(p * 100)}%`;
+    }
+
+    // クリックでコイン（1秒制限/匹）
     tryClickDrop() {
       const t = nowMs();
       if (t - this.lastClickSpawnAt < 1000) return;
@@ -245,13 +282,26 @@
       return Math.max(0, (Date.now() - this.lastClickAt) / 1000);
     }
 
-    update(dt) {
-      // auto coin
-      const t = nowMs();
-      if (t >= this.nextAutoAt) {
-        this.nextAutoAt = t + randomAutoIntervalMs();
-        spawnCoinAtBunny(this, "auto");
+    // ★ゲージ満タンで自動ドロップ（クリックとは別）
+    updateGauge(dt) {
+      // dt秒でゲージ進行
+      this.gauge += dt / this.gaugePeriod;
+
+      if (this.gauge >= 1) {
+        // ちょうど満タン演出
+        this.gauge = 0;
+        this.gaugePeriod = randomGaugeSeconds();
+
+        spawnCoinAtBunny(this, "autoGauge");
+        this.showHeart();
       }
+
+      this.renderGauge();
+    }
+
+    update(dt) {
+      // ★ゲージを進める（放置ドロップはゲージ方式に変更）
+      this.updateGauge(dt);
 
       // 混雑時調整
       const crowd = bunnies.length;
@@ -264,15 +314,12 @@
       const w = this.bunnyW();
       const visible = getEdgeVisibleRatio();
 
-      // 端の“首だけ”領域
       const edgeMinX = -(w * (1 - visible));
       const edgeMaxX = fr.width - (w * visible);
 
-      // roamは画面幅に応じて制限
       const maxRoam = Math.max(20, (fr.width - w) / 2);
       const roam = Math.min(this.roamRange * rangeMul, maxRoam);
 
-      // pause
       if (this.pauseLeft > 0) {
         this.pauseLeft -= dt;
       } else {
@@ -285,7 +332,6 @@
         this.x += this.dir * spd * dt;
       }
 
-      // home中心の往復範囲（ただし端の“首だけ”範囲も考慮）
       const minX = clamp(this.homeX - roam, edgeMinX, edgeMaxX);
       const maxX = clamp(this.homeX + roam, edgeMinX, edgeMaxX);
 
@@ -294,18 +340,14 @@
       if (this.x < minX) { this.x = minX; this.dir = 1; hitEdge = true; }
       if (this.x > maxX) { this.x = maxX; this.dir = -1; hitEdge = true; }
 
-      // さらに画面端の“首だけ”範囲も超えない最終ガード
       if (this.x <= edgeMinX) { this.x = edgeMinX; this.dir = 1; hitEdge = true; }
       if (this.x >= edgeMaxX) { this.x = edgeMaxX; this.dir = -1; hitEdge = true; }
 
-      // 端にぶつかったら「ぴょこん」
       if (hitEdge) this.hop();
 
-      // flip（親）
       if (this.dir < 0) this.wrap.classList.add("flip");
       else this.wrap.classList.remove("flip");
 
-      // render
       this.wrap.style.left = `${this.x}px`;
       this.wrap.style.top = `${this.y}px`;
     }
@@ -512,7 +554,6 @@
   // Init
   // -----------------------
   function init() {
-    // SWはそのままでもいいけど、更新が反映されない時はCACHE_NAMEも上げてね
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
     }
