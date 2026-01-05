@@ -72,6 +72,11 @@ button.iconBtn{
   padding:0;
 }
 
+/* キャンディモード中のボタン */
+#candyBtn.armed{
+  background: linear-gradient(180deg, #fff1a6, #ffd36a);
+}
+
 #field{ position:relative; flex:1; overflow:hidden; }
 
 #decorBack{
@@ -125,7 +130,7 @@ button.iconBtn{
   position:absolute;
   inset:0;
   z-index:15;
-  pointer-events:none; /* 下のうさぎクリックは通す */
+  pointer-events:none;
 }
 
 #decorFront{ position:absolute; inset:0; z-index:30; pointer-events:none; }
@@ -231,10 +236,10 @@ button.iconBtn{
   100% { transform: translateY(0) scale(1,1); }
 }
 
-/* ★ゲージは表示しない（内部で貯めるだけ） */
+/* ゲージは表示しない */
 .bunnyGauge{ display:none !important; }
 
-/* ハート（満タン時：常時表示＋ぷるぷる） */
+/* ハート（満タン時：常時表示） */
 .bunnyHeart{
   position:absolute;
   left:50%;
@@ -276,7 +281,19 @@ button.iconBtn{
   pointer-events:auto;
 }
 
-/* ★満タン演出：キラキラ粒子（JSで生成するdiv） */
+/* キャンディ */
+.candy{
+  position:absolute;
+  width:52px;
+  height:auto;
+  user-select:none;
+  -webkit-user-drag:none;
+  pointer-events:none;
+  filter: drop-shadow(0 12px 10px rgba(0,0,0,.20));
+  will-change: transform;
+}
+
+/* Sparkle */
 .spark{
   position:absolute;
   width:10px;
@@ -286,35 +303,14 @@ button.iconBtn{
   opacity:0;
   filter: blur(.1px);
 }
-.spark.show{
-  animation: spark-pop 520ms ease-out forwards;
-}
+.spark.show{ animation: spark-pop 520ms ease-out forwards; }
 @keyframes spark-pop{
   0%   { opacity:0; transform: translate(0,0) scale(.6); }
   20%  { opacity:1; }
   100% { opacity:0; transform: translate(var(--dx), var(--dy)) scale(1.15); }
 }
 
-/* Modal */
-.hidden{ display:none !important; }
-#modalBackdrop{ position:absolute; inset:0; background: rgba(0,0,0,.28); z-index:60; }
-#shopModal{
-  position:absolute; left:50%; top:50%; transform: translate(-50%, -50%);
-  width:min(520px, calc(100vw - 26px));
-  background:#fff; border-radius:20px; box-shadow: var(--shadow);
-  z-index:70; overflow:hidden;
-}
-.modalHeader{ display:flex; align-items:center; justify-content:space-between; padding:14px 14px; border-bottom:1px solid rgba(0,0,0,.06); }
-.modalTitle{ font-size:18px; font-weight:900; }
-.modalBody{ padding:14px; }
-.shopCard{
-  border:1px solid rgba(0,0,0,.06);
-  border-radius:18px;
-  padding:14px;
-  background: linear-gradient(180deg, #fff, #fff6fb);
-}
-
-/* 取得値ポップ（+100など） */
+/* 取得値ポップ */
 .gainPop{
   position:absolute;
   font-weight:900;
@@ -326,17 +322,12 @@ button.iconBtn{
   filter: drop-shadow(0 10px 10px rgba(0,0,0,.12));
   opacity:0;
 }
-
-.gainPop.show{
-  animation: gain-pop 720ms ease-out forwards;
-}
-
+.gainPop.show{ animation: gain-pop 720ms ease-out forwards; }
 @keyframes gain-pop{
   0%   { opacity:0; transform: translate(-50%, 6px) scale(.9); }
   15%  { opacity:1; transform: translate(-50%, 0px) scale(1.05); }
   100% { opacity:0; transform: translate(-50%, -34px) scale(1.0); }
 }
-/* coin4（+100）だけ虹っぽく光る */
 .gainPop.rainbow{
   background: linear-gradient(90deg,
     rgba(255,140,170,1),
@@ -353,17 +344,15 @@ button.iconBtn{
           drop-shadow(0 0 18px rgba(255,135,184,.45));
 }
 
-/* HUDコイン数：回収時にバウンス */
-#coinHud.bump{
-  animation: hud-bump 220ms ease-out;
-}
+/* HUDバウンス */
+#coinHud.bump{ animation: hud-bump 220ms ease-out; }
 @keyframes hud-bump{
   0%   { transform: translateY(0) scale(1); }
   40%  { transform: translateY(-2px) scale(1.06); }
   100% { transform: translateY(0) scale(1); }
 }
 
-/* 満タンクリック時：HUDがキラッ */
+/* HUDキラッ */
 #coinHud.shine{
   position: relative;
   overflow: hidden;
@@ -374,7 +363,6 @@ button.iconBtn{
   30%  { box-shadow: 0 10px 26px rgba(255,255,255,.35), 0 10px 26px rgba(255,135,184,.25); }
   100% { box-shadow: 0 6px 18px rgba(0,0,0,.08); }
 }
-
 #coinHud.shine::after{
   content:"";
   position:absolute;
@@ -396,6 +384,55 @@ button.iconBtn{
   100% { left:140%; opacity:0; }
 }
 
+/* ヒント */
+#hint{
+  position:absolute;
+  left:50%;
+  bottom:18px;
+  transform: translateX(-50%);
+  z-index:40;
+  padding:10px 14px;
+  border-radius:16px;
+  background: rgba(255,255,255,.92);
+  box-shadow: 0 10px 24px rgba(0,0,0,.14);
+  font-weight:900;
+}
+.hidden{ display:none !important; }
+
+/* Modal */
+#modalBackdrop{
+  position:absolute;
+  inset:0;
+  background: rgba(0,0,0,.28);
+  z-index:60;
+}
+#shopModal{
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform: translate(-50%, -50%);
+  width:min(520px, calc(100vw - 26px));
+  background:#fff;
+  border-radius:20px;
+  box-shadow: var(--shadow);
+  z-index:70;
+  overflow:hidden;
+}
+.modalHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 14px;
+  border-bottom:1px solid rgba(0,0,0,.06);
+}
+.modalTitle{ font-size:18px; font-weight:900; }
+.modalBody{ padding:14px; }
+.shopCard{
+  border:1px solid rgba(0,0,0,.06);
+  border-radius:18px;
+  padding:14px;
+  background: linear-gradient(180deg, #fff, #fff6fb);
+}
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
 .shopItemDesc{ opacity:.85; margin-bottom:12px; }
 .shopRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
