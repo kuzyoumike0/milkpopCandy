@@ -1,0 +1,115 @@
+:root{
+  --bg1:#fff7fb;
+  --bg2:#f1fbff;
+  --hud:#ffffffcc;
+  --shadow: 0 8px 24px rgba(0,0,0,.12);
+  --radius:16px;
+}
+
+*{ box-sizing:border-box; }
+html,body{
+  margin:0;
+  height:100%;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, var(--bg1), var(--bg2));
+  overscroll-behavior: none;
+}
+
+#app{
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  padding: env(safe-area-inset-top) 12px env(safe-area-inset-bottom) 12px;
+  gap:10px;
+}
+
+#hud{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:10px 12px;
+  border-radius: var(--radius);
+  background: var(--hud);
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+#coin{
+  font-weight:700;
+  font-size:18px;
+  flex:1;
+}
+
+button{
+  border:0;
+  padding:10px 12px;
+  border-radius: 12px;
+  background:#fff;
+  box-shadow: 0 6px 16px rgba(0,0,0,.10);
+  font-weight:600;
+  cursor:pointer;
+  touch-action: manipulation;
+}
+button:active{ transform: translateY(1px); }
+
+#field{
+  position:relative;
+  flex:1;
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.55);
+  box-shadow: var(--shadow);
+  overflow:hidden;
+  min-height: 360px;
+}
+
+#bunny{
+  position:absolute;
+  bottom: 18px;
+  left: 20px;
+  width: 160px;
+  height: 160px;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  user-select:none;
+  -webkit-user-select:none;
+  touch-action:none;
+  will-change: transform;
+}
+
+#bunny img{
+  width: 160px;
+  height: 160px;
+  image-rendering:auto;
+  pointer-events:none;
+}
+
+#floating{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  overflow:hidden;
+}
+
+.floatText{
+  position:absolute;
+  font-weight:800;
+  background:#ffffffcc;
+  padding:6px 10px;
+  border-radius: 999px;
+  box-shadow: 0 8px 20px rgba(0,0,0,.12);
+  animation: pop 900ms ease-out forwards;
+}
+@keyframes pop{
+  0%{ transform: translateY(0) scale(.9); opacity:0; }
+  20%{ opacity:1; }
+  100%{ transform: translateY(-60px) scale(1); opacity:0; }
+}
+
+#hint{
+  font-size:12px;
+  opacity:.7;
+  padding: 0 4px;
+}
