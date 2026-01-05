@@ -4,80 +4,43 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#ffd6e7" />
+
+  <title>milkpop牧場</title>
+
+  <!-- PWA -->
   <link rel="manifest" href="./manifest.webmanifest" />
+
+  <!-- Style -->
   <link rel="stylesheet" href="./style.css" />
-  <title>Bunny牧場</title>
 </head>
 
 <body>
+
+  <!-- 🌸 左右に1つずつの柵（装飾） -->
+  <img src="./assets/saku.png" class="saku-single left" alt="">
+  <img src="./assets/saku.png" class="saku-single right" alt="">
+
   <div id="app">
-<div class="saku-fence left"></div>
-<div class="saku-fence right"></div>
 
-
+    <!-- HUD -->
     <header id="hud">
-      <div id="coinHud">🪙 <span id="coinValue">0</span></div>
-
-      <button id="candyBtn" class="hasTip">
-        🍬 キャンディ
-        <span class="tip">
-          フィールドをクリックすると、上からキャンディを落とします。<br />
-          1回：<b>10🪙</b><br />
-          ※うさぎが集まって取り合います
-        </span>
-      </button>
-
-      <button id="departBtn" class="hasTip">
-        🌙 旅立ち
-        <span class="tip">
-          <b>10🪙</b> 消費で、うさぎを1匹送り出します。<br />
-          ※最後の1匹は旅立ちできません
-        </span>
-      </button>
-
-      <button id="rankBtn" class="hasTip">
-        🏆 実績
-        <span class="tip">
-          自己ベスト・日別・実績（アンロック）を確認できます。
-        </span>
-      </button>
-
-      <button id="shopBtn" class="hasTip">
-        🐰 お迎え
-        <span class="tip">
-          <div><span id="shopTipProgress"></span></div>
-
-          新しいうさぎをお迎えできます。<br />
-          価格（ふつう）：<b><span id="shopTipPrice">25</span>🪙</b><br />
-          ※お迎えした子は<b>3分</b>で成長します<br />
-          ※bunny2 / bunny3 はクリックでモーダルから選べます
-        </span>
-      </button>
-
-      <button id="resetBtn" class="hasTip">
-        🔁 リセット
-        <span class="tip">
-          コイン・うさぎ・記録を初期化します。<br />
-          ※確認ダイアログが出ます
-        </span>
-      </button>
+      <div id="coin">🪙 <span id="coinValue">0</span></div>
+      <button id="shopBtn">お迎え</button>
+      <button id="rankBtn">図鑑</button>
+      <button id="departBtn">旅立ち</button>
+      <button id="resetBtn">リセット</button>
     </header>
 
-    <!-- HUDの下に出す補助説明（任意：不要なら消してOK） -->
-    <div id="hint" class="hidden">
-      🐰 うさぎをクリックでコインが落ちます。ハートが出ているほど大量！
-    </div>
-
+    <!-- FIELD -->
     <main id="field">
       <div id="bunnyLayer"></div>
       <div id="coinLayer"></div>
-
-      <!-- 地面判定ライン（見えなくてOK） -->
-      <div id="groundLine"></div>
     </main>
 
   </div>
 
+  <!-- Script -->
   <script src="./app.js"></script>
+
 </body>
 </html>
