@@ -133,27 +133,6 @@ html,body{
 }
 
 /* =========================
-   SAKU (FENCE)
-========================= */
-.saku-fence{
-  position:fixed;
-  top:0;
-  width:48px;
-  height:100vh;
-  pointer-events:none;
-  z-index:4;
-  background-image:url("./assets/saku.png");
-  background-repeat:repeat-y;
-  background-size:48px auto;
-  opacity:.9;
-}
-.saku-fence.left{ left:0; }
-.saku-fence.right{
-  right:0;
-  transform:scaleX(-1);
-}
-
-/* =========================
    MODAL COMMON
 ========================= */
 .modalBackdrop{
@@ -348,7 +327,7 @@ html,body{
 .saku-single{
   position: fixed;
   top: 0;
-  height: 100vh;
+  height: 50vh;
   width: auto;
   pointer-events: none;
   z-index: 4;
