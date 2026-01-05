@@ -11,39 +11,53 @@
 
 <body>
   <div id="app">
-
-    <!-- HUD -->
     <header id="hud">
-      <div id="coin">🪙 <span id="coinValue">0</span></div>
-
-      <!-- app.js互換用（非表示） -->
-      <div id="coin-counter" style="display:none;">0</div>
-
-      <button id="petBtn">なでる</button>
-      <button id="shopBtn">ショップ</button>
-      <button id="resetBtn">リセット</button>
+      <div id="coinHud">🪙 <span id="coinValue">0</span></div>
+      <div class="hudRight">
+        <button id="shopBtn">ショップ</button>
+        <button id="resetBtn" class="ghost">リセット</button>
+      </div>
     </header>
 
-    <!-- フィールド -->
-    <main id="field">
-      <div id="bunnyLayer">
-        <!-- ★ クリック対象のうさぎ -->
-        <img
-          src="./assets/bunny.png"
-          alt="うさぎ"
-          class="rabbit"
-          draggable="false"
-        >
-      </div>
-
+    <main id="field" aria-label="bunny field">
+      <div id="bunnyLayer"></div>
       <div id="coinLayer"></div>
+      <div id="ground"></div>
     </main>
-
-    <footer id="hint">
-      放置でコインが落ちるよ／PCはカーソルを当てるだけで回収（クリック落としは1秒に1回）
-    </footer>
   </div>
 
+  <!-- Shop Modal -->
+  <div id="modalBackdrop" class="hidden"></div>
+  <section id="shopModal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="shopTitle">
+    <div class="modalHeader">
+      <h2 id="shopTitle">ショップ</h2>
+      <button id="closeShopBtn" class="ghost">×</button>
+    </div>
+    <div class="modalBody">
+      <div class="shopCard">
+        <div class="shopCardTitle">うさぎを増やす</div>
+        <div class="shopCardDesc">うさぎが1匹増えます（放置コインも増えるよ）</div>
+        <div class="shopCardRow">
+          <div>価格：<span id="bunnyPrice">50</span> 🪙</div>
+          <button id="buyBunnyBtn">購入</button>
+        </div>
+      </div>
+
+      <div class="shopInfo">
+        <div>現在のうさぎ：<span id="bunnyCount">2</span>匹</div>
+        <div class="note">コインは「クリック」または「カーソルを合わせる（ホバー）」で回収できます。</div>
+      </div>
+    </div>
+  </section>
+
   <script src="./app.js"></script>
+  <script>
+    // SW
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>
