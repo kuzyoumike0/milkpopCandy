@@ -13,7 +13,6 @@
 /* 任意：ショップカード間の余白を統一したい場合 */
 .shopCard + .shopCard{ margin-top:12px; }
 
-
 *{ box-sizing:border-box; }
 html,body{ height:100%; margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; color:var(--text); }
 body{
@@ -218,6 +217,11 @@ button.iconBtn{
 }
 .bunnyWrap.flip{ transform: scaleX(-1); }
 
+/* ★任意：babyを少し小さく見せたい場合（ONにしたければコメント解除）
+.bunnyWrap.baby{ transform: scale(.92); }
+.bunnyWrap.baby.flip{ transform: scaleX(-1) scale(.92); }
+*/
+
 .bunny{
   width:100%;
   height:auto;
@@ -238,6 +242,15 @@ button.iconBtn{
   30%  { transform: translateY(-12px) scale(1.03,.97); }
   60%  { transform: translateY(0) scale(.98,1.03); }
   100% { transform: translateY(0) scale(1,1); }
+}
+
+/* ★追加：鼻先クンクン（首だけ出る感じ） */
+.bunny.sniff{ animation: bunny-sniff 320ms ease-out; }
+@keyframes bunny-sniff{
+  0%   { transform: translateX(0) scaleY(1); }
+  35%  { transform: translateX(7px) scaleY(.985); }
+  70%  { transform: translateX(2px) scaleY(1.02); }
+  100% { transform: translateX(0) scaleY(1); }
 }
 
 /* ゲージは表示しない */
@@ -578,7 +591,6 @@ button.iconBtn{
   border-top:1px solid rgba(0,0,0,.06);
   transform: rotate(45deg);
 }
-
 
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
 .shopItemDesc{ opacity:.85; margin-bottom:12px; }
