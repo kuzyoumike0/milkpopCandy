@@ -5,6 +5,9 @@
   --line:#ffb6d3;
   --text:#3a2a33;
   --shadow: 0 10px 30px rgba(0,0,0,.12);
+
+  /* ★ うさぎの表示サイズ（ここを変えるだけで拡大縮小できる） */
+  --bunnySize: 140px;
 }
 
 *{ box-sizing:border-box; }
@@ -111,10 +114,12 @@ button.iconBtn{
   opacity:.9;
 }
 
-/* Bunny */
+/* -----------------------
+   Bunny
+----------------------- */
 .bunny{
   position:absolute;
-  width:96px;
+  width: var(--bunnySize);
   height:auto;
   user-select:none;
   -webkit-user-drag:none;
@@ -122,18 +127,25 @@ button.iconBtn{
   transform-origin: 50% 100%;
   filter: drop-shadow(0 10px 8px rgba(0,0,0,.16));
 }
+
+/* 歩行っぽい上下揺れ */
 .bunny.walk{
-  animation: bob 380ms ease-in-out infinite alternate;
+  animation: bunny-walk-bob 0.35s ease-in-out infinite alternate;
 }
-@keyframes bob{
+
+@keyframes bunny-walk-bob{
   from{ transform: translateY(0); }
-  to{ transform: translateY(2px); }
+  to{ transform: translateY(3px); }
 }
+
+/* 左向き反転（JSで付け外し） */
 .bunny.flip{
   transform: scaleX(-1);
 }
 
-/* Coin */
+/* -----------------------
+   Coin
+----------------------- */
 .coin{
   position:absolute;
   width:44px;
@@ -145,7 +157,9 @@ button.iconBtn{
   will-change: transform;
 }
 
-/* Modal */
+/* -----------------------
+   Modal
+----------------------- */
 .hidden{ display:none !important; }
 
 #modalBackdrop{
