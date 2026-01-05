@@ -27,28 +27,28 @@
       price: 25,
       desc: "基本のうさぎ。低確率でレア成長するかも。",
     },
-    bunny2: {
-      label: "bunny2",
-      img: "./assets/bunny2.png",
-      price: 50000,
+    reabunny:  
+      label:  "reabunny,
+      img:  "./assets/reabunny.png,
+      price:    50000,
       desc: "黄金タイプ",
     },
     bunny3: {
       label: "bunny3",
       img: "./assets/bunny3.png",
-      price: 200,
+      price:  200,
       desc: "毒タイプ",
     },
     bunny4: {
       label: "bunny4",
       img: "./assets/bunny4.png",
-      price: 400,
+      price:  400,
       desc: "実績解除でショップに出現する幻のうさぎ。",
     },
      bunny5: {
       label: "bunny5",
       img: "./assets/bunny5.png",
-      price: 800,
+      price:  800,
       desc: "正月タイプ",
     },
   };
