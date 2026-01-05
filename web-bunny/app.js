@@ -46,11 +46,46 @@
   let lastFrame = performance.now();
   let rafId = 0;
 
-  // audio (SE)
+  // -----------------------
+  // Audio（SE）
+  // -----------------------
   const sePoyo = new Audio(ASSETS.poyoSE);
   const seCoin = new Audio(ASSETS.coinSE);
   sePoyo.preload = "auto";
   seCoin.preload = "auto";
+  sePoyo.volume = 1.0;
+  seCoin.volume = 1.0;
+
+  let audioUnlocked = false;
+
+  function unlockAudioOnce() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+
+    // ユーザー操作のタイミングで一度だけ鳴らして即停止（音声許可の“解錠”）
+    try {
+      const a = sePoyo;
+      a.muted = true;
+      a.currentTime = 0;
+      const p = a.play();
+      if (p && typeof p.then === "function") {
+        p.then(() => {
+          a.pause();
+          a.currentTime = 0;
+          a.muted = false;
+        }).catch(() => {
+          a.muted = false;
+        });
+      } else {
+        a.pause();
+        a.currentTime = 0;
+        a.muted = false;
+      }
+    } catch (_) {}
+  }
+
+  // どこでも最初の操作で解錠
+  window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
 
   function playSE(aud) {
     try {
@@ -112,7 +147,7 @@
   }
 
   function randomAutoIntervalMs() {
-    return 2200 + Math.random() * 2800; // 2.2〜5.0秒
+    return 2200 + Math.random() * 2800;
   }
 
   // -----------------------
@@ -124,11 +159,9 @@
     constructor() {
       this.id = bunnyIdSeq++;
 
-      // ★親wrap（位置・反転担当）
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
 
-      // ★子img（上下揺れ担当）
       this.el = document.createElement("img");
       this.el.className = "bunny walk";
       this.el.src = ASSETS.bunny;
@@ -138,32 +171,30 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      // layout
       this.x = 0;
       this.y = 0;
       this.homeX = 0;
 
-      // 個体差（うさぎごとにランダム）
-      // ★動きが分かりやすいように少し速め
+      // 個体差
       this.dir = Math.random() < 0.5 ? -1 : 1;
-      this.baseSpeed = 55 + Math.random() * 65;     // 55〜120 px/s
-      this.roamRange = 90 + Math.random() * 260;    // 90〜350 px
+      this.baseSpeed = 55 + Math.random() * 65;     // 見える速さ
+      this.roamRange = 90 + Math.random() * 260;
       this.turnChancePerSec = 0.08 + Math.random() * 0.35;
       this.pauseChancePerSec = 0.02 + Math.random() * 0.12;
       this.pauseLeft = 0;
 
-      // idle tracking
       this.lastClickAt = Date.now();
       this.lastClickSpawnAt = 0;
 
-      // auto drop schedule
       this.nextAutoAt = nowMs() + randomAutoIntervalMs();
 
-      this.el.addEventListener("click", (e) => {
+      // ★ click だと取りこぼす環境があるので pointerdown + capture で確実化
+      this.wrap.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         e.stopPropagation();
+        unlockAudioOnce();           // 念のため
         this.tryClickDrop();
-      });
+      }, { capture: true });
     }
 
     setHome(x, y) {
@@ -179,7 +210,10 @@
       this.lastClickSpawnAt = t;
       this.lastClickAt = Date.now();
 
+      // 先に音（ユーザー体感優先）
       playSE(sePoyo);
+
+      // コイン生成
       spawnCoinAtBunny(this, "click");
     }
 
@@ -188,14 +222,12 @@
     }
 
     update(dt) {
-      // auto coin
       const t = nowMs();
       if (t >= this.nextAutoAt) {
         this.nextAutoAt = t + randomAutoIntervalMs();
         spawnCoinAtBunny(this, "auto");
       }
 
-      // 混雑時調整
       const crowd = bunnies.length;
       const speedMul = crowd <= 6 ? 1 : Math.max(0.32, 1 / Math.sqrt(crowd / 6));
       const rangeMul = crowd <= 6 ? 1 : Math.max(0.28, 1 / (crowd / 6));
@@ -203,7 +235,6 @@
       const spd = this.baseSpeed * speedMul;
       const roam = this.roamRange * rangeMul;
 
-      // pause
       if (this.pauseLeft > 0) {
         this.pauseLeft -= dt;
       } else {
@@ -216,18 +247,14 @@
         this.x += this.dir * spd * dt;
       }
 
-      // bounds (homeX中心で往復)
       const minX = this.homeX - roam;
       const maxX = this.homeX + roam;
-
       if (this.x < minX) { this.x = minX; this.dir = 1; }
       if (this.x > maxX) { this.x = maxX; this.dir = -1; }
 
-      // flip（親に付与）
       if (this.dir < 0) this.wrap.classList.add("flip");
       else this.wrap.classList.remove("flip");
 
-      // render（親を動かす）
       this.wrap.style.left = `${this.x}px`;
       this.wrap.style.top = `${this.y}px`;
     }
@@ -262,7 +289,6 @@
         this.collect();
       });
 
-      // hover collect
       this.el.addEventListener("pointerenter", () => {
         this.collect();
       });
@@ -336,7 +362,6 @@
     const fr = fieldRect();
     const gY = groundY();
 
-    // ★ wrapのrectで中心を取る（サイズ変更に強い）
     const bRect = bunny.wrap.getBoundingClientRect();
     const bXCenter = (bRect.left - fr.left) + bRect.width * 0.5;
 
@@ -353,9 +378,7 @@
     bunnies.length = 0;
     bunnyIdSeq = 1;
 
-    for (let i = 0; i < count; i++) {
-      bunnies.push(new Bunny());
-    }
+    for (let i = 0; i < count; i++) bunnies.push(new Bunny());
 
     layoutBunnies();
     updateHud();
@@ -365,7 +388,6 @@
     const fr = fieldRect();
     const gY = groundY();
 
-    // wrapのサイズを参照（CSSの--bunnySizeに追従）
     const probe = bunnies[0]?.wrap?.getBoundingClientRect();
     const bunnyW = probe?.width || 140;
     const bunnyH = probe?.height || 140;
@@ -402,9 +424,7 @@
     };
   }
 
-  const onResize = debounce(() => {
-    layoutBunnies();
-  }, 120);
+  const onResize = debounce(() => layoutBunnies(), 120);
 
   // -----------------------
   // Loop
@@ -423,8 +443,7 @@
   // UI
   // -----------------------
   function updateShopUI() {
-    const price = getBunnyPrice(bunnies.length);
-    bunnyPriceEl.textContent = String(price);
+    bunnyPriceEl.textContent = String(getBunnyPrice(bunnies.length));
   }
 
   function openShop(open) {
