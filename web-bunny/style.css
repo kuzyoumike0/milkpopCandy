@@ -184,3 +184,30 @@ button:active{ transform: translateY(1px); }
   100% { filter: hue-rotate(360deg) drop-shadow(0 12px 20px rgba(0,0,0,.20)); }
 }
 
+/* ===== 複数うさぎ用 ===== */
+#bunnyLayer{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+}
+
+.bunny{
+  position:absolute;
+  bottom: 18px;
+  width: 160px;
+  height: 160px;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  user-select:none;
+  -webkit-user-select:none;
+  touch-action:none;
+  will-change: transform;
+  pointer-events:auto; /* タップ/クリックできる */
+}
+
+.bunny img{
+  width:160px;
+  height:160px;
+  pointer-events:none;
+}
