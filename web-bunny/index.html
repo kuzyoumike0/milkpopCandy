@@ -5,40 +5,56 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#ffd6e7" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="apple-touch-icon" href="./assets/icon-192.png" />
   <link rel="stylesheet" href="./style.css" />
-  <title>Desktop Bunny (Web)</title>
+  <title>Bunny牧場</title>
 </head>
+
 <body>
   <div id="app">
+
+    <!-- HUD -->
     <header id="hud">
       <div id="coin">🪙 <span id="coinValue">0</span></div>
-      <button id="petBtn" aria-label="なでる">なでる</button>
-      <button id="shopBtn" aria-label="ショップ">ショップ</button>
-      <button id="resetBtn" aria-label="リセット">リセット</button>
-      
+      <button id="petBtn">なでる</button>
+      <button id="shopBtn">ショップ</button>
+      <button id="resetBtn">リセット</button>
     </header>
 
+    <!-- フィールド -->
     <main id="field">
       <div id="bunnyLayer"></div>
-<div id="coinLayer"></div>
-
-
       <div id="coinLayer"></div>
-
     </main>
 
     <footer id="hint">
-      放置でコインが増えるよ（iPadはSafari→共有→ホーム画面に追加でアプリ化）
+      放置でコインが落ちるよ／PCはカーソルを当てるだけで回収
     </footer>
   </div>
 
+  <!-- ショップ -->
+  <div id="shopModal" class="modal hidden" aria-hidden="true">
+    <div class="modalCard">
+      <div class="modalHeader">
+        <div class="modalTitle">ショップ</div>
+        <button id="shopCloseBtn" class="closeBtn">×</button>
+      </div>
+
+      <div class="shopRow">
+        <div class="shopItem">
+          <div class="shopName">うさぎを増やす</div>
+          <div class="shopDesc">うさぎが1匹増える</div>
+        </div>
+        <button id="buyBunnyBtn" class="buyBtn">購入</button>
+      </div>
+
+      <div class="shopInfo">
+        <div>所持コイン：<b id="shopCoins">0</b></div>
+        <div>現在の匹数：<b id="shopCount">0</b></div>
+        <div>価格：<b id="shopPrice">0</b></div>
+      </div>
+    </div>
+  </div>
+
   <script src="./app.js"></script>
-  <script>
-    // Service Worker（PWAオフライン対応）
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./sw.js").catch(()=>{});
-    }
-  </script>
 </body>
 </html>
