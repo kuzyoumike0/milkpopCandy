@@ -1,13 +1,15 @@
 (() => {
   /* =========================
-   * Bunny牧場 app.js（完全版）
+   * Bunny牧場 app.js（統合完全版）
    * - うさぎ種別: bunny1 / bunny3 / bunny4 / bunny5 / reabunny
    * - お迎え: モーダル＋サムネ＋不足は赤＋箱パカ/虹キラ演出
    * - baby: 3分、ハート（チャージ）なし、遅い、クリックでcoin1を1枚、他のうさぎの後ろを追従
    * - 成体: ゲージ（非表示）チャージ→ハート出しっぱなし、クリックで混合コイン雨（種類で増える）
    * - 画面端で折り返し、画面外に出ない
-   * - 図鑑: 出現した種類を一覧表示（未出現は？？？）
+   * - 図鑑: うさぎ一覧 + 称号ページ（黄金うんち回数／残り回数／進捗バー／装備切替）
    * - 低確率で黄金うんち(assets/ougonunchi.png)出現、クリックで+10000
+   * - 黄金うんち称号: 10/20/50 で解放、一覧から装備切替
+   * - 旅立ち回数: 種類ごとに記録、10/20/50で段階フレーバー（reabunnyは重い）＋到達通知
    * ========================= */
 
   /* ===== Assets ===== */
@@ -35,28 +37,28 @@
     bunny1: {
       label: "bunny1",
       img: "./assets/bunny1.png",
-      price: 25,
-      coinMul: 0.55, // 少なめ
+      price: 300, // ★高額化
+      coinMul: 0.55,
       desc: "基本のうさぎ。コインは控えめ。",
     },
     bunny3: {
       label: "bunny3",
       img: "./assets/bunny3.png",
-      price: 120,
+      price: 1800, // ★高額化
       coinMul: 1.0,
       desc: "安定してコインを稼ぐ中級うさぎ。",
     },
     bunny4: {
       label: "bunny4",
       img: "./assets/bunny4.png",
-      price: 300,
+      price: 6000, // ★高額化
       coinMul: 1.8,
       desc: "大量のコインを生み出す上級うさぎ。",
     },
     bunny5: {
       label: "bunny5",
       img: "./assets/bunny5.png",
-      price: 600,
+      price: 20000, // ★高額化
       coinMul: 2.8,
       desc: "牧場最上級クラス。圧倒的生産力。",
     },
@@ -96,7 +98,37 @@
   const GAUGE_PERIOD_RANGE = [7, 14];
 
   // 旅立ち（ボタンがある場合）
-  const DEPART_COST = 10; // 使ってないなら無視でOK（UI側に説明があれば合わせる）
+  const DEPART_COST = 10;
+
+  /* ===== 段階：旅立ちフレーバー（10/20/50） ===== */
+  const FAREWELL_FLAVOR = {
+    normal: [
+      { at: 10, text: "何度別れても、その温もりはここに残っている。" },
+      { at: 20, text: "別れは慣れない。…それでも歩いていけるようになった。" },
+      { at: 50, text: "数えきれない旅立ちの先で、ここはもう“帰る場所”になった。" },
+    ],
+    reabunny: [
+      { at: 10, text: "幻は、指の間から零れる。掴んだと思った瞬間に消えてしまう。" },
+      { at: 20, text: "二度と戻らないと知っていても、見送ってしまった自分を責めてしまう。" },
+      { at: 50, text: "重ねた別れは祈りになり、祈りは傷になった。…それでも忘れられない。" },
+    ],
+  };
+
+  function getFarewellFlavor(kind, farewellCount) {
+    if (!farewellCount || farewellCount < 10) return "";
+    const list = kind === "reabunny" ? FAREWELL_FLAVOR.reabunny : FAREWELL_FLAVOR.normal;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (farewellCount >= list[i].at) return list[i].text;
+    }
+    return "";
+  }
+
+  /* ===== 称号（黄金うんち 10/20/50） ===== */
+  const GOLDEN_UNCHI_TITLES = [
+    { at: 10, title: "黄金を踏みし者" },
+    { at: 20, title: "黄金に選ばれし者" },
+    { at: 50, title: "黄金の王" },
+  ];
 
   /* ===== Storage keys ===== */
   const LS = {
@@ -104,6 +136,11 @@
     bunnies: "wb_bunnies_v6", // [{bornAt, kind}]
     ach: "wb_ach_v2",
     dex: "wb_dex_v1",
+
+    // 黄金うんち＆称号
+    unchi: "wb_unchi_v1",
+    title: "wb_title_v1",          // 装備中
+    titleList: "wb_title_list_v1", // 所持称号配列
   };
 
   /* =========================
@@ -113,6 +150,7 @@
   const bunnyLayer = document.getElementById("bunnyLayer");
   const coinLayer = document.getElementById("coinLayer");
   const coinValueEl = document.getElementById("coinValue");
+  const titleEl = document.getElementById("title"); // index.htmlにあると表示（無くてもOK）
 
   const shopBtn = document.getElementById("shopBtn");
   const departBtn = document.getElementById("departBtn");
@@ -180,10 +218,22 @@
     localStorage.setItem(LS.ach, JSON.stringify(ach));
   }
 
+  // ★dex：旧形式(true) → 新形式({seen, farewell})に自動変換
   function loadDex() {
     try {
-      const d = JSON.parse(localStorage.getItem(LS.dex) || "{}");
-      return d && typeof d === "object" ? d : {};
+      const raw = JSON.parse(localStorage.getItem(LS.dex) || "{}");
+      const d = {};
+      for (const k in raw) {
+        if (raw[k] === true) {
+          d[k] = { seen: true, farewell: 0 };
+        } else {
+          d[k] = {
+            seen: !!raw[k]?.seen,
+            farewell: Number(raw[k]?.farewell) || 0,
+          };
+        }
+      }
+      return d;
     } catch {
       return {};
     }
@@ -217,6 +267,34 @@
     );
   }
 
+  /* ===== 黄金うんち回数＆称号 ===== */
+  function loadGoldenUnchiCount() {
+    const n = parseInt(localStorage.getItem(LS.unchi) || "0", 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function saveGoldenUnchiCount() {
+    localStorage.setItem(LS.unchi, String(goldenUnchiCount));
+  }
+
+  function loadOwnedTitles() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(LS.titleList) || "[]");
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveOwnedTitles() {
+    localStorage.setItem(LS.titleList, JSON.stringify(ownedTitles));
+  }
+
+  function loadEquippedTitle() {
+    return String(localStorage.getItem(LS.title) || "");
+  }
+  function saveEquippedTitle() {
+    localStorage.setItem(LS.title, String(currentTitle || ""));
+  }
+
   /* =========================
    * Utils
    * ========================= */
@@ -229,12 +307,14 @@
 
   // 地面Y（見た目に合わせて適度に上）
   function groundY() {
-    // だいたい下から60px
     return fieldRect().height - 60;
   }
 
   function updateHud() {
     coinValueEl.textContent = String(coins);
+    if (titleEl) {
+      titleEl.textContent = currentTitle ? `称号：${currentTitle}` : "";
+    }
   }
 
   /* =========================
@@ -244,10 +324,89 @@
   let ach = loadAch();
   let dex = loadDex();
 
+  let goldenUnchiCount = loadGoldenUnchiCount();
+  let ownedTitles = loadOwnedTitles();
+  let currentTitle = loadEquippedTitle();
+
   const bunnies = [];
   const dropsOnField = []; // Coin / OugonUnchi をまとめて管理
 
   let lastFrame = performance.now();
+
+  /* =========================
+   * UI FX（ふわっと通知）
+   * ※CSS: .farewellMsg / .farewellMilestone がある前提（無くても動作はする）
+   * ========================= */
+  function showFarewellMessage(kind) {
+    const texts = [
+      "またどこかで会えるよ。",
+      "ありがとう。元気でね。",
+      "やさしい時間をありがとう。",
+      "旅立ちは、はじまり。",
+      "ずっと忘れないよ。",
+    ];
+
+    const def = BUNNY_DEFS[kind];
+    const name = def?.label ?? "うさぎ";
+    const msg = `${name} は旅立っていった…`;
+
+    const el = document.createElement("div");
+    el.className = "farewellMsg";
+    el.textContent = msg + " " + texts[Math.floor(Math.random() * texts.length)];
+
+    document.body.appendChild(el);
+    setTimeout(() => {
+      try { el.remove(); } catch {}
+    }, 2600);
+  }
+
+  function showFarewellMilestone(kind, count) {
+    const isRea = kind === "reabunny";
+
+    let text = "";
+    if (count === 10) text = "たくさんの別れが、記憶になった。";
+    if (count === 20) text = "見送ることにも、意味が宿りはじめた。";
+    if (count === 50) text = "それでも忘れなかった。その名前を。";
+    if (!text) return;
+
+    const el = document.createElement("div");
+    el.className = "farewellMilestone" + (isRea ? " rea" : "");
+    el.textContent = isRea ? `reabunny ─ ${text}` : `${kind} ─ ${text}`;
+
+    document.body.appendChild(el);
+    setTimeout(() => {
+      try { el.remove(); } catch {}
+    }, 3200);
+  }
+
+  function showTitleMilestone(title) {
+    const el = document.createElement("div");
+    el.className = "farewellMilestone";
+    el.textContent = `🏅 称号解放：${title}`;
+    document.body.appendChild(el);
+    setTimeout(() => {
+      try { el.remove(); } catch {}
+    }, 3200);
+  }
+
+  /* =========================
+   * 称号：装備＆解放
+   * ========================= */
+  function equipTitle(name) {
+    currentTitle = String(name || "");
+    saveEquippedTitle();
+    updateHud();
+  }
+
+  function unlockTitle(name) {
+    if (!ownedTitles.includes(name)) {
+      ownedTitles.push(name);
+      saveOwnedTitles();
+    }
+    // 新称号は自動装備
+    equipTitle(name);
+    showTitleMilestone(name);
+  }
 
   /* =========================
    * Achievements (unlock shop)
@@ -260,7 +419,6 @@
   }
 
   function checkUnlocks() {
-    // 同時うさぎ数 >= 10 で shop 拡張
     if (!ach.unlock_bunny4 && bunnies.length >= UNLOCK_BUNNY4_NEED) {
       const newly = unlock("unlock_bunny4");
       if (newly) {
@@ -270,6 +428,24 @@
       }
     }
     refreshShopUI?.();
+  }
+
+  /* =========================
+   * 旅立ち回数記録
+   * ========================= */
+  function recordFarewell(kind) {
+    if (!dex[kind]) dex[kind] = { seen: true, farewell: 0 };
+    dex[kind].seen = true;
+    dex[kind].farewell = (dex[kind].farewell || 0) + 1;
+
+    const c = dex[kind].farewell;
+
+    // ★節目到達通知（10/20/50）
+    if (c === 10 || c === 20 || c === 50) {
+      showFarewellMilestone(kind, c);
+    }
+
+    saveDex();
   }
 
   /* =========================
@@ -319,9 +495,7 @@
     }
 
     removeSelf() {
-      try {
-        this.el.remove();
-      } catch {}
+      try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
     }
@@ -377,6 +551,19 @@
 
     collect() {
       coins += this.value;
+
+      // ★黄金うんち回数
+      goldenUnchiCount += 1;
+      saveGoldenUnchiCount();
+
+      // ★称号（10/20/50到達“瞬間”だけ解放）
+      for (const t of GOLDEN_UNCHI_TITLES) {
+        if (goldenUnchiCount === t.at) {
+          unlockTitle(t.title);
+          break;
+        }
+      }
+
       saveCoins();
       updateHud();
       playSE(seCoin);
@@ -394,13 +581,11 @@
   }
 
   function gaugeToTier(g01) {
-    // 0..1 -> 1..4
     return clamp(Math.ceil(clamp(g01, 0, 1) * 4), 1, 4);
   }
 
   // 「混合で雨みたいに」：上tierほど出やすい（maxTierに応じた重み）
   function pickTierMixed(maxTier) {
-    // index: 1..4
     const wTable = {
       1: [0, 1],
       2: [0, 1, 2],
@@ -418,7 +603,6 @@
     return maxTier;
   }
 
-  // うさぎからコイン雨
   function spawnRainFromBunny(bunny, gauge01) {
     const maxTier = gaugeToTier(gauge01);
     const mul = BUNNY_DEFS[bunny.kind]?.coinMul ?? 1;
@@ -470,11 +654,10 @@
       this.kind = safeKind(kind);
       this.isBaby = (Date.now() - bornAt) < BABY_DURATION_MS;
 
-      // 図鑑登録
-      if (!dex[this.kind]) {
-        dex[this.kind] = true;
-        saveDex();
-      }
+      // 図鑑登録（seen）
+      if (!dex[this.kind]) dex[this.kind] = { seen: true, farewell: 0 };
+      else dex[this.kind].seen = true;
+      saveDex();
 
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
@@ -496,7 +679,7 @@
       this.y = groundY() - 120;
 
       this.dir = Math.random() < 0.5 ? -1 : 1;
-      this.baseSpeed = 55 + Math.random() * 60; // 成体の基本歩行
+      this.baseSpeed = 55 + Math.random() * 60;
 
       // ゲージ（非表示）
       this.gauge = 0;
@@ -528,15 +711,13 @@
       // 成長時突然変異
       if (Math.random() < REA_EVOLVE_RATE) {
         this.kind = "reabunny";
-        if (!dex.reabunny) {
-          dex.reabunny = true;
-          saveDex();
-        }
+        if (!dex.reabunny) dex.reabunny = { seen: true, farewell: 0 };
+        else dex.reabunny.seen = true;
+        saveDex();
       }
 
       this.syncSprite();
 
-      // 成体になったのでゲージ初期化
       this.gauge = 0;
       this.charged = false;
       this.gaugePeriod = rand(GAUGE_PERIOD_RANGE[0], GAUGE_PERIOD_RANGE[1]);
@@ -610,12 +791,11 @@
       this.updateGauge(dt);
 
       const fr = fieldRect();
-      const wrapWidth = 140; // CSSのbunnyWrap幅
+      const wrapWidth = 140;
       const minX = 0;
       const maxX = Math.max(0, fr.width - wrapWidth);
 
       if (this.isBaby) {
-        // babyは他のうさぎの後ろを追従（行列）
         const leader = this.findLeaderForBaby();
         const babySpeedCap = Math.max(60, (this.baseSpeed * BABY_SPEED_MUL) * 2.0);
 
@@ -631,15 +811,13 @@
           if (Math.abs(this.vx) > 6) this.dir = this.vx >= 0 ? 1 : -1;
           else this.dir = leader.dir;
         } else {
-          // leader不在：ゆっくり徘徊
           this.x += this.dir * this.baseSpeed * BABY_SPEED_MUL * dt;
         }
       } else {
-        // 成体：左右に徘徊
         this.x += this.dir * this.baseSpeed * dt;
       }
 
-      // 画面端で折り返し（外に行かない）
+      // 画面端で折り返し
       if (this.x <= minX) {
         this.x = minX;
         this.dir = 1;
@@ -658,7 +836,7 @@
   }
 
   /* =========================
-   * DEX (図鑑)
+   * DEX (図鑑 + 称号ページ)
    * ========================= */
   const UNKNOWN_SVG = (() => {
     const svg =
@@ -686,39 +864,156 @@
       backdrop.appendChild(modal);
     }
 
-    const kinds = Object.keys(BUNNY_DEFS);
+    const close = () => {
+      try { backdrop.remove(); } catch {}
+    };
 
-    const cards = kinds
-      .map((kind) => {
+    const renderBunnyDex = () => {
+      const kinds = Object.keys(BUNNY_DEFS);
+
+      const cards = kinds.map(kind => {
         const def = BUNNY_DEFS[kind];
-        const known = !!dex[kind];
+        const entry = dex[kind];
+        const known = !!entry?.seen;
+        const farewellCount = entry?.farewell ?? 0;
+
         const img = known ? def.img : UNKNOWN_SVG;
         const name = known ? def.label : "？？？";
         const desc = known ? def.desc : "まだ出会っていません";
+
+        const flavor = known ? getFarewellFlavor(kind, farewellCount) : "";
+
         return `
           <div class="dexCard ${known ? "" : "unknown"}">
             <img src="${img}" alt="${name}">
             <div class="dexName">${name}</div>
             <div class="dexDesc">${desc}</div>
+            <div style="font-size:12px;opacity:.8;margin-top:4px;">旅立ち：${farewellCount} 回</div>
+            ${flavor ? `
+              <div style="
+                margin-top:6px;
+                font-size:12px;
+                line-height:1.5;
+                font-style:italic;
+                opacity:.9;
+                color:${kind === "reabunny" ? "#5a2a2a" : "#7a5a6e"};
+              ">
+                ${flavor}
+              </div>
+            ` : ""}
           </div>
         `;
-      })
-      .join("");
+      }).join("");
 
-    modal.innerHTML = `
-      <div class="modalHeader">
-        <div class="modalTitle">📖 Bunny図鑑</div>
-        <button class="modalClose" id="closeDexBtn" aria-label="close">×</button>
-      </div>
-      <div class="dexGrid">${cards}</div>
-    `;
-
-    const close = () => {
-      try {
-        backdrop.remove();
-      } catch {}
+      return `<div class="dexGrid">${cards}</div>`;
     };
-    modal.querySelector("#closeDexBtn").onclick = close;
+
+    const renderTitleDex = () => {
+      const count = Number(goldenUnchiCount || 0);
+
+      const next = (GOLDEN_UNCHI_TITLES || [])
+        .slice()
+        .sort((a, b) => a.at - b.at)
+        .find(t => count < t.at);
+
+      let progPct = 100;
+      let progText = "全解放済み";
+      if (next) {
+        progPct = Math.max(0, Math.min(100, Math.floor((count / next.at) * 100)));
+        progText = `${count} / ${next.at}`;
+      }
+
+      const nextLine = next
+        ? `次の称号まで：<b>あと ${next.at - count} 回</b>（${next.title}）`
+        : `次の称号まで：<b>全解放済み</b>`;
+
+      const equippedLine = currentTitle
+        ? `現在の称号：<b>${currentTitle}</b>`
+        : `現在の称号：<b>なし</b>`;
+
+      const headerInfo = `
+        <div style="font-size:12px;opacity:.92;line-height:1.7;margin:2px 0 10px;">
+          黄金うんち回数：<b>${count} 回</b><br>
+          ${nextLine}<br>
+          ${equippedLine}
+        </div>
+
+        <div class="titleProgress">
+          <div class="titleProgressBar">
+            <div class="titleProgressFill" style="width:${progPct}%;"></div>
+          </div>
+          <div class="titleProgressText">${progText}</div>
+        </div>
+      `;
+
+      const list = (GOLDEN_UNCHI_TITLES || []).map(t => {
+        const owned = (ownedTitles || []).includes(t.title);
+        const equipped = currentTitle === t.title;
+
+        return `
+          <div class="titleCard ${owned ? "" : "disabled"}">
+            <div class="titleName">
+              ${t.title}
+              ${equipped ? `<span class="titleBadge on">装備中</span>` : ""}
+              ${owned && !equipped ? `<span class="titleBadge">解放済</span>` : ""}
+              ${!owned ? `<span class="titleBadge">未解放</span>` : ""}
+            </div>
+            <div class="titleReq">条件：黄金うんち ${t.at} 回</div>
+            <div style="margin-top:8px;">
+              ${
+                owned
+                  ? `<button class="dexTab" data-equip="${t.title}" style="width:100%;background:#fff;box-shadow:0 6px 18px rgba(0,0,0,.10);">
+                       ${equipped ? "装備中" : "装備する"}
+                     </button>`
+                  : `<div style="font-size:12px;opacity:.7;">まだ解放されていません</div>`
+              }
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      return `
+        ${headerInfo}
+        <div style="display:grid;gap:12px;">${list}</div>
+      `;
+    };
+
+    let tab = "bunny";
+
+    const paint = () => {
+      modal.innerHTML = `
+        <div class="modalHeader">
+          <div class="modalTitle">📖 図鑑</div>
+          <button class="modalClose" id="closeDexBtn">×</button>
+        </div>
+
+        <div class="dexTabs">
+          <button class="dexTab ${tab==="bunny" ? "active" : ""}" id="tabBunny">うさぎ</button>
+          <button class="dexTab ${tab==="title" ? "active" : ""}" id="tabTitle">称号</button>
+        </div>
+
+        <div id="dexBody">
+          ${tab==="bunny" ? renderBunnyDex() : renderTitleDex()}
+        </div>
+      `;
+
+      modal.querySelector("#closeDexBtn").onclick = close;
+      modal.querySelector("#tabBunny").onclick = () => { tab = "bunny"; paint(); };
+      modal.querySelector("#tabTitle").onclick = () => { tab = "title"; paint(); };
+
+      // 称号：装備
+      modal.querySelectorAll("[data-equip]").forEach(btn => {
+        btn.onclick = () => {
+          const name = btn.getAttribute("data-equip");
+          equipTitle(name);
+          tab = "title";
+          paint();
+        };
+      });
+    };
+
+    paint();
+
     backdrop.onclick = (e) => {
       if (e.target === backdrop) close();
     };
@@ -738,7 +1033,6 @@
   let shopModal = null;
 
   function getShopKinds() {
-    // reabunny は出さない（突然変異枠）
     if (!ach.unlock_bunny4) return ["bunny1", "bunny3"];
     return ["bunny1", "bunny3", "bunny4", "bunny5"];
   }
@@ -805,7 +1099,6 @@
     shopModal.querySelectorAll("[data-buy]").forEach((btn) => {
       btn.onclick = () => {
         const kind = btn.getAttribute("data-buy");
-        // 押した瞬間に閉じてOK（演出は画面中央で出る）
         closeShopModal();
         buyBunny(kind);
       };
@@ -817,16 +1110,13 @@
   }
 
   function closeShopModal() {
-    try {
-      shopBackdrop?.remove();
-    } catch {}
+    try { shopBackdrop?.remove(); } catch {}
     shopBackdrop = null;
     shopModal = null;
   }
 
   function refreshShopUI() {
     if (!shopBackdrop || !shopModal) return;
-    // 価格色や解放進捗を更新したいので作り直し
     buildShopModal();
   }
 
@@ -885,18 +1175,16 @@
     document.body.appendChild(overlay);
 
     setTimeout(() => {
-      try {
-        overlay.remove();
-      } catch {}
+      try { overlay.remove(); } catch {}
     }, 900);
 
-    return 520; // うさぎ生成まで待つ目安
+    return 520;
   }
 
   function buyBunny(kind) {
     kind = safeKind(kind);
     const def = BUNNY_DEFS[kind];
-    if (!def || def.price <= 0) return; // reabunnyは買えない
+    if (!def || def.price <= 0) return;
     if (coins < def.price) return;
 
     coins -= def.price;
@@ -932,9 +1220,14 @@
       playSE(seTabidati);
 
       const victim = bunnies.pop();
-      try {
-        victim.wrap.remove();
-      } catch {}
+
+      // ★旅立ち回数記録 & 節目通知（10/20/50）
+      recordFarewell(victim.kind);
+
+      // ★お別れメッセージ（ふわっと）
+      showFarewellMessage(victim.kind);
+
+      try { victim.wrap.remove(); } catch {}
 
       saveBunnyMeta();
       checkUnlocks();
@@ -945,11 +1238,16 @@
     resetBtn.addEventListener("click", () => {
       unlockAudioOnce();
       if (!confirm("リセットしますか？")) return;
+
       localStorage.removeItem(LS.coins);
       localStorage.removeItem(LS.bunnies);
-      // 実績・図鑑も消すなら↓も外す
-      // localStorage.removeItem(LS.ach);
-      // localStorage.removeItem(LS.dex);
+      localStorage.removeItem(LS.ach);
+      localStorage.removeItem(LS.dex);
+
+      localStorage.removeItem(LS.unchi);
+      localStorage.removeItem(LS.title);
+      localStorage.removeItem(LS.titleList);
+
       location.reload();
     });
   }
@@ -977,11 +1275,10 @@
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
-    // 地面補正（リサイズに対応）
+    // 地面補正
     const gy = groundY();
     for (const d of dropsOnField) d.floor = gy;
 
-    // update
     for (const b of bunnies) b.update(dt);
     for (const d of dropsOnField) d.update(dt);
 
@@ -1003,29 +1300,4 @@
   }
 
   init();
-
-  function showFarewellMessage(kind) {
-  const texts = [
-    "またどこかで会えるよ。",
-    "ありがとう。元気でね。",
-    "やさしい時間をありがとう。",
-    "旅立ちは、はじまり。",
-    "ずっと忘れないよ。",
-  ];
-
-  const def = BUNNY_DEFS[kind];
-  const name = def?.label ?? "うさぎ";
-  const msg = `${name} は旅立っていった…`;
-
-  const el = document.createElement("div");
-  el.className = "farewellMsg";
-  el.textContent = msg + " " + texts[Math.floor(Math.random() * texts.length)];
-
-  document.body.appendChild(el);
-
-  setTimeout(() => {
-    try { el.remove(); } catch {}
-  }, 2600);
-}
-
 })();
