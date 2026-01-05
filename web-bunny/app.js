@@ -21,37 +21,43 @@
 
   // ★うさぎ定義（増やすならここに追加するだけ）
   const BUNNY_DEFS = {
-    bunny1: {
-      label: "ふつう",
-      img: "./assets/bunny.png",
-      price: 25,
-      desc: "基本のうさぎ。低確率でレア成長するかも。",
-    },
-    reabunny:  
-      label:  "reabunny,
-      img:  "./assets/reabunny.png,
-      price:    50000,
-      desc: "黄金タイプ",
-    },
-    bunny3: {
-      label: "bunny3",
-      img: "./assets/bunny3.png",
-      price:  200,
-      desc: "毒タイプ",
-    },
-    bunny4: {
-      label: "bunny4",
-      img: "./assets/bunny4.png",
-      price:  400,
-      desc: "実績解除でショップに出現する幻のうさぎ。",
-    },
-     bunny5: {
-      label: "bunny5",
-      img: "./assets/bunny5.png",
-      price:  800,
-      desc: "正月タイプ",
-    },
-  };
+  bunny1: {
+    label: "ふつう",
+    img: "./assets/bunny.png",
+    price: 25,
+    coinMul: 0.6,   // ★少ない
+    desc: "基本のうさぎ。コインは控えめ。",
+  },
+  reabunny: {
+    label: "reabunny",
+    img: "./assets/reabunny.png",
+    price: 1000,
+    coinMul: 5.0,   // 標準
+    desc: "レア見た目。圧倒的な稼ぎ。",
+  },
+  bunny3: {
+    label: "bunny3",
+    img: "./assets/bunny3.png",
+    price: 200,
+    coinMul: 1.5,   // 多い
+    desc: "毒タイプ",
+  },
+  bunny4: {
+    label: "bunny4",
+    img: "./assets/bunny4.png",
+    price: 400,
+    coinMul: 2.2,   // ★かなり多い
+    desc: "水タイプ",
+  },
+    
+  bunny5: {
+    label: "bunny5",
+    img: "./assets/bunny5.png",
+    price: 800,
+    coinMul: 4.2,   // ★かなり多い
+    desc: "正月タイプ",
+  },
+};
 
   const BABY_DURATION_MS = 3 * 60 * 1000; // 3分
   const BABY_SPEED_MUL = 0.68;
