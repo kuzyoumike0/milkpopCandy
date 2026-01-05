@@ -78,10 +78,12 @@ const MAX_DROPPED_COINS = 80;
 // ==============================
 // SE（iOS対策：最初のユーザー操作後に解禁）
 // ==============================
+// 要求仕様：
+// - うさぎクリック：poyo.mp3
+// - コイン回収：coin.mp3
 const SE = {
-  poyo:   "./assets/se_poyo.mp3",
-  drop:   "./assets/se_drop.mp3",
-  collect:"./assets/se_collect.mp3",
+  poyo:   "./assets/poyo.mp3",
+  collect:"./assets/coin.mp3",
 };
 
 let seUnlocked = false;
@@ -192,7 +194,7 @@ function createBunny(i){
     lastDrop: now
   };
 
-  // うさぎクリックでコインを落とす（SE：ぽよっ）
+  // うさぎクリックでコインを足元に置く（SE：poyo.mp3）
   el.addEventListener("pointerdown", (e)=>{
     e.preventDefault();
     e.stopPropagation(); // フィールドクリック処理に流れない
@@ -239,8 +241,9 @@ function createCoin(startX, startY, tier, userGesture){
   c.style.setProperty("--drop", `${drop}px`);
   c.style.setProperty("--fall", `${500 + Math.random()*300}ms`);
 
-  // 落下SE（ユーザー操作時だけ）
-  if(userGesture) playSE("drop", 0.7);
+  // クリック時SEは「poyo.mp3」に統一する要求なので、
+  // コイン生成側の落下SEは鳴らさない（ここでは何もしない）
+  void userGesture;
 
   const collect = ()=>{
     if(c.classList.contains("collecting")) return;
@@ -255,7 +258,7 @@ function createCoin(startX, startY, tier, userGesture){
     c.style.transform = `translate(${tx-cx}px, ${ty-cy}px) scale(.35)`;
     c.style.opacity = "0.2";
 
-    // 回収SE（回収操作）
+    // 回収SE（coin.mp3）
     playSE("collect", 0.8);
 
     setTimeout(()=>{
@@ -285,8 +288,14 @@ function dropCoinFromBunny(b, userGesture=false){
   const frect = field.getBoundingClientRect();
   const brect = b.el.getBoundingClientRect();
 
-  const startX = (brect.left - frect.left) + 60;
-  const startY = (brect.top  - frect.top)  + 40;
+  // うさぎ要素の「中央」＝足元付近にコインの中心が来るように
+  const centerX = (brect.left - frect.left) + (brect.width / 2);
+
+  // 足元（要素のbottom）にコインが“置かれる”位置
+  const footY = (brect.bottom - frect.top) - COIN_SIZE;
+
+  const startX = centerX - (COIN_SIZE / 2);
+  const startY = footY;
 
   const idleSec = (Date.now() - b.lastInteract)/1000;
   const tier = getTier(idleSec);
