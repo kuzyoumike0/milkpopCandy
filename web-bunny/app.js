@@ -94,7 +94,13 @@
       if (p && typeof p.catch === "function") p.catch(() => {});
     } catch (_) {}
   }
+  function clampXInField(x, bunnyWidth) {
+  const fr = fieldRect();
+  return clamp(x, 0, fr.width - bunnyWidth);
+}
 
+
+  
   // -----------------------
   // Helpers
   // -----------------------
