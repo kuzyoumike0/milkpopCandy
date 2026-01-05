@@ -1,7 +1,7 @@
 // ==============================
 // セーブ
 // ==============================
-const KEY = "bunny_farm_save_v3_upgrades";
+const KEY = "bunny_farm_save_v4_aura";
 
 function loadSave() {
   try {
@@ -11,8 +11,8 @@ function loadSave() {
     return {
       coins: Number(p.coins) || 0,
       bunnyCount: Math.max(1, Number(p.bunnyCount) || 3),
-      idleLv: Math.max(0, Math.floor(Number(p.idleLv) || 0)),
-      luckLv: Math.max(0, Math.floor(Number(p.luckLv) || 0))
+      idleLv: Math.max(0, Number(p.idleLv) || 0),
+      luckLv: Math.max(0, Number(p.luckLv) || 0),
     };
   } catch {
     return { coins: 0, bunnyCount: 3, idleLv: 0, luckLv: 0 };
@@ -20,12 +20,15 @@ function loadSave() {
 }
 
 function saveData() {
-  localStorage.setItem(KEY, JSON.stringify({
-    coins: game.coins,
-    bunnyCount,
-    idleLv,
-    luckLv
-  }));
+  localStorage.setItem(
+    KEY,
+    JSON.stringify({
+      coins: game.coins,
+      bunnyCount,
+      idleLv,
+      luckLv,
+    })
+  );
 }
 
 // ==============================
@@ -67,46 +70,40 @@ const save = loadSave();
 const game = { coins: save.coins };
 
 let bunnyCount = save.bunnyCount;
-
-// 強化状態
-let idleLv = save.idleLv; // 放置短縮レベル
-let luckLv = save.luckLv; // レア率レベル
+let idleLv = save.idleLv;
+let luckLv = save.luckLv;
 
 // クリックドロップ制限
 let lastClickDropAt = 0;
 
 // ==============================
-// 強化：放置短縮（秒）
+// 強化効果
 // ==============================
-// 基本20秒 → レベルで短縮（下限5秒）
 function getIdleIntervalSec() {
   const base = 20;
-  const reduced = idleLv * 2; // 1Lvで -2秒
+  const reduced = idleLv * 2;
   return Math.max(5, base - reduced);
 }
 
-// ==============================
-// 強化：レア率UP（倍率）
-// ==============================
-// レベルで「放置時間を水増し」して tier 判定する
-// 例：1.00 → 1.12 → 1.25 …（上限2.00）
 function getLuckMultiplier() {
-  const mul = 1 + luckLv * 0.12;
-  return Math.min(2.0, mul);
+  return Math.min(2.0, 1 + luckLv * 0.12);
+}
+
+function hasAura() {
+  return idleLv > 0 || luckLv > 0;
 }
 
 // ==============================
-// コインレア定義（minは“放置秒”）
+// コインレア定義
 // ==============================
 const TIERS = [
-  { emoji: "🪙", value: 1,  min: 0,   className: "" },
-  { emoji: "🥈", value: 3,  min: 60,  className: "silver" },
-  { emoji: "🥇", value: 8,  min: 180, className: "gold" },
-  { emoji: "🌈", value: 20, min: 420, className: "rainbow" }
+  { emoji: "🪙", value: 1, min: 0, className: "" },
+  { emoji: "🥈", value: 3, min: 60, className: "silver" },
+  { emoji: "🥇", value: 8, min: 180, className: "gold" },
+  { emoji: "🌈", value: 20, min: 420, className: "rainbow" },
 ];
 
 function getTier(idleSec) {
-  // レア率UP：放置秒を倍率で水増し
   const boosted = idleSec * getLuckMultiplier();
   for (let i = TIERS.length - 1; i >= 0; i--) {
     if (boosted >= TIERS[i].min) return TIERS[i];
@@ -131,6 +128,7 @@ const BUNNY_W = 160;
 function createBunny(i) {
   const el = document.createElement("div");
   el.className = "bunny";
+  if (hasAura()) el.classList.add("aura");
 
   const img = document.createElement("img");
   img.src = "./assets/bunny.png";
@@ -147,7 +145,7 @@ function createBunny(i) {
     dir: Math.random() < 0.5 ? 1 : -1,
     t: Math.random() * 10,
     lastInteract: now,
-    lastDrop: now
+    lastDrop: now,
   };
 }
 
@@ -160,38 +158,7 @@ function initBunnies() {
 }
 
 // ==============================
-// コイン生成（うさぎ由来）
-// ==============================
-function dropCoin(bunny, tier) {
-  const frect = field.getBoundingClientRect();
-  const hrect = hud.getBoundingClientRect();
-  const brect = bunny.el.getBoundingClientRect();
-
-  const startX = (brect.left - frect.left) + 60;
-  const startY = (brect.top - frect.top) + 40;
-  const drop = 140;
-
-  createCoin(startX, startY, drop, tier, () => {
-    bunny.lastInteract = Date.now();
-  }, frect, hrect);
-}
-
-// ==============================
-// コイン生成（任意座標）
-// ==============================
-function dropCoinAt(x, y, tier) {
-  const frect = field.getBoundingClientRect();
-  const hrect = hud.getBoundingClientRect();
-
-  const startX = x - 32;
-  const startY = y - 32;
-  const drop = Math.min(170, Math.max(90, frect.height - (startY + 90)));
-
-  createCoin(startX, startY, drop, tier, null, frect, hrect);
-}
-
-// ==============================
-// コイン共通生成
+// コイン生成
 // ==============================
 function createCoin(x, y, drop, tier, onCollect, frect, hrect) {
   const c = document.createElement("div");
@@ -225,12 +192,10 @@ function createCoin(x, y, drop, tier, onCollect, frect, hrect) {
     }, 280);
   };
 
-  // PC：ホバー回収
   c.addEventListener("pointerenter", () => {
     if (matchMedia("(hover:hover)").matches) collect();
   });
 
-  // iPad：タップ回収
   c.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     collect();
@@ -238,6 +203,31 @@ function createCoin(x, y, drop, tier, onCollect, frect, hrect) {
 
   coinLayer.appendChild(c);
   setTimeout(() => c.remove(), 30000);
+}
+
+function dropCoin(bunny, tier) {
+  const frect = field.getBoundingClientRect();
+  const hrect = hud.getBoundingClientRect();
+  const brect = bunny.el.getBoundingClientRect();
+
+  const x = (brect.left - frect.left) + 60;
+  const y = (brect.top - frect.top) + 40;
+  const drop = 140;
+
+  createCoin(x, y, drop, tier, () => {
+    bunny.lastInteract = Date.now();
+  }, frect, hrect);
+}
+
+function dropCoinAt(x, y, tier) {
+  const frect = field.getBoundingClientRect();
+  const hrect = hud.getBoundingClientRect();
+
+  const startX = x - 32;
+  const startY = y - 32;
+  const drop = Math.min(170, Math.max(90, frect.height - (startY + 90)));
+
+  createCoin(startX, startY, drop, tier, null, frect, hrect);
 }
 
 function spark(text, x, y) {
@@ -251,15 +241,14 @@ function spark(text, x, y) {
 }
 
 // ==============================
-// 放置ドロップ（放置短縮反映）
+// 放置ドロップ
 // ==============================
 setInterval(() => {
   const now = Date.now();
   const interval = getIdleIntervalSec();
 
-  bunnies.forEach(b => {
-    const since = (now - b.lastDrop) / 1000;
-    if (since >= interval) {
+  bunnies.forEach((b) => {
+    if ((now - b.lastDrop) / 1000 >= interval) {
       const idle = (now - b.lastInteract) / 1000;
       dropCoin(b, getTier(idle));
       b.lastDrop = now;
@@ -283,15 +272,15 @@ field.addEventListener("pointerdown", (e) => {
   const x = e.clientX - frect.left;
   const y = e.clientY - frect.top;
 
-  dropCoinAt(x, y, getTier(0)); // クリックは基本銅（レア率UPは “放置”に効く想定）
+  dropCoinAt(x, y, getTier(0));
 });
 
 // ==============================
-// 歩行処理
+// 歩行
 // ==============================
 function tick(dt) {
   const w = field.clientWidth;
-  bunnies.forEach(b => {
+  bunnies.forEach((b) => {
     b.x += b.dir * b.vx * dt;
     if (b.x < 0 || b.x > w - BUNNY_W) b.dir *= -1;
     b.t += dt * 6;
@@ -312,7 +301,7 @@ function loop(now) {
 // ボタン
 // ==============================
 petBtn.onclick = () => {
-  bunnies.forEach(b => {
+  bunnies.forEach((b) => {
     dropCoin(b, getTier(0));
     b.lastInteract = Date.now();
   });
@@ -324,27 +313,23 @@ resetBtn.onclick = () => {
 };
 
 // ==============================
-// ショップ：価格
+// ショップ価格
 // ==============================
 function bunnyPrice() {
   return 100 + Math.max(0, bunnyCount - 3) * 80;
 }
-
 function idlePrice() {
-  // レベルが上がるほど高い（上限は勝手に止めない、下限秒で実質頭打ち）
   return 150 + idleLv * 120;
 }
-
 function luckPrice() {
   return 200 + luckLv * 160;
 }
 
 // ==============================
-// ショップ：UI更新
+// ショップUI更新
 // ==============================
 function updateShop() {
   shopCoins.textContent = String(game.coins);
-
   shopCount.textContent = String(bunnyCount);
   shopBunnyPrice.textContent = String(bunnyPrice());
 
@@ -362,7 +347,7 @@ function updateShop() {
 }
 
 // ==============================
-// ショップ：開閉
+// ショップ操作
 // ==============================
 shopBtn.onclick = () => {
   updateShop();
@@ -373,14 +358,10 @@ shopCloseBtn.onclick = () => {
   shopModal.classList.add("hidden");
 };
 
-// 背景タップで閉じる
 shopModal.addEventListener("pointerdown", (e) => {
   if (e.target === shopModal) shopModal.classList.add("hidden");
 });
 
-// ==============================
-// ショップ：購入
-// ==============================
 buyBunnyBtn.onclick = () => {
   const price = bunnyPrice();
   if (game.coins < price) return;
@@ -400,6 +381,9 @@ buyIdleBtn.onclick = () => {
 
   game.coins -= price;
   idleLv++;
+
+  bunnies.forEach((b) => b.el.classList.add("aura"));
+
   updateHUD();
   updateShop();
   spark("放置短縮+", 40, 70);
@@ -412,6 +396,9 @@ buyLuckBtn.onclick = () => {
 
   game.coins -= price;
   luckLv++;
+
+  bunnies.forEach((b) => b.el.classList.add("aura"));
+
   updateHUD();
   updateShop();
   spark("レア率+", 40, 100);
