@@ -349,4 +349,23 @@ button:disabled{ opacity:.55; cursor:not-allowed; }
   filter:grayscale(1);
   opacity:.6;
 }
+/* ===== 桜（画面端装飾） ===== */
+.saku{
+  position:fixed;
+  top:0;
+  height:100vh;
+  width:auto;
+  pointer-events:none;
+  z-index:5;
+  opacity:.9;
+}
+
+.saku.left{
+  left:0;
+}
+
+.saku.right{
+  right:0;
+  transform:scaleX(-1);
+}
 
