@@ -437,6 +437,37 @@ button.iconBtn{
   padding:14px;
   background: linear-gradient(180deg, #fff, #fff6fb);
 }
+/* 旅立ち：うさぎがふわっと消える */
+.bunnyWrap.departing{
+  animation: bunny-depart 420ms ease-out forwards;
+}
+@keyframes bunny-depart{
+  0%   { opacity:1; transform: translateY(0) scale(1); }
+  60%  { opacity:.8; transform: translateY(-10px) scale(1.06); }
+  100% { opacity:0; transform: translateY(-18px) scale(.92); }
+}
+
+/* 旅立ち：煙/キラキラ粒子 */
+.puff{
+  position:absolute;
+  width:14px;
+  height:14px;
+  border-radius:999px;
+  pointer-events:none;
+  opacity:0;
+  filter: blur(.2px) drop-shadow(0 10px 10px rgba(0,0,0,.10));
+}
+.puff.show{
+  animation: puff-pop 520ms ease-out forwards;
+}
+@keyframes puff-pop{
+  0%   { opacity:0; transform: translate(0,0) scale(.7); }
+  15%  { opacity:1; }
+  100% { opacity:0; transform: translate(var(--dx), var(--dy)) scale(1.6); }
+}
+
+
+
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
 .shopItemDesc{ opacity:.85; margin-bottom:12px; }
 .shopRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
