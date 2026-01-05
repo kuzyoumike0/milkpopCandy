@@ -1,7 +1,7 @@
 // ==============================
 // セーブ
 // ==============================
-const KEY = "bunny_farm_save_v6_fix";
+const KEY = "bunny_farm_save_v7_keepcoins";
 
 function loadSave(){
   try{
@@ -10,7 +10,7 @@ function loadSave(){
     const p = JSON.parse(raw);
     return {
       coins: Number(p.coins)||0,
-      bunnyCount: Math.max(1, Number(p.bunnyCount)||3),
+      bunnyCount: Math.max(1, Math.floor(Number(p.bunnyCount)||3)),
       idleLv: Math.max(0, Math.floor(Number(p.idleLv)||0)),
       luckLv: Math.max(0, Math.floor(Number(p.luckLv)||0))
     };
@@ -72,6 +72,9 @@ let luckLv = save.luckLv;
 // クリックドロップ制限
 let lastClickDropAt = 0;
 
+// コインを床に置いておける上限（重くなるの防止）
+const MAX_DROPPED_COINS = 80;
+
 // ==============================
 // SE（iOS対策：最初のユーザー操作後に解禁）
 // ==============================
@@ -85,7 +88,6 @@ let seUnlocked = false;
 function unlockSEOnce(){
   if(seUnlocked) return;
   seUnlocked = true;
-  // iOS対策：最初の操作で一度だけ play を通せる状態にする
   try{
     const a = new Audio(SE.collect);
     a.volume = 0;
@@ -95,7 +97,7 @@ function unlockSEOnce(){
 document.addEventListener("pointerdown", unlockSEOnce, { once:true });
 
 function playSE(key, volume = 0.8){
-  if(!seUnlocked) return;              // 自動放置では鳴らない（iOS安全）
+  if(!seUnlocked) return;
   const src = SE[key];
   if(!src) return;
   try{
@@ -123,12 +125,16 @@ function hasAura(){
 // 床（コイン位置）
 // ==============================
 const COIN_SIZE = 64;
-// ★ここを増やすと「床が上がる」＝コインが上に来る
+// ★ここを増やすと床が上がる（コインが上に来る）
 const FLOOR_MARGIN = 28;
 
 function getFloorY(){
   const frect = field.getBoundingClientRect();
   return Math.max(0, frect.height - COIN_SIZE - FLOOR_MARGIN);
+}
+
+function droppedCoinCount(){
+  return coinLayer.querySelectorAll(".coin").length;
 }
 
 // ==============================
@@ -186,12 +192,12 @@ function createBunny(i){
     lastDrop: now
   };
 
-  // ★うさぎクリックでコインを落とす（SE：ぽよっ）
+  // うさぎクリックでコインを落とす（SE：ぽよっ）
   el.addEventListener("pointerdown", (e)=>{
     e.preventDefault();
-    e.stopPropagation(); // フィールドクリック処理に流れないように
+    e.stopPropagation(); // フィールドクリック処理に流れない
     b.lastInteract = Date.now();
-    dropCoinFromBunny(b, /*userGesture*/true);
+    dropCoinFromBunny(b, true);
     playSE("poyo", 0.9);
   });
 
@@ -207,9 +213,12 @@ function initBunnies(){
 }
 
 // ==============================
-// コイン生成（床に落とす）
+// コイン生成（床に落として置いておく）
 // ==============================
 function createCoin(startX, startY, tier, userGesture){
+  // 上限チェック（置きすぎ防止）
+  if(droppedCoinCount() >= MAX_DROPPED_COINS) return;
+
   const frect = field.getBoundingClientRect();
   const hrect = hud.getBoundingClientRect();
 
@@ -230,7 +239,7 @@ function createCoin(startX, startY, tier, userGesture){
   c.style.setProperty("--drop", `${drop}px`);
   c.style.setProperty("--fall", `${500 + Math.random()*300}ms`);
 
-  // 「落ちた音」はユーザー操作時だけ鳴らす（iOS対策）
+  // 落下SE（ユーザー操作時だけ）
   if(userGesture) playSE("drop", 0.7);
 
   const collect = ()=>{
@@ -246,7 +255,7 @@ function createCoin(startX, startY, tier, userGesture){
     c.style.transform = `translate(${tx-cx}px, ${ty-cy}px) scale(.35)`;
     c.style.opacity = "0.2";
 
-    // 回収音は“回収操作”なので鳴る（PCホバーもOK、iOSはタップでOK）
+    // 回収SE（回収操作）
     playSE("collect", 0.8);
 
     setTimeout(()=>{
@@ -268,7 +277,8 @@ function createCoin(startX, startY, tier, userGesture){
   });
 
   coinLayer.appendChild(c);
-  setTimeout(()=>c.remove(), 30000);
+
+  // ★消さない：床に置いておく（setTimeout remove は入れない）
 }
 
 function dropCoinFromBunny(b, userGesture=false){
@@ -298,7 +308,7 @@ setInterval(()=>{
 
   bunnies.forEach(b=>{
     if((now - b.lastDrop)/1000 >= interval){
-      // 放置は自動なので音は鳴らさない
+      // 放置は自動：音は鳴らさない
       dropCoinFromBunny(b, false);
       b.lastDrop = now;
     }
@@ -338,7 +348,7 @@ function tick(dt){
 
 let last = performance.now();
 function loop(now){
-  const dt = (now-last)/1000;
+  const dt = (now - last)/1000;
   last = now;
   tick(dt);
   requestAnimationFrame(loop);
@@ -348,7 +358,6 @@ function loop(now){
 // ボタン
 // ==============================
 petBtn.onclick = ()=>{
-  // 「なでる」はユーザー操作なので音OK
   bunnies.forEach(b=>{
     b.lastInteract = Date.now();
     dropCoinFromBunny(b, true);
@@ -380,7 +389,7 @@ function updateShop(){
   shopIdleLv.textContent = String(idleLv);
   shopIdlePrice.textContent = String(idlePrice());
 
-  shopLuckNow.textContent = String(getLuckMultiplier().toFixed(2));
+  shopLuckNow.textContent = getLuckMultiplier().toFixed(2);
   shopLuckLv.textContent = String(luckLv);
   shopLuckPrice.textContent = String(luckPrice());
 
@@ -396,13 +405,18 @@ shopBtn.onclick = ()=>{
   updateShop();
   shopModal.classList.remove("hidden");
 };
+
 shopCloseBtn.onclick = ()=>{
   shopModal.classList.add("hidden");
 };
+
 shopModal.addEventListener("pointerdown",(e)=>{
   if(e.target === shopModal) shopModal.classList.add("hidden");
 });
 
+// ==============================
+// ショップ購入
+// ==============================
 buyBunnyBtn.onclick = ()=>{
   const p = bunnyPrice();
   if(game.coins < p) return;
