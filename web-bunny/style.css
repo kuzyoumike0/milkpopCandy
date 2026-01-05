@@ -1,664 +1,352 @@
-:root{
-  --bg1:#ffe6f0;
-  --bg2:#fff7fb;
-  --hud:#ffffffcc;
-  --line:#ffb6d3;
-  --text:#3a2a33;
-  --shadow: 0 10px 30px rgba(0,0,0,.12);
+(() => {
+  /* =========================
+   * ASSETS / CONST
+   * ========================= */
+  const ASSETS = {
+    bunny: "./assets/bunny.png",
+    babyBunny: "./assets/babybunny.png",
+    hart: "./assets/hart.png",
+    candy: "./assets/candy.png",
+    coinSE: "./assets/coin.mp3",
+    poyoSE: "./assets/poyo.mp3",
+    babySE: "./assets/babybunny.mp3",
+    tabidatiSE: "./assets/tabidati.mp3",
+    coins: [
+      "./assets/coin1.png",
+      "./assets/coin2.png",
+      "./assets/coin3.png",
+      "./assets/coin4.png",
+    ],
+  };
 
-  --bunnySize: 140px;
-  --edgeVisibleRatio: 0.55;
-}
+  const BABY_DURATION_MS = 3 * 60 * 1000;
+  const BABY_SPEED_MUL = 0.68;
 
-/* 任意：ショップカード間の余白を統一したい場合 */
-.shopCard + .shopCard{ margin-top:12px; }
+  const BABY_FOLLOW_GAP = 48;
+  const BABY_FOLLOW_FORCE = 6.5;
+  const BABY_FOLLOW_MAX = 170;
 
-*{ box-sizing:border-box; }
-html,body{ height:100%; margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; color:var(--text); }
-body{
-  background: radial-gradient(1200px 600px at 50% 0%, var(--bg2), var(--bg1));
-  overflow:hidden;
-}
+  const EVOLVE_SPARK_COUNT = 14;
 
-#app{ height:100%; display:flex; flex-direction:column; }
+  /* =========================
+   * DOM
+   * ========================= */
+  const field = document.getElementById("field");
+  const bunnyLayer = document.getElementById("bunnyLayer");
+  const coinLayer = document.getElementById("coinLayer");
 
-#hud{
-  position:relative;
-  z-index:50;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:10px 12px;
-  background:var(--hud);
-  backdrop-filter: blur(8px);
-  border-bottom:1px solid rgba(255,182,211,.7);
-}
+  const coinValueEl = document.getElementById("coinValue");
+  const shopBtn = document.getElementById("shopBtn");
 
-#leftHud{ display:flex; gap:14px; align-items:center; font-weight:700; }
+  /* =========================
+   * STATE
+   * ========================= */
+  let coins = 0;
+  const bunnies = [];
+  const coinsOnField = [];
 
-#coinHud,#bunnyHud{
-  display:flex;
-  gap:8px;
-  align-items:center;
-  padding:6px 10px;
-  background:#fff;
-  border-radius:14px;
-  box-shadow: 0 6px 18px rgba(0,0,0,.08);
-}
+  let lastFrame = performance.now();
 
-#rightHud{ display:flex; gap:10px; align-items:center; }
+  /* =========================
+   * AUDIO
+   * ========================= */
+  const sePoyo = new Audio(ASSETS.poyoSE);
+  const seBaby = new Audio(ASSETS.babySE);
+  const seCoin = new Audio(ASSETS.coinSE);
+  const seTabidati = new Audio(ASSETS.tabidatiSE);
 
-button{
-  border:0;
-  padding:10px 12px;
-  border-radius:14px;
-  background:#fff;
-  font-weight:800;
-  cursor:pointer;
-  box-shadow: 0 6px 18px rgba(0,0,0,.08);
-  transition: transform .05s ease, filter .15s ease;
-}
-button:hover{ filter:brightness(1.03); }
-button:active{ transform: translateY(1px) scale(.99); }
+  function playSE(a) {
+    try {
+      a.currentTime = 0;
+      a.play();
+    } catch {}
+  }
 
-button.primary{
-  background: linear-gradient(180deg, #ffb6d3, #ff87b8);
-  color:#2b1620;
-}
+  /* =========================
+   * UTILS
+   * ========================= */
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rand = (a, b) => a + Math.random() * (b - a);
 
-button.iconBtn{
-  width:40px;
-  height:40px;
-  border-radius:14px;
-  display:grid;
-  place-items:center;
-  padding:0;
-}
+  function fieldRect() {
+    return field.getBoundingClientRect();
+  }
+  function groundY() {
+    const fr = fieldRect();
+    const gl = document.getElementById("groundLine").getBoundingClientRect();
+    return gl.top - fr.top;
+  }
+  function updateHud() {
+    coinValueEl.textContent = coins;
+  }
 
-/* キャンディモード中のボタン */
-#candyBtn.armed{
-  background: linear-gradient(180deg, #fff1a6, #ffd36a);
-}
+  /* =========================
+   * SPARK（虹対応）
+   * ========================= */
+  function spawnSparks(x, y, count = 8, spread = 70, rainbow = false) {
+    for (let i = 0; i < count; i++) {
+      const s = document.createElement("div");
+      s.className = "spark show";
+      s.style.left = `${x}px`;
+      s.style.top = `${y}px`;
+      s.style.setProperty("--dx", `${(Math.random() * 2 - 1) * spread}px`);
+      s.style.setProperty("--dy", `${(Math.random() * 2 - 1) * spread - 30}px`);
 
-#field{ position:relative; flex:1; overflow:hidden; }
+      if (rainbow) {
+        const h = Math.floor(Math.random() * 360);
+        s.style.background = `hsla(${h},90%,78%,0.9)`;
+        s.style.boxShadow = `0 0 14px hsla(${h},90%,78%,0.6)`;
+      } else {
+        s.style.background = "rgba(255,255,255,0.9)";
+      }
 
-#decorBack{
-  position:absolute;
-  inset:0;
-  z-index:1;
-  pointer-events:none;
-}
-#decorBack::before{
-  content:"";
-  position:absolute;
-  left:-40px;
-  bottom:18%;
-  width:240px;
-  height:280px;
-  opacity:.9;
-  background:
-    radial-gradient(circle at 45% 30%, #4caf50 0 38%, transparent 39%),
-    radial-gradient(circle at 65% 40%, #43a047 0 34%, transparent 35%),
-    radial-gradient(circle at 45% 55%, #388e3c 0 34%, transparent 35%),
-    linear-gradient(#8d6e63, #6d4c41);
-  background-size: 240px 200px, 200px 180px, 220px 170px, 34px 140px;
-  background-position: 0 0, 30px 10px, 10px 50px, 110px 140px;
-  background-repeat:no-repeat;
-  filter: drop-shadow(0 14px 14px rgba(0,0,0,.12));
-  border-radius: 40px;
-}
-#decorBack::after{
-  content:"";
-  position:absolute;
-  right:-60px;
-  bottom:16%;
-  width:260px;
-  height:310px;
-  opacity:.9;
-  background:
-    radial-gradient(circle at 40% 26%, #66bb6a 0 38%, transparent 39%),
-    radial-gradient(circle at 60% 40%, #4caf50 0 34%, transparent 35%),
-    radial-gradient(circle at 48% 58%, #2e7d32 0 36%, transparent 37%),
-    linear-gradient(#8d6e63, #6d4c41);
-  background-size: 260px 210px, 210px 190px, 240px 180px, 36px 150px;
-  background-position: 0 0, 20px 10px, 0 60px, 120px 160px;
-  background-repeat:no-repeat;
-  filter: drop-shadow(0 14px 14px rgba(0,0,0,.12));
-  border-radius: 40px;
-}
+      coinLayer.appendChild(s);
+      setTimeout(() => s.remove(), 700);
+    }
+  }
 
-#bunnyLayer{ position:absolute; inset:0; z-index:10; }
+  /* =========================
+   * COIN
+   * ========================= */
+  class Coin {
+    constructor(x, yStart, yFloor, tier, value) {
+      this.value = value;
+      this.x = x;
+      this.y = yStart;
+      this.yFloor = yFloor;
 
-#coinLayer{
-  position:absolute;
-  inset:0;
-  z-index:15;
-  pointer-events:none;
-}
+      this.vx = (Math.random() * 2 - 1) * (20 + tier * 6);
+      this.vy = 80 + Math.random() * 260;
+      this.gravity = 2200;
+      this.bounce = 0.28 + Math.random() * 0.1;
 
-#decorFront{ position:absolute; inset:0; z-index:30; pointer-events:none; }
+      this.el = document.createElement("img");
+      this.el.className = "coin";
+      this.el.src = ASSETS.coins[tier - 1];
+      this.el.draggable = false;
 
-.edgeCover{
-  position:absolute;
-  top:0;
-  bottom:0;
-  width:90px;
-  opacity:.95;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      rgba(210,170,120,.95) 0 10px,
-      rgba(190,150,100,.95) 10px 20px
+      this.el.addEventListener("pointerenter", () => this.collect());
+      this.el.addEventListener("click", () => this.collect());
+
+      coinLayer.appendChild(this.el);
+      this.render();
+    }
+
+    collect() {
+      coins += this.value;
+      updateHud();
+      playSE(seCoin);
+      this.el.remove();
+
+      const i = coinsOnField.indexOf(this);
+      if (i >= 0) coinsOnField.splice(i, 1);
+    }
+
+    update(dt) {
+      this.vy += this.gravity * dt;
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+
+      if (this.y >= this.yFloor) {
+        this.y = this.yFloor;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
+      }
+      this.render();
+    }
+
+    render() {
+      this.el.style.left = `${this.x - 22}px`;
+      this.el.style.top = `${this.y - 22}px`;
+    }
+  }
+
+  function coinValueFromTier(t) {
+    if (t === 4) return 100;
+    if (t === 3) return 10;
+    if (t === 2) return 5;
+    return 1;
+  }
+
+  function gaugeToTier(g) {
+    return clamp(Math.ceil(g * 4), 1, 4);
+  }
+
+  /* =========================
+   * ★大量レイン版
+   * ========================= */
+  function spawnCoinsByGauge(bunny, gauge01) {
+    const maxTier = gaugeToTier(gauge01);
+
+    // ★大量！
+    const countByTier = [0, 8, 14, 22, 36];
+    const count = countByTier[maxTier];
+
+    const fr = fieldRect();
+    const gY = groundY();
+    const r = bunny.wrap.getBoundingClientRect();
+    const baseX = (r.left - fr.left) + r.width / 2;
+
+    const spreadX = 180 + maxTier * 40;
+    const spawnAbove = 300 + maxTier * 60;
+
+    const weights = {
+      1: [0, 1],
+      2: [0, 1, 2],
+      3: [0, 1, 2, 3],
+      4: [0, 1, 2, 3, 5],
+    };
+
+    function pickTier(maxT) {
+      const w = weights[maxT];
+      let sum = 0;
+      for (let t = 1; t <= maxT; t++) sum += w[t];
+      let r = Math.random() * sum;
+      for (let t = 1; t <= maxT; t++) {
+        r -= w[t];
+        if (r <= 0) return t;
+      }
+      return maxT;
+    }
+
+    for (let i = 0; i < count; i++) {
+      const delay = i * (12 + Math.random() * 18);
+      setTimeout(() => {
+        const tier = pickTier(maxTier);
+        const value = coinValueFromTier(tier);
+
+        const x = baseX + (Math.random() * 2 - 1) * spreadX;
+        const startY = gY - spawnAbove - Math.random() * 120;
+
+        const c = new Coin(x, startY, gY - 2, tier, value);
+        coinsOnField.push(c);
+
+        if (tier >= 3 && Math.random() < 0.3) {
+          spawnSparks(x, gY - 40, 3, 30, false);
+        }
+      }, delay);
+    }
+  }
+
+  /* =========================
+   * BUNNY
+   * ========================= */
+  class Bunny {
+    constructor(bornAt) {
+      this.bornAt = bornAt;
+      this.isBaby = Date.now() - bornAt < BABY_DURATION_MS;
+
+      this.wrap = document.createElement("div");
+      this.wrap.className = "bunnyWrap";
+
+      this.heart = document.createElement("img");
+      this.heart.className = "bunnyHeart";
+      this.heart.src = ASSETS.hart;
+
+      this.el = document.createElement("img");
+      this.el.className = "bunny";
+      this.el.src = this.isBaby ? ASSETS.babyBunny : ASSETS.bunny;
+
+      this.wrap.appendChild(this.heart);
+      this.wrap.appendChild(this.el);
+      bunnyLayer.appendChild(this.wrap);
+
+      this.x = rand(40, fieldRect().width - 180);
+      this.y = groundY() - 120;
+
+      this.dir = Math.random() < 0.5 ? -1 : 1;
+      this.baseSpeed = 55 + Math.random() * 60;
+
+      this.gauge = 0;
+      this.gaugePeriod = 8 + Math.random() * 8;
+      this.charged = false;
+
+      this.wrap.addEventListener("pointerdown", () => this.tryClickDrop());
+    }
+
+    updateGauge(dt) {
+      if (this.isBaby) {
+        this.gauge = 0;
+        this.charged = false;
+        this.heart.classList.remove("show");
+        return;
+      }
+
+      if (!this.charged) {
+        this.gauge += dt / this.gaugePeriod;
+        if (this.gauge >= 1) {
+          this.gauge = 1;
+          this.charged = true;
+        }
+      }
+
+      if (this.charged) this.heart.classList.add("show");
+      else this.heart.classList.remove("show");
+    }
+
+    tryClickDrop() {
+      playSE(this.isBaby ? seBaby : sePoyo);
+
+      if (this.isBaby) {
+        const r = this.wrap.getBoundingClientRect();
+        const fr = fieldRect();
+        const x = r.left - fr.left + r.width / 2;
+        const gY = groundY();
+        const c = new Coin(x, gY - 160, gY - 2, 1, 1);
+        coinsOnField.push(c);
+        return;
+      }
+
+      const g = this.gauge;
+      spawnCoinsByGauge(this, g);
+
+      this.gauge = 0;
+      this.charged = false;
+      this.gaugePeriod = 8 + Math.random() * 8;
+      this.heart.classList.remove("show");
+    }
+
+    update(dt) {
+      this.updateGauge(dt);
+
+      this.x += this.dir * this.baseSpeed * (this.isBaby ? BABY_SPEED_MUL : 1) * dt;
+
+      const fr = fieldRect();
+      const bunnySize = 140;
+      if (this.x <= 0) this.dir = 1;
+      if (this.x >= fr.width - bunnySize) this.dir = -1;
+
+      this.wrap.classList.toggle("flip", this.dir < 0);
+      this.wrap.style.left = `${this.x}px`;
+      this.wrap.style.top = `${this.y}px`;
+    }
+  }
+
+  /* =========================
+   * LOOP / INIT
+   * ========================= */
+  function tick(ts) {
+    const dt = Math.min(0.033, (ts - lastFrame) / 1000);
+    lastFrame = ts;
+
+    bunnies.forEach((b) => b.update(dt));
+    coinsOnField.forEach((c) => c.update(dt));
+
+    requestAnimationFrame(tick);
+  }
+
+  function init() {
+    bunnies.push(
+      new Bunny(Date.now() - BABY_DURATION_MS - 1000),
+      new Bunny(Date.now() - BABY_DURATION_MS - 2000)
     );
-  box-shadow: 0 0 18px rgba(0,0,0,.12);
-}
-.edgeCover.left{ left:0; }
-.edgeCover.right{ right:0; }
-.edgeCover::before{
-  content:"";
-  position:absolute;
-  left:0;
-  right:0;
-  top:18%;
-  height:12px;
-  background: rgba(160,120,80,.92);
-  box-shadow: 0 10px 0 rgba(160,120,80,.92), 0 20px 0 rgba(160,120,80,.92);
-  opacity:.9;
-}
+    updateHud();
+    requestAnimationFrame(tick);
+  }
 
-#ground{
-  position:absolute;
-  left:0;
-  right:0;
-  bottom:0;
-  height:26%;
-  z-index:35;
-  pointer-events:none;
-}
-#groundLine{
-  position:absolute;
-  left:0;
-  right:0;
-  top:0;
-  height:4px;
-  background: linear-gradient(90deg, transparent, var(--line), transparent);
-  opacity:.9;
-}
-#grassStrip{
-  position:absolute;
-  left:-20px;
-  right:-20px;
-  top:4px;
-  height:62px;
-  opacity:.95;
-  background:
-    repeating-linear-gradient(
-      90deg,
-      rgba(46,125,50,.0) 0 6px,
-      rgba(46,125,50,.25) 6px 8px
-    ),
-    radial-gradient(circle at 20px 52px, rgba(76,175,80,.85) 0 60%, transparent 61%),
-    radial-gradient(circle at 60px 54px, rgba(56,142,60,.9) 0 58%, transparent 59%),
-    radial-gradient(circle at 100px 56px, rgba(102,187,106,.85) 0 62%, transparent 63%);
-  background-size: auto, 120px 70px, 140px 70px, 160px 70px;
-  background-repeat: repeat, repeat, repeat, repeat;
-  filter: drop-shadow(0 10px 10px rgba(0,0,0,.10));
-}
-
-/* Bunny */
-.bunnyWrap{
-  position:absolute;
-  left:0;
-  top:0;
-  width: var(--bunnySize);
-  height: var(--bunnySize);
-  transform-origin: 50% 100%;
-  filter: drop-shadow(0 10px 8px rgba(0,0,0,.16));
-}
-.bunnyWrap.flip{ transform: scaleX(-1); }
-
-/* ★任意：babyを少し小さく見せたい場合（ONにしたければコメント解除）
-.bunnyWrap.baby{ transform: scale(.92); }
-.bunnyWrap.baby.flip{ transform: scaleX(-1) scale(.92); }
-*/
-
-.bunny{
-  width:100%;
-  height:auto;
-  user-select:none;
-  -webkit-user-drag:none;
-  cursor:pointer;
-  display:block;
-  transform-origin: 50% 100%;
-}
-.bunny.walk{ animation: bunny-walk-bob 0.35s ease-in-out infinite alternate; }
-@keyframes bunny-walk-bob{
-  from{ transform: translateY(0); }
-  to{ transform: translateY(3px); }
-}
-.bunny.hop{ animation: bunny-hop 220ms ease-out; }
-@keyframes bunny-hop{
-  0%   { transform: translateY(0) scale(1,1); }
-  30%  { transform: translateY(-12px) scale(1.03,.97); }
-  60%  { transform: translateY(0) scale(.98,1.03); }
-  100% { transform: translateY(0) scale(1,1); }
-}
-
-/* ★追加：鼻先クンクン（首だけ出る感じ） */
-.bunny.sniff{ animation: bunny-sniff 320ms ease-out; }
-@keyframes bunny-sniff{
-  0%   { transform: translateX(0) scaleY(1); }
-  35%  { transform: translateX(7px) scaleY(.985); }
-  70%  { transform: translateX(2px) scaleY(1.02); }
-  100% { transform: translateX(0) scaleY(1); }
-}
-
-/* ゲージは表示しない */
-.bunnyGauge{ display:none !important; }
-
-/* ハート（満タン時：常時表示） */
-.bunnyHeart{
-  position:absolute;
-  left:50%;
-  top:-60px;
-  transform: translateX(-50%);
-  width:44px;
-  height:auto;
-  pointer-events:none;
-  opacity:0;
-}
-.bunnyHeart.ready{
-  opacity:1;
-  animation: heart-ready-pulse 900ms ease-in-out infinite;
-  filter: drop-shadow(0 10px 10px rgba(255,135,184,.25));
-}
-@keyframes heart-ready-pulse{
-  0%   { transform: translateX(-50%) translateY(0) scale(1.00); }
-  50%  { transform: translateX(-50%) translateY(-3px) scale(1.06); }
-  100% { transform: translateX(-50%) translateY(0) scale(1.00); }
-}
-.bunnyHeart.show{ animation: heart-pop 650ms ease-out forwards; }
-@keyframes heart-pop{
-  0%   { opacity:0; transform: translateX(-50%) translateY(10px) scale(.8); }
-  20%  { opacity:1; transform: translateX(-50%) translateY(0) scale(1.05); }
-  60%  { opacity:1; transform: translateX(-50%) translateY(-10px) scale(1.0); }
-  100% { opacity:0; transform: translateX(-50%) translateY(-18px) scale(.95); }
-}
-
-/* Coin */
-.coin{
-  position:absolute;
-  width:44px;
-  height:auto;
-  user-select:none;
-  -webkit-user-drag:none;
-  cursor:pointer;
-  filter: drop-shadow(0 10px 8px rgba(0,0,0,.18));
-  will-change: transform;
-  pointer-events:auto;
-}
-
-/* キャンディ */
-.candy{
-  position:absolute;
-  width:52px;
-  height:auto;
-  user-select:none;
-  -webkit-user-drag:none;
-  pointer-events:none;
-  filter: drop-shadow(0 12px 10px rgba(0,0,0,.20));
-  will-change: transform;
-}
-
-/* Sparkle */
-.spark{
-  position:absolute;
-  width:10px;
-  height:10px;
-  border-radius:999px;
-  pointer-events:none;
-  opacity:0;
-  filter: blur(.1px);
-}
-.spark.show{ animation: spark-pop 520ms ease-out forwards; }
-@keyframes spark-pop{
-  0%   { opacity:0; transform: translate(0,0) scale(.6); }
-  20%  { opacity:1; }
-  100% { opacity:0; transform: translate(var(--dx), var(--dy)) scale(1.15); }
-}
-
-/* 取得値ポップ */
-.gainPop{
-  position:absolute;
-  font-weight:900;
-  font-size:18px;
-  line-height:1;
-  pointer-events:none;
-  user-select:none;
-  text-shadow: 0 2px 0 rgba(0,0,0,.12);
-  filter: drop-shadow(0 10px 10px rgba(0,0,0,.12));
-  opacity:0;
-}
-.gainPop.show{ animation: gain-pop 720ms ease-out forwards; }
-@keyframes gain-pop{
-  0%   { opacity:0; transform: translate(-50%, 6px) scale(.9); }
-  15%  { opacity:1; transform: translate(-50%, 0px) scale(1.05); }
-  100% { opacity:0; transform: translate(-50%, -34px) scale(1.0); }
-}
-.gainPop.rainbow{
-  background: linear-gradient(90deg,
-    rgba(255,140,170,1),
-    rgba(255,220,120,1),
-    rgba(140,255,180,1),
-    rgba(140,200,255,1),
-    rgba(220,140,255,1)
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  text-shadow: none;
-  filter: drop-shadow(0 0 10px rgba(255,255,255,.65))
-          drop-shadow(0 0 18px rgba(255,135,184,.45));
-}
-
-/* HUDバウンス */
-#coinHud.bump{ animation: hud-bump 220ms ease-out; }
-@keyframes hud-bump{
-  0%   { transform: translateY(0) scale(1); }
-  40%  { transform: translateY(-2px) scale(1.06); }
-  100% { transform: translateY(0) scale(1); }
-}
-
-/* HUDキラッ */
-#coinHud.shine{
-  position: relative;
-  overflow: hidden;
-  animation: hud-shine-pop 420ms ease-out;
-}
-@keyframes hud-shine-pop{
-  0%   { box-shadow: 0 6px 18px rgba(0,0,0,.08); }
-  30%  { box-shadow: 0 10px 26px rgba(255,255,255,.35), 0 10px 26px rgba(255,135,184,.25); }
-  100% { box-shadow: 0 6px 18px rgba(0,0,0,.08); }
-}
-#coinHud.shine::after{
-  content:"";
-  position:absolute;
-  top:-20%;
-  left:-60%;
-  width:45%;
-  height:160%;
-  transform: rotate(18deg);
-  background: linear-gradient(90deg,
-    rgba(255,255,255,0),
-    rgba(255,255,255,.75),
-    rgba(255,255,255,0)
-  );
-  animation: hud-shine-sweep 420ms ease-out;
-}
-@keyframes hud-shine-sweep{
-  0%   { left:-60%; opacity:0; }
-  15%  { opacity:1; }
-  100% { left:140%; opacity:0; }
-}
-
-/* ヒント */
-#hint{
-  position:absolute;
-  left:50%;
-  bottom:18px;
-  transform: translateX(-50%);
-  z-index:40;
-  padding:10px 14px;
-  border-radius:16px;
-  background: rgba(255,255,255,.92);
-  box-shadow: 0 10px 24px rgba(0,0,0,.14);
-  font-weight:900;
-}
-.hidden{ display:none !important; }
-
-/* Modal */
-#modalBackdrop{
-  position:absolute;
-  inset:0;
-  background: rgba(0,0,0,.28);
-  z-index:60;
-}
-#shopModal{
-  position:absolute;
-  left:50%;
-  top:50%;
-  transform: translate(-50%, -50%);
-  width:min(520px, calc(100vw - 26px));
-  background:#fff;
-  border-radius:20px;
-  box-shadow: var(--shadow);
-  z-index:70;
-  overflow:hidden;
-}
-.modalHeader{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:14px 14px;
-  border-bottom:1px solid rgba(0,0,0,.06);
-}
-.modalTitle{ font-size:18px; font-weight:900; }
-.modalBody{ padding:14px; }
-.shopCard{
-  border:1px solid rgba(0,0,0,.06);
-  border-radius:18px;
-  padding:14px;
-  background: linear-gradient(180deg, #fff, #fff6fb);
-}
-/* 旅立ち：うさぎがふわっと消える */
-.bunnyWrap.departing{
-  animation: bunny-depart 420ms ease-out forwards;
-}
-@keyframes bunny-depart{
-  0%   { opacity:1; transform: translateY(0) scale(1); }
-  60%  { opacity:.8; transform: translateY(-10px) scale(1.06); }
-  100% { opacity:0; transform: translateY(-18px) scale(.92); }
-}
-
-/* 旅立ち：煙/キラキラ粒子 */
-.puff{
-  position:absolute;
-  width:14px;
-  height:14px;
-  border-radius:999px;
-  pointer-events:none;
-  opacity:0;
-  filter: blur(.2px) drop-shadow(0 10px 10px rgba(0,0,0,.10));
-}
-.puff.show{
-  animation: puff-pop 520ms ease-out forwards;
-}
-@keyframes puff-pop{
-  0%   { opacity:0; transform: translate(0,0) scale(.7); }
-  15%  { opacity:1; }
-  100% { opacity:0; transform: translate(var(--dx), var(--dy)) scale(1.6); }
-}
-
-/* 旅立ちメッセージ（ありがとう…） */
-.departMsg{
-  position:absolute;
-  font-weight:900;
-  font-size:14px;
-  letter-spacing:.04em;
-  pointer-events:none;
-  user-select:none;
-  opacity:0;
-  color: rgba(58,42,51,.92);
-  text-shadow: 0 2px 10px rgba(255,255,255,.85);
-  filter: drop-shadow(0 10px 10px rgba(0,0,0,.10));
-}
-
-.departMsg.show{
-  animation: depart-msg 2200ms ease-out forwards;
-}
-
-@keyframes depart-msg{
-  0%   { opacity:0; transform: translate(-50%, 8px) scale(.92); }
-  15%  { opacity:1; transform: translate(-50%, 0px) scale(1.00); }
-  100% { opacity:0; transform: translate(-50%, -46px) scale(.98); }
-}
-/* レア台詞（きんきら） */
-.departMsg.rare{
-  background: linear-gradient(90deg,
-    rgba(255,220,120,1),
-    rgba(255,245,180,1),
-    rgba(255,200,80,1)
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  text-shadow: none;
-  filter: drop-shadow(0 0 10px rgba(255,230,150,.75))
-          drop-shadow(0 0 18px rgba(255,180,80,.45));
-}
-/* ===== Rank/Achievements modal ===== */
-.rankGrid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:12px;
-}
-.rankCard{
-  border:1px solid rgba(0,0,0,.06);
-  border-radius:18px;
-  padding:12px;
-  background: linear-gradient(180deg, #fff, #fff6fb);
-}
-.rankCard.wide{ grid-column: 1 / -1; }
-.rankTitle{ font-weight:900; margin-bottom:8px; }
-.rankList{ display:flex; flex-direction:column; gap:6px; font-weight:800; }
-.rankRow{ display:flex; justify-content:space-between; gap:10px; opacity:.92; }
-.rankRow small{ opacity:.75; font-weight:800; }
-
-.achList{ display:flex; flex-direction:column; gap:8px; }
-.achItem{
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-  padding:10px 12px;
-  border-radius:16px;
-  background:#fff;
-  border:1px solid rgba(0,0,0,.06);
-}
-.achItem.locked{ opacity:.55; }
-.achName{ font-weight:900; }
-.achDesc{ opacity:.78; font-weight:800; font-size:12px; margin-top:2px; }
-.achRight{ text-align:right; font-weight:900; white-space:nowrap; }
-.achRare{ background: linear-gradient(90deg,#ffd66a,#fff1a6,#ffcf4d); -webkit-background-clip:text; background-clip:text; color:transparent; }
-@media (max-width: 720px){
-  .rankGrid{ grid-template-columns: 1fr; }
-}
-
-/* ===== Tooltip ===== */
-.tipWrap{ position:relative; display:inline-block; }
-.tooltip{
-  position:absolute;
-  right:0;
-  top:calc(100% + 10px);
-  min-width: 240px;
-  max-width: 320px;
-  padding:10px 12px;
-  border-radius:16px;
-  background: rgba(255,255,255,.95);
-  border:1px solid rgba(0,0,0,.06);
-  box-shadow: 0 10px 24px rgba(0,0,0,.14);
-  font-weight:900;
-  font-size:12px;
-  line-height:1.45;
-  opacity:0;
-  transform: translateY(-4px);
-  pointer-events:none;
-  transition: opacity .12s ease, transform .12s ease;
-  z-index: 80;
-}
-.tipWrap:hover .tooltip{
-  opacity:1;
-  transform: translateY(0);
-}
-.tooltip::before{
-  content:"";
-  position:absolute;
-  right:16px;
-  top:-7px;
-  width:12px;
-  height:12px;
-  background: rgba(255,255,255,.95);
-  border-left:1px solid rgba(0,0,0,.06);
-  border-top:1px solid rgba(0,0,0,.06);
-  transform: rotate(45deg);
-}
-
-/* ★baby期間はハート（チャージ）を出さない */
-.bunnyWrap.baby .bunnyHeart{
-  display: none !important;
-}
-.bunnyWrap.baby{
-  transform: scale(0.82) translateY(6px);
-}
-.bunnyWrap.baby.flip{
-  transform: scaleX(-1) scale(0.82) translateY(6px);
-}
-
-.shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
-.shopItemDesc{ opacity:.85; margin-bottom:12px; }
-.shopRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
-.shopPrice{ font-weight:900; }
-.shopHint{ margin-top:12px; font-size:12px; opacity:.8; line-height:1.5; }
-
-/* お迎えボタンのホバー詳細 */
-.hasTip {
-  position: relative;
-}
-
-.hasTip .tip {
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 10px);
-  transform: translateX(-50%);
-  min-width: 220px;
-  max-width: 280px;
-
-  padding: 10px 12px;
-  border-radius: 12px;
-
-  background: rgba(30, 30, 40, 0.92);
-  color: #fff;
-  font-size: 12px;
-  line-height: 1.4;
-
-  box-shadow: 0 10px 25px rgba(0,0,0,0.25);
-  border: 1px solid rgba(255,255,255,0.12);
-
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 50;
-}
-
-.hasTip .tip::before {
-  content: "";
-  position: absolute;
-  top: -8px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 8px solid transparent;
-  border-right: 8px solid transparent;
-  border-bottom: 8px solid rgba(30, 30, 40, 0.92);
-}
-
-.hasTip:hover .tip {
-  opacity: 1;
-  transform: translateX(-50%) translateY(2px);
-}
-/* お迎えホバー：不足時に赤 */
-.tip .priceBad {
-  color: #ff5a5a;
-  font-weight: 800;
-}
-
+  init();
+})();
