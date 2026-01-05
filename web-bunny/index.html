@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#ffd6e7" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./assets/icon-192.png" />
+  <link rel="stylesheet" href="./style.css" />
+  <title>Desktop Bunny (Web)</title>
+</head>
+<body>
+  <div id="app">
+    <header id="hud">
+      <div id="coin">🪙 <span id="coinValue">0</span></div>
+      <button id="petBtn" aria-label="なでる">なでる</button>
+      <button id="resetBtn" aria-label="リセット">リセット</button>
+    </header>
+
+    <main id="field">
+      <div id="bunny" role="img" aria-label="うさぎ">
+        <img src="./assets/bunny.png" alt="bunny" draggable="false" />
+      </div>
+
+      <div id="floating"></div>
+    </main>
+
+    <footer id="hint">
+      放置でコインが増えるよ（iPadはSafari→共有→ホーム画面に追加でアプリ化）
+    </footer>
+  </div>
+
+  <script src="./app.js"></script>
+  <script>
+    // Service Worker（PWAオフライン対応）
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js").catch(()=>{});
+    }
+  </script>
+</body>
+</html>
