@@ -12,7 +12,6 @@
 <body>
   <div id="app">
 
-    <!-- HUD -->
     <header id="hud">
       <div id="coin">🪙 <span id="coinValue">0</span></div>
       <button id="petBtn">なでる</button>
@@ -20,14 +19,13 @@
       <button id="resetBtn">リセット</button>
     </header>
 
-    <!-- フィールド -->
     <main id="field">
       <div id="bunnyLayer"></div>
       <div id="coinLayer"></div>
     </main>
 
     <footer id="hint">
-      放置でコインが落ちるよ／PCはカーソルを当てるだけで回収
+      放置でコインが落ちるよ／PCはカーソルを当てるだけで回収（クリック落としは1秒に1回）
     </footer>
   </div>
 
@@ -39,18 +37,45 @@
         <button id="shopCloseBtn" class="closeBtn">×</button>
       </div>
 
+      <!-- うさぎ購入 -->
       <div class="shopRow">
         <div class="shopItem">
           <div class="shopName">うさぎを増やす</div>
-          <div class="shopDesc">うさぎが1匹増える</div>
+          <div class="shopDesc">うさぎが1匹増える（歩く＋コインを落とす）</div>
         </div>
         <button id="buyBunnyBtn" class="buyBtn">購入</button>
+      </div>
+
+      <!-- 放置短縮 -->
+      <div class="shopRow">
+        <div class="shopItem">
+          <div class="shopName">放置短縮</div>
+          <div class="shopDesc">コインを落とす間隔を短くする</div>
+        </div>
+        <button id="buyIdleBtn" class="buyBtn">購入</button>
+      </div>
+
+      <!-- レア率UP -->
+      <div class="shopRow">
+        <div class="shopItem">
+          <div class="shopName">レア率UP</div>
+          <div class="shopDesc">銀/金/虹が出やすくなる</div>
+        </div>
+        <button id="buyLuckBtn" class="buyBtn">購入</button>
       </div>
 
       <div class="shopInfo">
         <div>所持コイン：<b id="shopCoins">0</b></div>
         <div>現在の匹数：<b id="shopCount">0</b></div>
-        <div>価格：<b id="shopPrice">0</b></div>
+        <div>うさぎ価格：<b id="shopBunnyPrice">0</b></div>
+
+        <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:6px 0;">
+
+        <div>放置間隔：<b id="shopIdleNow">20</b> 秒</div>
+        <div>放置短縮Lv：<b id="shopIdleLv">0</b>（次：<b id="shopIdlePrice">0</b>）</div>
+
+        <div>レア倍率：<b id="shopLuckNow">1.00</b> 倍</div>
+        <div>レア率Lv：<b id="shopLuckLv">0</b>（次：<b id="shopLuckPrice">0</b>）</div>
       </div>
     </div>
   </div>
