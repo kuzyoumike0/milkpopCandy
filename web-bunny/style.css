@@ -115,20 +115,37 @@ button.iconBtn{
 }
 
 /* -----------------------
-   Bunny
+   Bunny（transform衝突を避けるため、親wrapに反転、imgに揺れ）
 ----------------------- */
-.bunny{
+
+/* 親：位置(left/top)と反転(scaleX)担当 */
+.bunnyWrap{
   position:absolute;
+  left:0;
+  top:0;
   width: var(--bunnySize);
-  height:auto;
-  user-select:none;
-  -webkit-user-drag:none;
-  cursor:pointer;
+  height: var(--bunnySize);
   transform-origin: 50% 100%;
   filter: drop-shadow(0 10px 8px rgba(0,0,0,.16));
 }
 
-/* 歩行っぽい上下揺れ */
+/* 反転は親に付与（img側のアニメtransformと干渉しない） */
+.bunnyWrap.flip{
+  transform: scaleX(-1);
+}
+
+/* 子：画像本体（上下揺れ担当） */
+.bunny{
+  width:100%;
+  height:auto;
+  user-select:none;
+  -webkit-user-drag:none;
+  cursor:pointer;
+  display:block;
+  transform-origin: 50% 100%;
+}
+
+/* 歩行っぽい上下揺れ（transformはここだけ） */
 .bunny.walk{
   animation: bunny-walk-bob 0.35s ease-in-out infinite alternate;
 }
@@ -136,11 +153,6 @@ button.iconBtn{
 @keyframes bunny-walk-bob{
   from{ transform: translateY(0); }
   to{ transform: translateY(3px); }
-}
-
-/* 左向き反転（JSで付け外し） */
-.bunny.flip{
-  transform: scaleX(-1);
 }
 
 /* -----------------------
