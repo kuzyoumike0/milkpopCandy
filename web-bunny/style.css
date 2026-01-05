@@ -7,8 +7,6 @@
   --shadow: 0 10px 30px rgba(0,0,0,.12);
 
   --bunnySize: 140px;
-
-  /* 端に出ても“首だけ”見せる */
   --edgeVisibleRatio: 0.55;
 }
 
@@ -76,15 +74,12 @@ button.iconBtn{
 
 #field{ position:relative; flex:1; overflow:hidden; }
 
-/* レイヤー順 */
 #decorBack{
   position:absolute;
   inset:0;
   z-index:1;
   pointer-events:none;
 }
-
-/* 木っぽい装飾（CSSのみ） */
 #decorBack::before{
   content:"";
   position:absolute;
@@ -130,7 +125,7 @@ button.iconBtn{
   position:absolute;
   inset:0;
   z-index:15;
-  pointer-events:none; /* 下のうさぎクリックを通す */
+  pointer-events:none;
 }
 
 #decorFront{ position:absolute; inset:0; z-index:30; pointer-events:none; }
@@ -202,9 +197,7 @@ button.iconBtn{
   filter: drop-shadow(0 10px 10px rgba(0,0,0,.10));
 }
 
-/* -----------------------
-   Bunny
------------------------ */
+/* Bunny */
 .bunnyWrap{
   position:absolute;
   left:0;
@@ -214,7 +207,6 @@ button.iconBtn{
   transform-origin: 50% 100%;
   filter: drop-shadow(0 10px 8px rgba(0,0,0,.16));
 }
-
 .bunnyWrap.flip{ transform: scaleX(-1); }
 
 .bunny{
@@ -227,16 +219,12 @@ button.iconBtn{
   transform-origin: 50% 100%;
 }
 
-/* 歩行揺れ */
-.bunny.walk{
-  animation: bunny-walk-bob 0.35s ease-in-out infinite alternate;
-}
+.bunny.walk{ animation: bunny-walk-bob 0.35s ease-in-out infinite alternate; }
 @keyframes bunny-walk-bob{
   from{ transform: translateY(0); }
   to{ transform: translateY(3px); }
 }
 
-/* 端にぶつかった時の“ぴょこん” */
 .bunny.hop{ animation: bunny-hop 220ms ease-out; }
 @keyframes bunny-hop{
   0%   { transform: translateY(0) scale(1,1); }
@@ -245,7 +233,7 @@ button.iconBtn{
   100% { transform: translateY(0) scale(1,1); }
 }
 
-/* ★ゲージ（うさぎ個体） */
+/* ゲージ */
 .bunnyGauge{
   position:absolute;
   left:10px;
@@ -265,7 +253,7 @@ button.iconBtn{
   background: linear-gradient(90deg, #ffb6d3, #ff87b8);
 }
 
-/* ★満タン演出：ハート */
+/* ハート（満タン時：常時表示＋ぷるぷる） */
 .bunnyHeart{
   position:absolute;
   left:50%;
@@ -276,6 +264,18 @@ button.iconBtn{
   pointer-events:none;
   opacity:0;
 }
+.bunnyHeart.ready{
+  opacity:1;
+  animation: heart-ready-pulse 900ms ease-in-out infinite;
+  filter: drop-shadow(0 10px 10px rgba(255,135,184,.25));
+}
+@keyframes heart-ready-pulse{
+  0%   { transform: translateX(-50%) translateY(0) scale(1.00); }
+  50%  { transform: translateX(-50%) translateY(-3px) scale(1.06); }
+  100% { transform: translateX(-50%) translateY(0) scale(1.00); }
+}
+
+/* クリック消費時：ポップして消える */
 .bunnyHeart.show{
   animation: heart-pop 650ms ease-out forwards;
 }
@@ -286,9 +286,7 @@ button.iconBtn{
   100% { opacity:0; transform: translateX(-50%) translateY(-18px) scale(.95); }
 }
 
-/* -----------------------
-   Coin
------------------------ */
+/* Coin */
 .coin{
   position:absolute;
   width:44px;
@@ -298,12 +296,10 @@ button.iconBtn{
   cursor:pointer;
   filter: drop-shadow(0 10px 8px rgba(0,0,0,.18));
   will-change: transform;
-  pointer-events:auto; /* 回収できる */
+  pointer-events:auto;
 }
 
-/* -----------------------
-   Modal
------------------------ */
+/* Modal */
 .hidden{ display:none !important; }
 
 #modalBackdrop{
@@ -312,7 +308,6 @@ button.iconBtn{
   background: rgba(0,0,0,.28);
   z-index:60;
 }
-
 #shopModal{
   position:absolute;
   left:50%;
@@ -325,7 +320,6 @@ button.iconBtn{
   z-index:70;
   overflow:hidden;
 }
-
 .modalHeader{
   display:flex;
   align-items:center;
@@ -335,7 +329,6 @@ button.iconBtn{
 }
 .modalTitle{ font-size:18px; font-weight:900; }
 .modalBody{ padding:14px; }
-
 .shopCard{
   border:1px solid rgba(0,0,0,.06);
   border-radius:18px;
