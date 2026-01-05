@@ -466,6 +466,29 @@ button.iconBtn{
   100% { opacity:0; transform: translate(var(--dx), var(--dy)) scale(1.6); }
 }
 
+/* 旅立ちメッセージ（ありがとう…） */
+.departMsg{
+  position:absolute;
+  font-weight:900;
+  font-size:14px;
+  letter-spacing:.04em;
+  pointer-events:none;
+  user-select:none;
+  opacity:0;
+  color: rgba(58,42,51,.92);
+  text-shadow: 0 2px 10px rgba(255,255,255,.85);
+  filter: drop-shadow(0 10px 10px rgba(0,0,0,.10));
+}
+
+.departMsg.show{
+  animation: depart-msg 1100ms ease-out forwards;
+}
+
+@keyframes depart-msg{
+  0%   { opacity:0; transform: translate(-50%, 8px) scale(.92); }
+  15%  { opacity:1; transform: translate(-50%, 0px) scale(1.00); }
+  100% { opacity:0; transform: translate(-50%, -46px) scale(.98); }
+}
 
 
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
