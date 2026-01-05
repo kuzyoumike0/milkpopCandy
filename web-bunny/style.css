@@ -6,10 +6,9 @@
   --text:#3a2a33;
   --shadow: 0 10px 30px rgba(0,0,0,.12);
 
-  /* ★ うさぎの表示サイズ */
   --bunnySize: 140px;
 
-  /* 端に出ても“首だけ”見せるための可視率（0.55なら55%見える） */
+  /* 端に出ても“首だけ”見せる */
   --edgeVisibleRatio: 0.55;
 }
 
@@ -20,11 +19,7 @@ body{
   overflow:hidden;
 }
 
-#app{
-  height:100%;
-  display:flex;
-  flex-direction:column;
-}
+#app{ height:100%; display:flex; flex-direction:column; }
 
 #hud{
   position:relative;
@@ -38,12 +33,7 @@ body{
   border-bottom:1px solid rgba(255,182,211,.7);
 }
 
-#leftHud{
-  display:flex;
-  gap:14px;
-  align-items:center;
-  font-weight:700;
-}
+#leftHud{ display:flex; gap:14px; align-items:center; font-weight:700; }
 
 #coinHud,#bunnyHud{
   display:flex;
@@ -55,11 +45,7 @@ body{
   box-shadow: 0 6px 18px rgba(0,0,0,.08);
 }
 
-#rightHud{
-  display:flex;
-  gap:10px;
-  align-items:center;
-}
+#rightHud{ display:flex; gap:10px; align-items:center; }
 
 button{
   border:0;
@@ -88,15 +74,9 @@ button.iconBtn{
   padding:0;
 }
 
-#field{
-  position:relative;
-  flex:1;
-  overflow:hidden;
-}
+#field{ position:relative; flex:1; overflow:hidden; }
 
-/* レイヤー順
-   decorBack(1) -> bunny(10) -> coin(15) -> decorFront(30) -> ground(35)
-*/
+/* レイヤー順 */
 #decorBack{
   position:absolute;
   inset:0;
@@ -104,7 +84,7 @@ button.iconBtn{
   pointer-events:none;
 }
 
-/* 木っぽい装飾（画像なしでCSSだけで） */
+/* 木っぽい装飾（CSSのみ） */
 #decorBack::before{
   content:"";
   position:absolute;
@@ -144,28 +124,17 @@ button.iconBtn{
   border-radius: 40px;
 }
 
-#bunnyLayer{
-  position:absolute;
-  inset:0;
-  z-index:10;
-}
+#bunnyLayer{ position:absolute; inset:0; z-index:10; }
 
 #coinLayer{
   position:absolute;
   inset:0;
   z-index:15;
-  /* coinLayer自体はクリック透過（下のうさぎを押せるように） */
-  pointer-events:none;
+  pointer-events:none; /* 下のうさぎクリックを通す */
 }
 
-#decorFront{
-  position:absolute;
-  inset:0;
-  z-index:30;
-  pointer-events:none;
-}
+#decorFront{ position:absolute; inset:0; z-index:30; pointer-events:none; }
 
-/* 端の柵（前面）＋“首だけ”演出用の隠し板 */
 .edgeCover{
   position:absolute;
   top:0;
@@ -182,8 +151,6 @@ button.iconBtn{
 }
 .edgeCover.left{ left:0; }
 .edgeCover.right{ right:0; }
-
-/* 柵っぽい棒 */
 .edgeCover::before{
   content:"";
   position:absolute;
@@ -196,7 +163,6 @@ button.iconBtn{
   opacity:.9;
 }
 
-/* 地面 */
 #ground{
   position:absolute;
   left:0;
@@ -206,7 +172,6 @@ button.iconBtn{
   z-index:35;
   pointer-events:none;
 }
-
 #groundLine{
   position:absolute;
   left:0;
@@ -216,7 +181,6 @@ button.iconBtn{
   background: linear-gradient(90deg, transparent, var(--line), transparent);
   opacity:.9;
 }
-
 #grassStrip{
   position:absolute;
   left:-20px;
@@ -239,7 +203,7 @@ button.iconBtn{
 }
 
 /* -----------------------
-   Bunny（wrapで反転、imgで揺れ）
+   Bunny
 ----------------------- */
 .bunnyWrap{
   position:absolute;
@@ -251,9 +215,7 @@ button.iconBtn{
   filter: drop-shadow(0 10px 8px rgba(0,0,0,.16));
 }
 
-.bunnyWrap.flip{
-  transform: scaleX(-1);
-}
+.bunnyWrap.flip{ transform: scaleX(-1); }
 
 .bunny{
   width:100%;
@@ -265,7 +227,7 @@ button.iconBtn{
   transform-origin: 50% 100%;
 }
 
-/* 歩行っぽい上下揺れ */
+/* 歩行揺れ */
 .bunny.walk{
   animation: bunny-walk-bob 0.35s ease-in-out infinite alternate;
 }
@@ -275,14 +237,53 @@ button.iconBtn{
 }
 
 /* 端にぶつかった時の“ぴょこん” */
-.bunny.hop{
-  animation: bunny-hop 220ms ease-out;
-}
+.bunny.hop{ animation: bunny-hop 220ms ease-out; }
 @keyframes bunny-hop{
   0%   { transform: translateY(0) scale(1,1); }
   30%  { transform: translateY(-12px) scale(1.03,.97); }
   60%  { transform: translateY(0) scale(.98,1.03); }
   100% { transform: translateY(0) scale(1,1); }
+}
+
+/* ★ゲージ（うさぎ個体） */
+.bunnyGauge{
+  position:absolute;
+  left:10px;
+  right:10px;
+  top:-10px;
+  height:10px;
+  border-radius:999px;
+  background: rgba(255,255,255,.85);
+  box-shadow: 0 8px 18px rgba(0,0,0,.10);
+  overflow:hidden;
+  border:1px solid rgba(255,135,184,.35);
+}
+.bunnyGaugeFill{
+  height:100%;
+  width:0%;
+  border-radius:999px;
+  background: linear-gradient(90deg, #ffb6d3, #ff87b8);
+}
+
+/* ★満タン演出：ハート */
+.bunnyHeart{
+  position:absolute;
+  left:50%;
+  top:-60px;
+  transform: translateX(-50%);
+  width:44px;
+  height:auto;
+  pointer-events:none;
+  opacity:0;
+}
+.bunnyHeart.show{
+  animation: heart-pop 650ms ease-out forwards;
+}
+@keyframes heart-pop{
+  0%   { opacity:0; transform: translateX(-50%) translateY(10px) scale(.8); }
+  20%  { opacity:1; transform: translateX(-50%) translateY(0) scale(1.05); }
+  60%  { opacity:1; transform: translateX(-50%) translateY(-10px) scale(1.0); }
+  100% { opacity:0; transform: translateX(-50%) translateY(-18px) scale(.95); }
 }
 
 /* -----------------------
@@ -332,13 +333,8 @@ button.iconBtn{
   padding:14px 14px;
   border-bottom:1px solid rgba(0,0,0,.06);
 }
-.modalTitle{
-  font-size:18px;
-  font-weight:900;
-}
-.modalBody{
-  padding:14px;
-}
+.modalTitle{ font-size:18px; font-weight:900; }
+.modalBody{ padding:14px; }
 
 .shopCard{
   border:1px solid rgba(0,0,0,.06);
@@ -346,27 +342,8 @@ button.iconBtn{
   padding:14px;
   background: linear-gradient(180deg, #fff, #fff6fb);
 }
-.shopItemTitle{
-  font-size:16px;
-  font-weight:900;
-  margin-bottom:6px;
-}
-.shopItemDesc{
-  opacity:.85;
-  margin-bottom:12px;
-}
-.shopRow{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-}
-.shopPrice{
-  font-weight:900;
-}
-.shopHint{
-  margin-top:12px;
-  font-size:12px;
-  opacity:.8;
-  line-height:1.5;
-}
+.shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
+.shopItemDesc{ opacity:.85; margin-bottom:12px; }
+.shopRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.shopPrice{ font-weight:900; }
+.shopHint{ margin-top:12px; font-size:12px; opacity:.8; line-height:1.5; }
