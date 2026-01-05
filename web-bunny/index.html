@@ -18,6 +18,7 @@
       </div>
 
       <div id="rightHud">
+        <button id="candyBtn">🍬 キャンディ</button>
         <button id="shopBtn">ショップ</button>
         <button id="resetBtn">リセット</button>
       </div>
@@ -38,6 +39,9 @@
         <div id="groundLine"></div>
         <div id="grassStrip"></div>
       </div>
+
+      <!-- 画面下のヒント -->
+      <div id="hint" class="hidden">🍬 フィールドをクリックすると、上からキャンディを落とします</div>
     </main>
 
     <div id="modalBackdrop" class="hidden"></div>
@@ -58,13 +62,13 @@
           </div>
 
           <div class="shopHint">
-            ゲージ満タン（ハート表示）でクリックすると、レアコイン確率が上がります。
+            満タンクリック（ハート表示）でレア確率UP＋派手落下になります。
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="./app.js?v=4"></script>
+  <script src="./app.js?v=6"></script>
 </body>
 </html>
