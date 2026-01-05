@@ -4,6 +4,8 @@
    * ========================= */
   const ASSETS = {
     bunny: "./assets/bunny.png",
+    bunny2: "./assets/bunny2.png",   // ★追加
+　  bunny3: "./assets/bunny3.png",   // ★追加
     babyBunny: "./assets/babybunny.png",
     hart: "./assets/hart.png",
     candy: "./assets/candy.png",
