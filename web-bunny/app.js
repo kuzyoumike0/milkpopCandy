@@ -1,13 +1,16 @@
 (() => {
   /* =========================
-   * CONFIG / ASSETS
+   * ASSETS / CONST
    * ========================= */
   const ASSETS = {
     bunny: "./assets/bunny.png",
     babyBunny: "./assets/babybunny.png",
-    babySE: "./assets/babybunny.mp3",
-    poyoSE: "./assets/poyo.mp3",
+    hart: "./assets/hart.png",
+    candy: "./assets/candy.png",
     coinSE: "./assets/coin.mp3",
+    poyoSE: "./assets/poyo.mp3",
+    babySE: "./assets/babybunny.mp3",
+    tabidatiSE: "./assets/tabidati.mp3",
     coins: [
       "./assets/coin1.png",
       "./assets/coin2.png",
@@ -17,11 +20,11 @@
   };
 
   const BABY_DURATION_MS = 3 * 60 * 1000;
-  const BABY_SPEED_MUL = 0.65;
+  const BABY_SPEED_MUL = 0.68;
 
-  const BABY_FOLLOW_GAP = 46;
-  const BABY_FOLLOW_FORCE = 6.0;
-  const BABY_FOLLOW_MAX = 160;
+  const BABY_FOLLOW_GAP = 48;
+  const BABY_FOLLOW_FORCE = 6.5;
+  const BABY_FOLLOW_MAX = 170;
 
   const EVOLVE_SPARK_COUNT = 14;
 
@@ -41,6 +44,7 @@
   let coins = 0;
   const bunnies = [];
   const coinsOnField = [];
+
   let lastFrame = performance.now();
 
   /* =========================
@@ -49,13 +53,14 @@
   const sePoyo = new Audio(ASSETS.poyoSE);
   const seBaby = new Audio(ASSETS.babySE);
   const seCoin = new Audio(ASSETS.coinSE);
+  const seTabidati = new Audio(ASSETS.tabidatiSE);
 
-  const playSE = (a) => {
+  function playSE(a) {
     try {
       a.currentTime = 0;
       a.play();
     } catch {}
-  };
+  }
 
   /* =========================
    * UTILS
@@ -66,21 +71,19 @@
   function fieldRect() {
     return field.getBoundingClientRect();
   }
-
   function groundY() {
     const fr = fieldRect();
     const gl = document.getElementById("groundLine").getBoundingClientRect();
     return gl.top - fr.top;
   }
-
-  function updateHUD() {
+  function updateHud() {
     coinValueEl.textContent = coins;
   }
 
   /* =========================
-   * SPARK（虹）
+   * SPARK（虹対応）
    * ========================= */
-  function spawnSparks(x, y, count = 10, spread = 80, rainbow = false) {
+  function spawnSparks(x, y, count = 8, spread = 70, rainbow = false) {
     for (let i = 0; i < count; i++) {
       const s = document.createElement("div");
       s.className = "spark show";
@@ -111,10 +114,11 @@
       this.x = x;
       this.y = yStart;
       this.yFloor = yFloor;
-      // ★生成時にピョン（上向き初速）
-      this.vy = -(flashy ? 520 : 420);
 
-      this.gravity = 2400;
+      this.vx = (Math.random() * 2 - 1) * (20 + tier * 6);
+      this.vy = 80 + Math.random() * 260;
+      this.gravity = 2200;
+      this.bounce = 0.28 + Math.random() * 0.1;
 
       this.el = document.createElement("img");
       this.el.className = "coin";
@@ -130,7 +134,7 @@
 
     collect() {
       coins += this.value;
-      updateHUD();
+      updateHud();
       playSE(seCoin);
       this.el.remove();
 
@@ -140,10 +144,17 @@
 
     update(dt) {
       this.vy += this.gravity * dt;
+      this.x += this.vx * dt;
       this.y += this.vy * dt;
+
       if (this.y >= this.yFloor) {
         this.y = this.yFloor;
-        this.vy = 0;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
       }
       this.render();
     }
@@ -154,22 +165,71 @@
     }
   }
 
-  function spawnCoinAtBunny(bunny) {
-    let tier = 1;
-    let value = 1;
+  function coinValueFromTier(t) {
+    if (t === 4) return 100;
+    if (t === 3) return 10;
+    if (t === 2) return 5;
+    return 1;
+  }
 
-    if (!bunny.isBaby && Math.random() < 0.2) {
-      tier = 2;
-      value = 5;
-    }
+  function gaugeToTier(g) {
+    return clamp(Math.ceil(g * 4), 1, 4);
+  }
+
+  /* =========================
+   * ★大量レイン版
+   * ========================= */
+  function spawnCoinsByGauge(bunny, gauge01) {
+    const maxTier = gaugeToTier(gauge01);
+
+    // ★大量！
+    const countByTier = [0, 8, 14, 22, 36];
+    const count = countByTier[maxTier];
 
     const fr = fieldRect();
-    const yFloor = groundY();
+    const gY = groundY();
     const r = bunny.wrap.getBoundingClientRect();
-    const x = r.left - fr.left + r.width / 2;
+    const baseX = (r.left - fr.left) + r.width / 2;
 
-    const c = new Coin(x, yFloor - 140, yFloor - 2, tier, value);
-    coinsOnField.push(c);
+    const spreadX = 180 + maxTier * 40;
+    const spawnAbove = 300 + maxTier * 60;
+
+    const weights = {
+      1: [0, 1],
+      2: [0, 1, 2],
+      3: [0, 1, 2, 3],
+      4: [0, 1, 2, 3, 5],
+    };
+
+    function pickTier(maxT) {
+      const w = weights[maxT];
+      let sum = 0;
+      for (let t = 1; t <= maxT; t++) sum += w[t];
+      let r = Math.random() * sum;
+      for (let t = 1; t <= maxT; t++) {
+        r -= w[t];
+        if (r <= 0) return t;
+      }
+      return maxT;
+    }
+
+    for (let i = 0; i < count; i++) {
+      const delay = i * (12 + Math.random() * 18);
+      setTimeout(() => {
+        const tier = pickTier(maxTier);
+        const value = coinValueFromTier(tier);
+
+        const x = baseX + (Math.random() * 2 - 1) * spreadX;
+        const startY = gY - spawnAbove - Math.random() * 120;
+
+        const c = new Coin(x, startY, gY - 2, tier, value);
+        coinsOnField.push(c);
+
+        if (tier >= 3 && Math.random() < 0.3) {
+          spawnSparks(x, gY - 40, 3, 30, false);
+        }
+      }, delay);
+    }
   }
 
   /* =========================
@@ -183,8 +243,15 @@
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
 
+      this.heart = document.createElement("img");
+      this.heart.className = "bunnyHeart";
+      this.heart.src = ASSETS.hart;
+
       this.el = document.createElement("img");
       this.el.className = "bunny";
+      this.el.src = this.isBaby ? ASSETS.babyBunny : ASSETS.bunny;
+
+      this.wrap.appendChild(this.heart);
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
@@ -193,116 +260,65 @@
 
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
-      this.vx = 0;
 
-      this.syncSprite();
+      this.gauge = 0;
+      this.gaugePeriod = 8 + Math.random() * 8;
+      this.charged = false;
 
-      this.wrap.addEventListener("pointerdown", () => {
-        playSE(this.isBaby ? seBaby : sePoyo);
-        spawnCoinAtBunny(this);
-      });
+      this.wrap.addEventListener("pointerdown", () => this.tryClickDrop());
     }
 
-    syncSprite() {
-      this.el.src = this.isBaby ? ASSETS.babyBunny : ASSETS.bunny;
-      this.wrap.classList.toggle("baby", this.isBaby);
-    }
-
-    updateEvolve() {
-      if (!this.isBaby) return;
-      if (Date.now() - this.bornAt >= BABY_DURATION_MS) {
-        this.isBaby = false;
-        this.syncSprite();
-
-        const fr = fieldRect();
-        const r = this.wrap.getBoundingClientRect();
-        spawnSparks(
-          r.left - fr.left + r.width / 2,
-          r.top - fr.top + r.height / 2,
-          EVOLVE_SPARK_COUNT,
-          90,
-          true
-        );
-
-        this.vx = 0;
+    updateGauge(dt) {
+      if (this.isBaby) {
+        this.gauge = 0;
+        this.charged = false;
+        this.heart.classList.remove("show");
+        return;
       }
+
+      if (!this.charged) {
+        this.gauge += dt / this.gaugePeriod;
+        if (this.gauge >= 1) {
+          this.gauge = 1;
+          this.charged = true;
+        }
+      }
+
+      if (this.charged) this.heart.classList.add("show");
+      else this.heart.classList.remove("show");
     }
 
-    // ★baby行列：大人 or 先に生まれたbaby をリーダーにする（最寄り）
-findLeaderForBaby() {
-  let best = null;
-  let bestD = Infinity;
-
-  for (const b of bunnies) {
-    if (b === this) continue;
-
-    // babyは「大人」か「自分より先に生まれたbaby」を追う
-    const canLead =
-      (!b.isBaby) || (b.isBaby && (b.bornAt < this.bornAt));
-
-    if (!canLead) continue;
-
-    const d = Math.abs(b.x - this.x);
-    if (d < bestD) {
-      bestD = d;
-      best = b;
-    }
-  }
-  return best;
-}
-
-
-    update(dt) {
-      this.updateEvolve();
-
-      const fr = fieldRect();
-      const bunnySize =
-        parseFloat(
-          getComputedStyle(document.documentElement).getPropertyValue("--bunnySize")
-        ) || 140;
-
-      const minX = 0;
-      const maxX = Math.max(0, fr.width - bunnySize);
+    tryClickDrop() {
+      playSE(this.isBaby ? seBaby : sePoyo);
 
       if (this.isBaby) {
-        const leader = this.findLeaderForBaby();
-
-        if (leader) {
-          const desiredX = leader.x - leader.dir * BABY_FOLLOW_GAP;
-          const dx = desiredX - this.x;
-
-          const targetV = clamp(
-            dx * BABY_FOLLOW_FORCE,
-            -BABY_FOLLOW_MAX,
-            BABY_FOLLOW_MAX
-          );
-
-          this.vx = clamp(
-            targetV,
-            -this.baseSpeed * 2,
-            this.baseSpeed * 2
-          );
-
-          this.x += this.vx * dt;
-
-          if (Math.abs(this.vx) > 5) this.dir = this.vx >= 0 ? 1 : -1;
-          else this.dir = leader.dir;
-        } else {
-          this.x += this.dir * this.baseSpeed * BABY_SPEED_MUL * dt;
-        }
-      } else {
-        this.x += this.dir * this.baseSpeed * dt;
+        const r = this.wrap.getBoundingClientRect();
+        const fr = fieldRect();
+        const x = r.left - fr.left + r.width / 2;
+        const gY = groundY();
+        const c = new Coin(x, gY - 160, gY - 2, 1, 1);
+        coinsOnField.push(c);
+        return;
       }
 
-      // 端で折り返す
-      if (this.x <= minX) {
-        this.x = minX;
-        this.dir = 1;
-      }
-      if (this.x >= maxX) {
-        this.x = maxX;
-        this.dir = -1;
-      }
+      const g = this.gauge;
+      spawnCoinsByGauge(this, g);
+
+      this.gauge = 0;
+      this.charged = false;
+      this.gaugePeriod = 8 + Math.random() * 8;
+      this.heart.classList.remove("show");
+    }
+
+    update(dt) {
+      this.updateGauge(dt);
+
+      this.x += this.dir * this.baseSpeed * (this.isBaby ? BABY_SPEED_MUL : 1) * dt;
+
+      const fr = fieldRect();
+      const bunnySize = 140;
+      if (this.x <= 0) this.dir = 1;
+      if (this.x >= fr.width - bunnySize) this.dir = -1;
 
       this.wrap.classList.toggle("flip", this.dir < 0);
       this.wrap.style.left = `${this.x}px`;
@@ -311,7 +327,7 @@ findLeaderForBaby() {
   }
 
   /* =========================
-   * LOOP
+   * LOOP / INIT
    * ========================= */
   function tick(ts) {
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
@@ -323,25 +339,12 @@ findLeaderForBaby() {
     requestAnimationFrame(tick);
   }
 
-  /* =========================
-   * UI
-   * ========================= */
-  shopBtn.onclick = () => {
-    if (coins < 10) return;
-    coins -= 10;
-    updateHUD();
-    bunnies.push(new Bunny(Date.now()));
-  };
-
-  /* =========================
-   * START
-   * ========================= */
   function init() {
     bunnies.push(
       new Bunny(Date.now() - BABY_DURATION_MS - 1000),
       new Bunny(Date.now() - BABY_DURATION_MS - 2000)
     );
-    updateHUD();
+    updateHud();
     requestAnimationFrame(tick);
   }
 
