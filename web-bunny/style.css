@@ -468,4 +468,30 @@ html,body{
 .titleBadge.on{
   background:rgba(255, 215, 120, 0.55);
 }
+/* ===== 称号：進捗バー ===== */
+.titleProgress{
+  margin: 6px 0 10px;
+}
+
+.titleProgressBar{
+  height: 10px;
+  border-radius: 999px;
+  background: #eee;
+  overflow: hidden;
+}
+
+.titleProgressFill{
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffd36a, #ffb703);
+  transition: width .4s ease;
+}
+
+.titleProgressText{
+  margin-top: 4px;
+  font-size: 11px;
+  opacity: .8;
+  text-align: right;
+}
 
