@@ -3,7 +3,7 @@
   "short_name": "Bunny牧場",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#fff4f8",
+  "background_color": "#fff7fb",
   "theme_color": "#ffd6e7",
   "icons": [
     { "src": "./assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
