@@ -339,7 +339,7 @@
     d.style.left = `${clamp(x, 0, fr.width)}px`;
     d.style.top  = `${clamp(y, 0, fr.height)}px`;
     coinLayer.appendChild(d);
-    setTimeout(() => d.remove(), 1200);
+    setTimeout(() => d.remove(), 2200;
   }
 
   /* ===== Candy ===== */
