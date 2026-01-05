@@ -360,12 +360,26 @@ button:disabled{ opacity:.55; cursor:not-allowed; }
   opacity:.9;
 }
 
-.saku.left{
-  left:0;
+/* ===== 桜の柵 ===== */
+.saku-fence{
+  position: fixed;
+  top: 0;
+  width: 48px;                 /* ★細め */
+  height: 100vh;
+  pointer-events: none;
+  z-index: 4;
+  background-image: url("./assets/saku.png");
+  background-repeat: repeat-y; /* ★縦に並べる */
+  background-size: 48px auto;  /* ★小さく */
+  opacity: 0.9;
 }
 
-.saku.right{
-  right:0;
-  transform:scaleX(-1);
+.saku-fence.left{
+  left: 0;
+}
+
+.saku-fence.right{
+  right: 0;
+  transform: scaleX(-1);       /* 左右反転で統一感 */
 }
 
