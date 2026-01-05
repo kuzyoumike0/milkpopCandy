@@ -114,7 +114,7 @@
     return Math.floor(base * Math.pow(growth, extra));
   }
 
-  // 放置判定（最後のクリックから）で coin1〜4 の“ベース”
+  // ベースtier（クリック間隔の放置時間で決める）
   function coinTierFromIdleSeconds(idleSec) {
     if (idleSec >= 90) return 4;
     if (idleSec >= 45) return 3;
@@ -122,18 +122,14 @@
     return 1;
   }
 
-  // ★満タン時のレア確率UP（coin3/coin4に寄せる）
+  // 満タン時のレア確率UP（coin3/coin4に寄せる）
   function applyRareBoost(baseTier) {
-    // baseTierから“上げる”抽選（最大4）
-    // 体感：満タン時は coin3〜4 がかなり出る
     const r = Math.random();
-
     let up = 0;
-    if (r < 0.10) up = 3;       // 10%：+3（ほぼcoin4）
+    if (r < 0.10) up = 3;       // 10%：+3
     else if (r < 0.35) up = 2;  // 25%：+2
     else if (r < 0.75) up = 1;  // 40%：+1
     else up = 0;               // 25%：据え置き
-
     return clamp(baseTier + up, 1, 4);
   }
 
@@ -154,7 +150,7 @@
     return groundLine.top - fr.top;
   }
 
-  // ゲージ満タンまで：2.2〜5.0秒（個体ごとに変える）
+  // ゲージ満タンまで：2.2〜5.0秒（内部だけ）
   function randomGaugeSeconds() {
     return 2.2 + Math.random() * 2.8;
   }
@@ -166,7 +162,43 @@
   }
 
   // -----------------------
-  // Bunny / Coin classes
+  // Sparkle (派手演出)
+  // -----------------------
+  function spawnSparks(x, y) {
+    // x,y: field内座標（px）
+    const fr = fieldRect();
+
+    for (let i = 0; i < 8; i++) {
+      const s = document.createElement("div");
+      s.className = "spark show";
+
+      // ランダム方向へ飛ぶ
+      const dx = (Math.random() * 2 - 1) * 70;
+      const dy = (Math.random() * 2 - 1) * 70 - 30;
+
+      s.style.left = `${clamp(x, 0, fr.width)}px`;
+      s.style.top = `${clamp(y, 0, fr.height)}px`;
+      s.style.setProperty("--dx", `${dx}px`);
+      s.style.setProperty("--dy", `${dy}px`);
+
+      // 色は指定しないルールだけど、ここはCSS未指定なので
+      // 背景色を“ランダム明度の白系”にする（最小限）
+      const a = 0.75 + Math.random() * 0.25;
+      s.style.background = `rgba(255,255,255,${a})`;
+
+      // サイズ微差
+      const sz = 6 + Math.random() * 10;
+      s.style.width = `${sz}px`;
+      s.style.height = `${sz}px`;
+
+      coinLayer.appendChild(s);
+
+      setTimeout(() => s.remove(), 700);
+    }
+  }
+
+  // -----------------------
+  // Bunny / Coin
   // -----------------------
   let bunnyIdSeq = 1;
 
@@ -177,21 +209,19 @@
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
 
-      // gauge
+      // ダミー（ゲージは非表示CSSだが、構造は残しておく）
       this.gaugeWrap = document.createElement("div");
       this.gaugeWrap.className = "bunnyGauge";
       this.gaugeFill = document.createElement("div");
       this.gaugeFill.className = "bunnyGaugeFill";
       this.gaugeWrap.appendChild(this.gaugeFill);
 
-      // heart
       this.heart = document.createElement("img");
       this.heart.className = "bunnyHeart";
       this.heart.src = ASSETS.hart;
       this.heart.alt = "heart";
       this.heart.draggable = false;
 
-      // bunny
       this.el = document.createElement("img");
       this.el.className = "bunny walk";
       this.el.src = ASSETS.bunny;
@@ -207,7 +237,6 @@
       this.y = 0;
       this.homeX = 0;
 
-      // walk individuality
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 65;
       this.roamRange = 90 + Math.random() * 260;
@@ -215,15 +244,15 @@
       this.pauseChancePerSec = 0.02 + Math.random() * 0.12;
       this.pauseLeft = 0;
 
-      // gauge (fills while idle, NO auto drop)
+      // 充電（放置で貯まる、満タンで止まる、落とさない）
       this.gauge = Math.random() * 0.25;
       this.gaugePeriod = randomGaugeSeconds();
       this.charged = false;
 
-      // idle time for tier base
+      // tier基準用（最後にクリックした時刻）
       this.lastClickAt = Date.now();
 
-      // click cooldown (1s/匹)
+      // click cooldown
       this.lastClickSpawnAt = 0;
 
       this.lastHopAt = 0;
@@ -235,7 +264,6 @@
         this.tryClickDrop();
       }, { capture: true });
 
-      this.renderGauge();
       this.updateChargeUI();
     }
 
@@ -253,7 +281,6 @@
 
       this.homeX = clamp(x, minX, maxX);
       this.y = y;
-
       if (this.x === 0 && this.y === 0) this.x = this.homeX;
     }
 
@@ -267,12 +294,8 @@
       this.el.classList.add("hop");
     }
 
-    showHeartPop() {
-      // readyを外してからポップ
-      this.heart.classList.remove("ready");
-      this.heart.classList.remove("show");
-      void this.heart.offsetWidth;
-      this.heart.classList.add("show");
+    idleSeconds() {
+      return Math.max(0, (Date.now() - this.lastClickAt) / 1000);
     }
 
     updateChargeUI() {
@@ -280,58 +303,50 @@
       else this.heart.classList.remove("ready");
     }
 
-    renderGauge() {
-      const p = clamp(this.gauge, 0, 1);
-      this.gaugeFill.style.width = `${Math.round(p * 100)}%`;
+    showHeartPop() {
+      this.heart.classList.remove("ready");
+      this.heart.classList.remove("show");
+      void this.heart.offsetWidth;
+      this.heart.classList.add("show");
     }
 
-    idleSeconds() {
-      return Math.max(0, (Date.now() - this.lastClickAt) / 1000);
-    }
-
-    // ★放置でゲージだけ貯まる（満タンで止まる）
     updateGauge(dt) {
       if (this.charged) return;
 
       this.gauge += dt / this.gaugePeriod;
-
       if (this.gauge >= 1) {
         this.gauge = 1;
         this.charged = true;
         this.updateChargeUI();
       }
-      this.renderGauge();
     }
 
-    // ★クリックでコイン（満タンならレアUPして消費）
     tryClickDrop() {
       const t = performance.now();
       if (t - this.lastClickSpawnAt < 1000) return;
-
       this.lastClickSpawnAt = t;
 
-      // クリックしたら「放置タイマー」は更新（従来仕様）
+      // クリックしたら放置タイマー更新（tier計算用）
       this.lastClickAt = Date.now();
 
       playSE(sePoyo);
 
       const wasCharged = this.charged;
 
-      // 満タンなら：消費してゲージリセット
+      // 満タンなら消費して派手演出
       if (wasCharged) {
         this.charged = false;
         this.gauge = 0;
         this.gaugePeriod = randomGaugeSeconds();
-        this.renderGauge();
         this.showHeartPop();
         this.updateChargeUI();
       }
 
-      spawnCoinAtBunny(this, { rareBoost: wasCharged });
+      spawnCoinAtBunny(this, { rareBoost: wasCharged, flashy: wasCharged });
     }
 
     update(dt) {
-      // 放置で貯まる（自動ドロップしない）
+      // 放置で貯まる（落とさない）
       this.updateGauge(dt);
 
       // crowd adjust
@@ -381,10 +396,11 @@
   }
 
   class Coin {
-    constructor(x, yStart, yFloor, tier, value) {
+    constructor(x, yStart, yFloor, tier, value, flashy) {
       this.tier = tier;
       this.value = value;
       this.collected = false;
+      this.flashy = !!flashy;
 
       this.el = document.createElement("img");
       this.el.className = "coin";
@@ -396,11 +412,15 @@
       this.y = yStart;
       this.yFloor = yFloor;
 
-      this.vx = (Math.random() * 2 - 1) * 10;
+      // ★派手時：回転＆跳ね強め
+      this.spin = this.flashy ? (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 10) : 0;
+      this.angle = 0;
+
+      this.vx = (Math.random() * 2 - 1) * (this.flashy ? 22 : 10);
       this.vy = 0;
-      this.gravity = 2100;
-      this.bounce = 0.38;
-      this.friction = 0.86;
+      this.gravity = this.flashy ? 2400 : 2100;
+      this.bounce = this.flashy ? 0.62 : 0.38;
+      this.friction = this.flashy ? 0.90 : 0.86;
       this.resting = false;
 
       this.el.addEventListener("click", (e) => {
@@ -436,13 +456,22 @@
         this.x += this.vx * dt;
         this.y += this.vy * dt;
 
+        // 回転
+        if (this.flashy) this.angle += this.spin * dt;
+
         if (this.y >= this.yFloor) {
           this.y = this.yFloor;
 
           if (Math.abs(this.vy) > 260) {
             this.vy = -this.vy * this.bounce;
             this.vx *= this.friction;
-            this.vx += (Math.random() * 2 - 1) * 18;
+
+            // 派手時は跳ねのたびに少し散る
+            if (this.flashy) {
+              this.vx += (Math.random() * 2 - 1) * 30;
+            } else {
+              this.vx += (Math.random() * 2 - 1) * 18;
+            }
           } else {
             this.vy = 0;
             this.vx = 0;
@@ -461,15 +490,23 @@
       this.el.style.left = `${this.x - 22}px`;
       this.el.style.top = `${this.y - 22}px`;
 
-      if (!this.resting && this.y > this.yFloor - 16) this.el.style.transform = `scale(1.05,0.95)`;
-      else this.el.style.transform = `scale(1,1)`;
+      // 着地付近の潰れ
+      const squash = (!this.resting && this.y > this.yFloor - 16);
+
+      if (this.flashy) {
+        const rot = this.angle * 180 / Math.PI;
+        const scale = squash ? "scale(1.18,0.88)" : "scale(1.08,1.08)";
+        this.el.style.transform = `${scale} rotate(${rot}deg)`;
+      } else {
+        this.el.style.transform = squash ? `scale(1.05,0.95)` : `scale(1,1)`;
+      }
     }
   }
 
   function spawnCoinAtBunny(bunny, opts) {
     const rareBoost = !!opts?.rareBoost;
+    const flashy = !!opts?.flashy;
 
-    // ベースtierは「最後のクリックからの放置時間」
     const baseTier = coinTierFromIdleSeconds(bunny.idleSeconds());
     const tier = rareBoost ? applyRareBoost(baseTier) : baseTier;
     const value = coinValueFromTier(tier);
@@ -481,10 +518,13 @@
     const bXCenter = (bRect.left - fr.left) + bRect.width * 0.5;
 
     const floorY = gY - 2;
-    const startY = floorY - 140 - Math.random() * 70;
+    const startY = floorY - (flashy ? 200 : 140) - Math.random() * (flashy ? 120 : 70);
     const x = bXCenter + (Math.random() * 2 - 1) * 10;
 
-    const c = new Coin(x, startY, floorY, tier, value);
+    // 満タンクリック時だけ：キラキラ
+    if (flashy) spawnSparks(x, startY + 40);
+
+    const c = new Coin(x, startY, floorY, tier, value, flashy);
     coinsOnField.push(c);
   }
 
