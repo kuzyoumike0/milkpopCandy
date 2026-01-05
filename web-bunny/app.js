@@ -1,11 +1,11 @@
 // ===============================
-// 基本状態
+// 状態
 // ===============================
 let coins = 0;
 let lastClickTime = 0;
 
 // ===============================
-// UI更新
+// コイン表示更新
 // ===============================
 function updateCoinUI() {
   const counter = document.getElementById("coin-counter");
@@ -19,12 +19,15 @@ const poyoSE = new Audio("poyo.mp3");
 poyoSE.volume = 0.6;
 
 function playPoyoSE() {
-  poyoSE.currentTime = 0;
-  poyoSE.play();
+  try {
+    poyoSE.currentTime = 0;
+    const p = poyoSE.play();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  } catch (e) {}
 }
 
 // ===============================
-// コイン生成制限（1秒1回）
+// 1秒1回制限
 // ===============================
 function canDropCoin() {
   const now = Date.now();
@@ -42,21 +45,26 @@ function dropCoinFromRabbit(rabbitEl) {
   const coin = document.createElement("div");
   coin.className = "coin";
 
-  // 🐰 足元に配置
-  const x = rect.left + rect.width / 2 - 10;
-  const y = rect.bottom - 10;
+  // rectは画面基準 → fixed
+  coin.style.position = "fixed";
+  coin.style.zIndex = "9999";
+
+  // 🐰 足元
+  const x = rect.left + rect.width / 2;
+  const y = rect.bottom - 6;
 
   coin.style.left = `${x}px`;
   coin.style.top = `${y}px`;
+  coin.style.transform = "translate(-50%, -50%)";
 
   document.body.appendChild(coin);
 
-  // 🪙 軽いバウンド
+  // 💫 ぽよん
   coin.animate(
     [
-      { transform: "translateY(0)" },
-      { transform: "translateY(-8px)" },
-      { transform: "translateY(0)" }
+      { transform: "translate(-50%, -50%) translateY(0)" },
+      { transform: "translate(-50%, -50%) translateY(-10px)" },
+      { transform: "translate(-50%, -50%) translateY(0)" }
     ],
     { duration: 300, easing: "ease-out" }
   );
@@ -68,7 +76,7 @@ function dropCoinFromRabbit(rabbitEl) {
     updateCoinUI();
   });
 
-  // 放置しすぎたら消える
+  // ⏳ 放置消滅
   setTimeout(() => {
     if (coin.isConnected) coin.remove();
   }, 8000);
@@ -80,14 +88,14 @@ function dropCoinFromRabbit(rabbitEl) {
 window.addEventListener("DOMContentLoaded", () => {
   updateCoinUI();
 
-  const rabbits = document.querySelectorAll(".rabbit");
+  // イベント委譲（画像内クリックでもOK）
+  document.addEventListener("click", (e) => {
+    const rabbit = e.target.closest(".rabbit");
+    if (!rabbit) return;
 
-  rabbits.forEach(rabbit => {
-    rabbit.addEventListener("click", () => {
-      if (!canDropCoin()) return;
+    if (!canDropCoin()) return;
 
-      playPoyoSE();
-      dropCoinFromRabbit(rabbit);
-    });
+    playPoyoSE();
+    dropCoinFromRabbit(rabbit);
   });
 });
