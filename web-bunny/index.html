@@ -19,6 +19,17 @@
 
       <div id="rightHud">
         <button id="candyBtn">🍬 キャンディ</button>
+
+        <!-- 旅立ち（ホバーで詳細） -->
+        <span class="tipWrap">
+          <button id="departBtn">🐰 旅立ち</button>
+          <span id="departTip" class="tooltip" role="tooltip">
+            10🪙 消費で うさぎを1匹送り出します。<br/>
+            ※最後の1匹は旅立ちできません。
+          </span>
+        </span>
+
+        <button id="rankBtn">🏆 実績</button>
         <button id="shopBtn">ショップ</button>
         <button id="resetBtn">リセット</button>
       </div>
@@ -26,7 +37,6 @@
 
     <main id="field" aria-label="牧場">
       <div id="decorBack"></div>
-
       <div id="bunnyLayer"></div>
       <div id="coinLayer"></div>
 
@@ -44,6 +54,8 @@
     </main>
 
     <div id="modalBackdrop" class="hidden"></div>
+
+    <!-- Shop（旅立ちはここから削除） -->
     <div id="shopModal" class="hidden" role="dialog" aria-modal="true" aria-label="ショップ">
       <div class="modalHeader">
         <div class="modalTitle">ショップ</div>
@@ -59,29 +71,38 @@
             <div class="shopPrice">価格：<span id="bunnyPrice">0</span> 🪙</div>
             <button id="buyBunnyBtn" class="primary">購入</button>
           </div>
-
-          <div class="shopHint">
-            満タンクリック（ハート表示）でレア確率UP＋派手落下になります。
-          </div>
         </div>
+      </div>
+    </div>
 
-        <div class="shopCard" style="margin-top:12px;">
-          <div class="shopItemTitle">旅立ち</div>
-          <div class="shopItemDesc">うさぎを1匹送り出します（削除）。</div>
+    <!-- Rank/Achievements -->
+    <div id="rankModal" class="hidden" role="dialog" aria-modal="true" aria-label="実績とランキング">
+      <div class="modalHeader">
+        <div class="modalTitle">🏆 実績 / ランキング</div>
+        <button id="closeRankBtn" class="iconBtn" aria-label="閉じる">✕</button>
+      </div>
 
-          <div class="shopRow">
-            <div class="shopPrice">費用：<span id="departPrice">10</span> 🪙</div>
-            <button id="departBunnyBtn">旅立ち</button>
+      <div class="modalBody">
+        <div class="rankGrid">
+          <div class="rankCard">
+            <div class="rankTitle">自己ベスト</div>
+            <div id="bestBox" class="rankList"></div>
           </div>
 
-          <div class="shopHint">
-            ※最後の1匹は旅立ちできません。
+          <div class="rankCard">
+            <div class="rankTitle">日別（直近）</div>
+            <div id="dailyBox" class="rankList"></div>
+          </div>
+
+          <div class="rankCard wide">
+            <div class="rankTitle">実績</div>
+            <div id="achBox" class="achList"></div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="./app.js?v=7"></script>
+  <script src="./app.js?v=10"></script>
 </body>
 </html>
