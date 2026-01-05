@@ -1,104 +1,443 @@
-// ===============================
+// ==============================
+// セーブ
+// ==============================
+const KEY = "bunny_farm_save_v6_fix";
+
+function loadSave(){
+  try{
+    const raw = localStorage.getItem(KEY);
+    if(!raw) return { coins:0, bunnyCount:3, idleLv:0, luckLv:0 };
+    const p = JSON.parse(raw);
+    return {
+      coins: Number(p.coins)||0,
+      bunnyCount: Math.max(1, Number(p.bunnyCount)||3),
+      idleLv: Math.max(0, Math.floor(Number(p.idleLv)||0)),
+      luckLv: Math.max(0, Math.floor(Number(p.luckLv)||0))
+    };
+  }catch{
+    return { coins:0, bunnyCount:3, idleLv:0, luckLv:0 };
+  }
+}
+
+function saveData(){
+  localStorage.setItem(KEY, JSON.stringify({
+    coins: game.coins,
+    bunnyCount,
+    idleLv,
+    luckLv
+  }));
+}
+
+// ==============================
+// UI
+// ==============================
+const coinValue = document.getElementById("coinValue");
+const petBtn = document.getElementById("petBtn");
+const resetBtn = document.getElementById("resetBtn");
+
+const shopBtn = document.getElementById("shopBtn");
+const shopModal = document.getElementById("shopModal");
+const shopCloseBtn = document.getElementById("shopCloseBtn");
+
+const buyBunnyBtn = document.getElementById("buyBunnyBtn");
+const buyIdleBtn  = document.getElementById("buyIdleBtn");
+const buyLuckBtn  = document.getElementById("buyLuckBtn");
+
+const shopCoins = document.getElementById("shopCoins");
+const shopCount = document.getElementById("shopCount");
+const shopBunnyPrice = document.getElementById("shopBunnyPrice");
+
+const shopIdleNow = document.getElementById("shopIdleNow");
+const shopIdleLv = document.getElementById("shopIdleLv");
+const shopIdlePrice = document.getElementById("shopIdlePrice");
+
+const shopLuckNow = document.getElementById("shopLuckNow");
+const shopLuckLv = document.getElementById("shopLuckLv");
+const shopLuckPrice = document.getElementById("shopLuckPrice");
+
+const field = document.getElementById("field");
+const bunnyLayer = document.getElementById("bunnyLayer");
+const coinLayer = document.getElementById("coinLayer");
+const hud = document.getElementById("hud");
+
+// ==============================
 // 状態
-// ===============================
-let coins = 0;
-let lastClickTime = 0;
+// ==============================
+const save = loadSave();
+const game = { coins: save.coins };
+let bunnyCount = save.bunnyCount;
+let idleLv = save.idleLv;
+let luckLv = save.luckLv;
 
-// ===============================
-// コイン表示更新（HUD対応）
-// ===============================
-function updateCoinUI() {
-  const v1 = document.getElementById("coinValue");
-  const v2 = document.getElementById("coin-counter");
+// クリックドロップ制限
+let lastClickDropAt = 0;
 
-  if (v1) v1.textContent = coins;
-  if (v2) v2.textContent = coins;
+// ==============================
+// SE（iOS対策：最初のユーザー操作後に解禁）
+// ==============================
+const SE = {
+  poyo:   "./assets/se_poyo.mp3",
+  drop:   "./assets/se_drop.mp3",
+  collect:"./assets/se_collect.mp3",
+};
+
+let seUnlocked = false;
+function unlockSEOnce(){
+  if(seUnlocked) return;
+  seUnlocked = true;
+  // iOS対策：最初の操作で一度だけ play を通せる状態にする
+  try{
+    const a = new Audio(SE.collect);
+    a.volume = 0;
+    a.play().then(()=>{ a.pause(); }).catch(()=>{});
+  }catch{}
+}
+document.addEventListener("pointerdown", unlockSEOnce, { once:true });
+
+function playSE(key, volume = 0.8){
+  if(!seUnlocked) return;              // 自動放置では鳴らない（iOS安全）
+  const src = SE[key];
+  if(!src) return;
+  try{
+    const a = new Audio(src);
+    a.volume = volume;
+    a.currentTime = 0;
+    a.play().catch(()=>{});
+  }catch{}
 }
 
-// ===============================
-// 効果音（assets配下）
-// ===============================
-const poyoSE = new Audio("./assets/poyo.mp3");
-poyoSE.volume = 0.6;
-
-function playPoyoSE() {
-  try {
-    poyoSE.currentTime = 0;
-    const p = poyoSE.play();
-    if (p && p.catch) p.catch(() => {});
-  } catch (e) {}
+// ==============================
+// 強化効果
+// ==============================
+function getIdleIntervalSec(){
+  return Math.max(5, 20 - idleLv * 2);
+}
+function getLuckMultiplier(){
+  return Math.min(2.0, 1 + luckLv * 0.12);
+}
+function hasAura(){
+  return idleLv > 0 || luckLv > 0;
 }
 
-// ===============================
-// 1秒1回制限
-// ===============================
-function canDropCoin() {
+// ==============================
+// 床（コイン位置）
+// ==============================
+const COIN_SIZE = 64;
+// ★ここを増やすと「床が上がる」＝コインが上に来る
+const FLOOR_MARGIN = 28;
+
+function getFloorY(){
+  const frect = field.getBoundingClientRect();
+  return Math.max(0, frect.height - COIN_SIZE - FLOOR_MARGIN);
+}
+
+// ==============================
+// レア定義
+// ==============================
+const TIERS = [
+  { emoji:"🪙", value:1,  min:0,   className:"" },
+  { emoji:"🥈", value:3,  min:60,  className:"silver" },
+  { emoji:"🥇", value:8,  min:180, className:"gold" },
+  { emoji:"🌈", value:20, min:420, className:"rainbow" }
+];
+
+function getTier(idleSec){
+  const boosted = idleSec * getLuckMultiplier();
+  for(let i=TIERS.length-1;i>=0;i--){
+    if(boosted >= TIERS[i].min) return TIERS[i];
+  }
+  return TIERS[0];
+}
+
+// ==============================
+// HUD
+// ==============================
+function updateHUD(){
+  coinValue.textContent = String(game.coins);
+  saveData();
+}
+
+// ==============================
+// うさぎ
+// ==============================
+const bunnies = [];
+const BUNNY_W = 160;
+
+function createBunny(i){
+  const el = document.createElement("div");
+  el.className = "bunny";
+  if(hasAura()) el.classList.add("aura");
+
+  const img = document.createElement("img");
+  img.src = "./assets/bunny.png";
+  img.draggable = false;
+
+  el.appendChild(img);
+  bunnyLayer.appendChild(el);
+
   const now = Date.now();
-  if (now - lastClickTime < 1000) return false;
-  lastClickTime = now;
-  return true;
-}
+  const b = {
+    el,
+    x: 20 + i * 120,
+    vx: 30 + Math.random()*30,
+    dir: Math.random()<0.5?1:-1,
+    t: Math.random()*10,
+    lastInteract: now,
+    lastDrop: now
+  };
 
-// ===============================
-// コイン生成（ウサギの足元）
-// ===============================
-function dropCoinFromRabbit(rabbitEl) {
-  const rect = rabbitEl.getBoundingClientRect();
-
-  const coin = document.createElement("div");
-  coin.className = "coin";
-
-  // rectは画面基準 → fixed
-  coin.style.position = "fixed";
-  coin.style.zIndex = "9999";
-
-  // 🐰 足元
-  const x = rect.left + rect.width / 2;
-  const y = rect.bottom - 6;
-
-  coin.style.left = `${x}px`;
-  coin.style.top = `${y}px`;
-  coin.style.transform = "translate(-50%, -50%)";
-
-  document.body.appendChild(coin);
-
-  // ぽよんバウンド
-  coin.animate(
-    [
-      { transform: "translate(-50%, -50%) translateY(0)" },
-      { transform: "translate(-50%, -50%) translateY(-10px)" },
-      { transform: "translate(-50%, -50%) translateY(0)" }
-    ],
-    { duration: 300, easing: "ease-out" }
-  );
-
-  // ホバーで回収
-  coin.addEventListener("mouseenter", () => {
-    coin.remove();
-    coins++;
-    updateCoinUI();
+  // ★うさぎクリックでコインを落とす（SE：ぽよっ）
+  el.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    e.stopPropagation(); // フィールドクリック処理に流れないように
+    b.lastInteract = Date.now();
+    dropCoinFromBunny(b, /*userGesture*/true);
+    playSE("poyo", 0.9);
   });
 
-  // 放置消滅
-  setTimeout(() => {
-    if (coin.isConnected) coin.remove();
-  }, 8000);
+  return b;
 }
 
-// ===============================
-// 初期化
-// ===============================
-window.addEventListener("DOMContentLoaded", () => {
-  updateCoinUI();
+function initBunnies(){
+  bunnyLayer.innerHTML = "";
+  bunnies.length = 0;
+  for(let i=0;i<bunnyCount;i++){
+    bunnies.push(createBunny(i));
+  }
+}
 
-  // イベント委譲（画像内クリックも拾う）
-  document.addEventListener("click", (e) => {
-    const rabbit = e.target.closest(".rabbit");
-    if (!rabbit) return;
+// ==============================
+// コイン生成（床に落とす）
+// ==============================
+function createCoin(startX, startY, tier, userGesture){
+  const frect = field.getBoundingClientRect();
+  const hrect = hud.getBoundingClientRect();
 
-    if (!canDropCoin()) return;
+  // フィールド内に収める
+  const x = Math.max(0, Math.min(frect.width - COIN_SIZE, startX));
+  const y = Math.max(0, Math.min(frect.height - COIN_SIZE, startY));
 
-    playPoyoSE();
-    dropCoinFromRabbit(rabbit);
+  const floorY = getFloorY();
+  const drop = Math.max(0, floorY - y);
+
+  const c = document.createElement("div");
+  c.className = `coin ${tier.className}`;
+  c.textContent = tier.emoji;
+  c.dataset.value = String(tier.value);
+
+  c.style.left = `${x}px`;
+  c.style.top  = `${y}px`;
+  c.style.setProperty("--drop", `${drop}px`);
+  c.style.setProperty("--fall", `${500 + Math.random()*300}ms`);
+
+  // 「落ちた音」はユーザー操作時だけ鳴らす（iOS対策）
+  if(userGesture) playSE("drop", 0.7);
+
+  const collect = ()=>{
+    if(c.classList.contains("collecting")) return;
+    c.classList.add("collecting");
+
+    const cx = x + COIN_SIZE/2;
+    const cy = floorY + COIN_SIZE/2;
+
+    const tx = hrect.left + 30 - frect.left;
+    const ty = hrect.top + hrect.height/2 - frect.top;
+
+    c.style.transform = `translate(${tx-cx}px, ${ty-cy}px) scale(.35)`;
+    c.style.opacity = "0.2";
+
+    // 回収音は“回収操作”なので鳴る（PCホバーもOK、iOSはタップでOK）
+    playSE("collect", 0.8);
+
+    setTimeout(()=>{
+      game.coins += Number(c.dataset.value);
+      updateHUD();
+      c.remove();
+    }, 280);
+  };
+
+  // PC：ホバー回収
+  c.addEventListener("pointerenter", ()=>{
+    if(matchMedia("(hover:hover)").matches) collect();
   });
+
+  // iPad：タップ回収
+  c.addEventListener("pointerdown", (e)=>{
+    e.preventDefault();
+    collect();
+  });
+
+  coinLayer.appendChild(c);
+  setTimeout(()=>c.remove(), 30000);
+}
+
+function dropCoinFromBunny(b, userGesture=false){
+  const frect = field.getBoundingClientRect();
+  const brect = b.el.getBoundingClientRect();
+
+  const startX = (brect.left - frect.left) + 60;
+  const startY = (brect.top  - frect.top)  + 40;
+
+  const idleSec = (Date.now() - b.lastInteract)/1000;
+  const tier = getTier(idleSec);
+
+  createCoin(startX, startY, tier, userGesture);
+}
+
+function dropCoinAt(x,y, userGesture=false){
+  const tier = getTier(0);
+  createCoin(x - COIN_SIZE/2, y - COIN_SIZE/2, tier, userGesture);
+}
+
+// ==============================
+// 放置
+// ==============================
+setInterval(()=>{
+  const now = Date.now();
+  const interval = getIdleIntervalSec();
+
+  bunnies.forEach(b=>{
+    if((now - b.lastDrop)/1000 >= interval){
+      // 放置は自動なので音は鳴らさない
+      dropCoinFromBunny(b, false);
+      b.lastDrop = now;
+    }
+  });
+}, 1000);
+
+// ==============================
+// フィールドクリック（1秒に1回）
+// ==============================
+field.addEventListener("pointerdown",(e)=>{
+  if(e.target.closest("#hud")) return;
+  if(e.target.closest(".coin")) return;
+  if(e.target.closest("#shopModal")) return;
+  if(e.target.closest(".bunny")) return;
+
+  const now = Date.now();
+  if(now - lastClickDropAt < 1000) return;
+  lastClickDropAt = now;
+
+  const frect = field.getBoundingClientRect();
+  dropCoinAt(e.clientX - frect.left, e.clientY - frect.top, true);
 });
+
+// ==============================
+// 歩行
+// ==============================
+function tick(dt){
+  const w = field.clientWidth;
+  bunnies.forEach(b=>{
+    b.x += b.dir * b.vx * dt;
+    if(b.x < 0 || b.x > w - BUNNY_W) b.dir *= -1;
+    b.t += dt * 6;
+    const bob = Math.abs(Math.sin(b.t)) * 4;
+    b.el.style.transform = `translate(${b.x}px, ${-bob}px) scaleX(${b.dir})`;
+  });
+}
+
+let last = performance.now();
+function loop(now){
+  const dt = (now-last)/1000;
+  last = now;
+  tick(dt);
+  requestAnimationFrame(loop);
+}
+
+// ==============================
+// ボタン
+// ==============================
+petBtn.onclick = ()=>{
+  // 「なでる」はユーザー操作なので音OK
+  bunnies.forEach(b=>{
+    b.lastInteract = Date.now();
+    dropCoinFromBunny(b, true);
+  });
+  playSE("poyo", 0.75);
+};
+
+resetBtn.onclick = ()=>{
+  game.coins = 0;
+  updateHUD();
+};
+
+// ==============================
+// ショップ価格
+// ==============================
+function bunnyPrice(){ return 100 + Math.max(0,bunnyCount-3)*80; }
+function idlePrice(){ return 150 + idleLv*120; }
+function luckPrice(){ return 200 + luckLv*160; }
+
+// ==============================
+// ショップUI
+// ==============================
+function updateShop(){
+  shopCoins.textContent = String(game.coins);
+  shopCount.textContent = String(bunnyCount);
+  shopBunnyPrice.textContent = String(bunnyPrice());
+
+  shopIdleNow.textContent = String(getIdleIntervalSec());
+  shopIdleLv.textContent = String(idleLv);
+  shopIdlePrice.textContent = String(idlePrice());
+
+  shopLuckNow.textContent = String(getLuckMultiplier().toFixed(2));
+  shopLuckLv.textContent = String(luckLv);
+  shopLuckPrice.textContent = String(luckPrice());
+
+  buyBunnyBtn.disabled = game.coins < bunnyPrice();
+  buyIdleBtn.disabled  = game.coins < idlePrice() || getIdleIntervalSec() <= 5;
+  buyLuckBtn.disabled  = game.coins < luckPrice() || getLuckMultiplier() >= 2.0;
+}
+
+// ==============================
+// ショップ操作
+// ==============================
+shopBtn.onclick = ()=>{
+  updateShop();
+  shopModal.classList.remove("hidden");
+};
+shopCloseBtn.onclick = ()=>{
+  shopModal.classList.add("hidden");
+};
+shopModal.addEventListener("pointerdown",(e)=>{
+  if(e.target === shopModal) shopModal.classList.add("hidden");
+});
+
+buyBunnyBtn.onclick = ()=>{
+  const p = bunnyPrice();
+  if(game.coins < p) return;
+  game.coins -= p;
+  bunnyCount++;
+  initBunnies();
+  updateHUD();
+  updateShop();
+};
+
+buyIdleBtn.onclick = ()=>{
+  const p = idlePrice();
+  if(game.coins < p) return;
+  if(getIdleIntervalSec() <= 5) return;
+  game.coins -= p;
+  idleLv++;
+  bunnies.forEach(b=>b.el.classList.add("aura"));
+  updateHUD();
+  updateShop();
+};
+
+buyLuckBtn.onclick = ()=>{
+  const p = luckPrice();
+  if(game.coins < p) return;
+  if(getLuckMultiplier() >= 2.0) return;
+  game.coins -= p;
+  luckLv++;
+  bunnies.forEach(b=>b.el.classList.add("aura"));
+  updateHUD();
+  updateShop();
+};
+
+// ==============================
+// 開始
+// ==============================
+updateHUD();
+initBunnies();
+requestAnimationFrame(loop);
