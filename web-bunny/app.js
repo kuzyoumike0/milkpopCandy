@@ -13,6 +13,11 @@
     ],
   };
 
+  const COST = {
+    CANDY: 10,
+    DEPART: 10,
+  };
+
   const LS_KEYS = {
     coins: "webBunny_coins_v1",
     bunnyCount: "webBunny_bunnyCount_v1",
@@ -37,6 +42,9 @@
   const closeShopBtn = document.getElementById("closeShopBtn");
   const bunnyPriceEl = document.getElementById("bunnyPrice");
   const buyBunnyBtn = document.getElementById("buyBunnyBtn");
+
+  const departPriceEl = document.getElementById("departPrice");
+  const departBunnyBtn = document.getElementById("departBunnyBtn");
 
   /* =======================
      State
@@ -108,12 +116,14 @@
   }
 
   function bumpCoinHud() {
+    if (!coinHudEl) return;
     coinHudEl.classList.remove("bump");
     void coinHudEl.offsetWidth;
     coinHudEl.classList.add("bump");
   }
 
   function shineCoinHud() {
+    if (!coinHudEl) return;
     coinHudEl.classList.remove("shine");
     void coinHudEl.offsetWidth;
     coinHudEl.classList.add("shine");
@@ -142,7 +152,7 @@
     return clamp(baseTier + up, 1, 4);
   }
 
-  // ★コイン価値（指定）
+  // コイン価値（指定）
   function coinValueFromTier(tier) {
     if (tier === 4) return 100;
     if (tier === 3) return 10;
@@ -158,7 +168,7 @@
     return gl.top - fr.top;
   }
 
-  // ★ゲージ充電：遅くする（満タンまで 8〜16秒）
+  // ゲージ充電：遅め（満タンまで 8〜16秒）
   function randomGaugeSeconds() {
     return 8.0 + Math.random() * 8.0;
   }
@@ -217,17 +227,11 @@
       this.render();
     }
 
-    floorY() {
-      return groundY() - 2;
-    }
+    floorY() { return groundY() - 2; }
 
-    isExpired(now) {
-      return (now - this.spawnAt) >= this.ttlMs;
-    }
+    isExpired(now) { return (now - this.spawnAt) >= this.ttlMs; }
 
-    remove() {
-      this.el.remove();
-    }
+    remove() { this.el.remove(); }
 
     update(dt) {
       if (!this.resting) {
@@ -247,7 +251,6 @@
     render() {
       this.el.style.left = `${this.x - 26}px`;
       this.el.style.top = `${this.y - 26}px`;
-      // ちょい揺れ
       const t = performance.now() / 200;
       const rot = Math.sin(t) * 6;
       this.el.style.transform = `rotate(${rot}deg)`;
@@ -282,28 +285,21 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      // 位置
       this.x = 0;
       this.y = 0;
 
-      // 通常のホーム（整列結果）
       this.baseHomeX = 0;
       this.baseHomeY = 0;
-
-      // 集合時ターゲット
       this.targetHomeX = 0;
 
-      // 歩き個体差
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 65;
       this.roamRange = 90 + Math.random() * 260;
 
-      // ゲージ（内部・貯まるだけ）
       this.gauge = Math.random() * 0.25;
       this.gaugePeriod = randomGaugeSeconds();
       this.charged = false;
 
-      // tier基準用
       this.lastClickAt = Date.now();
       this.lastClickSpawnAt = 0;
 
@@ -323,9 +319,7 @@
       }
     }
 
-    idleSeconds() {
-      return (Date.now() - this.lastClickAt) / 1000;
-    }
+    idleSeconds() { return (Date.now() - this.lastClickAt) / 1000; }
 
     updateGauge(dt) {
       if (this.charged) return;
@@ -362,38 +356,27 @@
     update(dt, crowdIndex, crowdCount, candyTargetXOrNull) {
       this.updateGauge(dt);
 
-      // 集合ターゲットがあるなら、そこに寄る（個体ごとに横ズレを付ける）
       if (candyTargetXOrNull != null) {
-        const spread = 52; // うさぎ同士の間隔
+        const spread = 52;
         const centerIndex = (crowdCount - 1) / 2;
         const offset = (crowdIndex - centerIndex) * spread;
         this.targetHomeX = candyTargetXOrNull + offset;
       } else {
-        // 通常は整列ホーム
         this.targetHomeX = this.baseHomeX;
       }
 
-      // ホームをスムーズに追従（急にワープしない）
       const homeX = lerp(this.x, this.targetHomeX, 0.03);
-
-      // 歩行：ホーム周辺をちょこちょこ
       const roam = (candyTargetXOrNull != null) ? 35 : this.roamRange;
       const targetMin = homeX - roam;
       const targetMax = homeX + roam;
-
-      // スピードも集合時は少し上げる
       const spd = this.baseSpeed * (candyTargetXOrNull != null ? 1.25 : 1.0);
 
       this.x += this.dir * spd * dt;
 
-      // 範囲を越えたら折り返し
       if (this.x < targetMin) this.dir = 1;
       if (this.x > targetMax) this.dir = -1;
 
-      // 向き
       this.wrap.classList.toggle("flip", this.dir < 0);
-
-      // 描画
       this.wrap.style.left = `${this.x}px`;
       this.wrap.style.top = `${this.baseHomeY}px`;
     }
@@ -516,25 +499,104 @@
     candyArmed = on;
     candyBtn.classList.toggle("armed", on);
     hintEl.classList.toggle("hidden", !on);
+    if (on) hintEl.textContent = `🍬 フィールドをクリックすると、上からキャンディを落とします（${COST.CANDY}🪙）`;
+  }
+
+  function flashButtonText(btn, text, ms = 650) {
+    const prev = btn.textContent;
+    btn.textContent = text;
+    setTimeout(() => (btn.textContent = prev), ms);
   }
 
   candyBtn.addEventListener("click", () => {
+    // ★キャンディは10コイン必要
+    if (!candyArmed && coins < COST.CANDY) {
+      flashButtonText(candyBtn, "コイン不足…");
+      return;
+    }
     setCandyMode(!candyArmed);
   });
 
   field.addEventListener("pointerdown", (e) => {
     if (!candyArmed) return;
 
-    // キャンディ投下：クリック位置Xで落とす
+    // 念のため再チェック
+    if (coins < COST.CANDY) {
+      setCandyMode(false);
+      flashButtonText(candyBtn, "コイン不足…");
+      return;
+    }
+
+    // 支払い（落とした瞬間に消費）
+    coins -= COST.CANDY;
+    save();
+    updateHud();
+    bumpCoinHud();
+
     const fr = fieldRect();
     const x = clamp(e.clientX - fr.left, 30, fr.width - 30);
 
-    const c = new Candy(x, 10000); // ★10秒で消える
+    const c = new Candy(x, 10000); // 10秒で消える
     candies.push(c);
 
-    // モード解除
     setCandyMode(false);
   });
+
+  /* =======================
+     Shop
+  ======================= */
+  function updateShopUI() {
+    bunnyPriceEl.textContent = String(getBunnyPrice(bunnies.length));
+    if (departPriceEl) departPriceEl.textContent = String(COST.DEPART);
+  }
+
+  function openShop(open) {
+    modalBackdrop.classList.toggle("hidden", !open);
+    shopModal.classList.toggle("hidden", !open);
+    if (open) updateShopUI();
+  }
+
+  buyBunnyBtn.addEventListener("click", () => {
+    const price = getBunnyPrice(bunnies.length);
+    if (coins < price) {
+      flashButtonText(buyBunnyBtn, "コイン不足…");
+      return;
+    }
+
+    coins -= price;
+    bunnyCount = bunnies.length + 1;
+    save();
+
+    rebuildBunnies(bunnyCount);
+    updateShopUI();
+    updateHud();
+    bumpCoinHud();
+  });
+
+  departBunnyBtn.addEventListener("click", () => {
+    // 最後の1匹は残す
+    if (bunnies.length <= 1) {
+      flashButtonText(departBunnyBtn, "これ以上ムリ…");
+      return;
+    }
+    if (coins < COST.DEPART) {
+      flashButtonText(departBunnyBtn, "コイン不足…");
+      return;
+    }
+
+    coins -= COST.DEPART;
+    bunnyCount = bunnies.length - 1;
+    save();
+
+    rebuildBunnies(bunnyCount);
+    updateShopUI();
+    updateHud();
+    bumpCoinHud();
+  });
+
+  shopBtn.onclick = () => openShop(true);
+  closeShopBtn.onclick = () => openShop(false);
+  modalBackdrop.onclick = () => openShop(false);
 
   /* =======================
      Init & Loop
@@ -577,11 +639,11 @@
       }
     }
 
-    // うさぎが集まるターゲット（最新のキャンディを優先）
+    // うさぎが集まるターゲット（最新キャンディ優先）
     const targetCandy = candies.length ? candies[candies.length - 1] : null;
     const targetX = targetCandy ? targetCandy.x : null;
 
-    // うさぎ更新（集合）
+    // うさぎ更新
     for (let i = 0; i < bunnies.length; i++) {
       bunnies[i].update(dt, i, bunnies.length, targetX);
     }
@@ -592,30 +654,12 @@
     rafId = requestAnimationFrame(tick);
   }
 
-  function openShop(open) {
-    modalBackdrop.classList.toggle("hidden", !open);
-    shopModal.classList.toggle("hidden", !open);
-    bunnyPriceEl.textContent = String(getBunnyPrice(bunnies.length));
-  }
-
   function init() {
     rebuildBunnies(bunnyCount);
     updateHud();
+    updateShopUI();
 
     window.addEventListener("resize", () => layoutBunnies());
-
-    shopBtn.onclick = () => openShop(true);
-    closeShopBtn.onclick = () => openShop(false);
-    modalBackdrop.onclick = () => openShop(false);
-
-    buyBunnyBtn.onclick = () => {
-      const price = getBunnyPrice(bunnies.length);
-      if (coins < price) return;
-      coins -= price;
-      bunnyCount++;
-      save();
-      rebuildBunnies(bunnyCount);
-    };
 
     resetBtn.onclick = () => {
       if (!confirm("リセットしますか？")) return;
@@ -623,7 +667,6 @@
       bunnyCount = 2;
       save();
 
-      // 画面上のコイン/キャンディも消す
       for (const c of coinsOnField) c.el.remove();
       coinsOnField.length = 0;
 
@@ -631,6 +674,9 @@
       candies.length = 0;
 
       rebuildBunnies(bunnyCount);
+      updateHud();
+      updateShopUI();
+      setCandyMode(false);
     };
 
     setCandyMode(false);
