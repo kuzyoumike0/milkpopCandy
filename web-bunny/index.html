@@ -1,40 +1,78 @@
-<button id="candyBtn" class="hasTip">
-  🍬 キャンディ
-  <span class="tip">
-    フィールドをクリックすると、上からキャンディを落とします。<br />
-    1回：<b>10🪙</b><br />
-    ※うさぎが集まって取り合います
-  </span>
-</button>
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#ffd6e7" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./style.css" />
+  <title>Bunny牧場</title>
+</head>
 
-<button id="departBtn" class="hasTip">
-  🌙 旅立ち
-  <span class="tip">
-    <b>10🪙</b> 消費で、うさぎを1匹送り出します。<br />
-    ※最後の1匹は旅立ちできません
-  </span>
-</button>
+<body>
+  <div id="app">
 
-<button id="rankBtn" class="hasTip">
-  🏆 実績
-  <span class="tip">
-    自己ベスト・日別・実績（アンロック）を確認できます。
-  </span>
-</button>
+    <header id="hud">
+      <div id="coinHud">🪙 <span id="coinValue">0</span></div>
 
-<button id="shopBtn" class="hasTip">
-  🐰 お迎え
-  <span class="tip">
-    新しいうさぎをお迎えできます。<br />
-    価格：<b><span id="shopTipPrice">-</span>🪙</b><br />
-    ※お迎えした子は<b>3分</b>で成長します
-  </span>
-</button>
+      <button id="candyBtn" class="hasTip">
+        🍬 キャンディ
+        <span class="tip">
+          フィールドをクリックすると、上からキャンディを落とします。<br />
+          1回：<b>10🪙</b><br />
+          ※うさぎが集まって取り合います
+        </span>
+      </button>
 
-<button id="resetBtn" class="hasTip">
-  🔁 リセット
-  <span class="tip">
-    コイン・うさぎ・記録を初期化します。<br />
-    ※確認ダイアログが出ます
-  </span>
-</button>
+      <button id="departBtn" class="hasTip">
+        🌙 旅立ち
+        <span class="tip">
+          <b>10🪙</b> 消費で、うさぎを1匹送り出します。<br />
+          ※最後の1匹は旅立ちできません
+        </span>
+      </button>
+
+      <button id="rankBtn" class="hasTip">
+        🏆 実績
+        <span class="tip">
+          自己ベスト・日別・実績（アンロック）を確認できます。
+        </span>
+      </button>
+
+      <button id="shopBtn" class="hasTip">
+        🐰 お迎え
+        <span class="tip">
+          新しいうさぎをお迎えできます。<br />
+          価格（ふつう）：<b><span id="shopTipPrice">25</span>🪙</b><br />
+          ※お迎えした子は<b>3分</b>で成長します<br />
+          ※bunny2 / bunny3 はクリックでモーダルから選べます
+        </span>
+      </button>
+
+      <button id="resetBtn" class="hasTip">
+        🔁 リセット
+        <span class="tip">
+          コイン・うさぎ・記録を初期化します。<br />
+          ※確認ダイアログが出ます
+        </span>
+      </button>
+    </header>
+
+    <!-- HUDの下に出す補助説明（任意：不要なら消してOK） -->
+    <div id="hint" class="hidden">
+      🐰 うさぎをクリックでコインが落ちます。ハートが出ているほど大量！
+    </div>
+
+    <main id="field">
+      <div id="bunnyLayer"></div>
+      <div id="coinLayer"></div>
+
+      <!-- 地面判定ライン（見えなくてOK） -->
+      <div id="groundLine"></div>
+    </main>
+
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
