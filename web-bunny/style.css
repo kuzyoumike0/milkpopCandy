@@ -608,3 +608,52 @@ button.iconBtn{
 .shopRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
 .shopPrice{ font-weight:900; }
 .shopHint{ margin-top:12px; font-size:12px; opacity:.8; line-height:1.5; }
+
+/* お迎えボタンのホバー詳細 */
+.hasTip {
+  position: relative;
+}
+
+.hasTip .tip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 10px);
+  transform: translateX(-50%);
+  min-width: 220px;
+  max-width: 280px;
+
+  padding: 10px 12px;
+  border-radius: 12px;
+
+  background: rgba(30, 30, 40, 0.92);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+
+  box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+  border: 1px solid rgba(255,255,255,0.12);
+
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 50;
+}
+
+.hasTip .tip::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 8px solid rgba(30, 30, 40, 0.92);
+}
+
+.hasTip:hover .tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(2px);
+}
+
