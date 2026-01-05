@@ -24,11 +24,21 @@
     </header>
 
     <main id="field" aria-label="牧場">
+      <!-- 背景装飾（木など・後ろ） -->
+      <div id="decorBack"></div>
+
       <div id="bunnyLayer"></div>
       <div id="coinLayer"></div>
 
+      <!-- 端の柵（前面：うさぎが外に行くと“首だけ”見える用） -->
+      <div id="decorFront">
+        <div class="edgeCover left"></div>
+        <div class="edgeCover right"></div>
+      </div>
+
       <div id="ground">
         <div id="groundLine"></div>
+        <div id="grassStrip"></div>
       </div>
     </main>
 
@@ -58,6 +68,6 @@
     </div>
   </div>
 
-  <script src="./app.js"></script>
+  <script src="./app.js?v=2"></script>
 </body>
 </html>
