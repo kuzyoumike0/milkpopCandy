@@ -540,6 +540,45 @@ button.iconBtn{
   .rankGrid{ grid-template-columns: 1fr; }
 }
 
+/* ===== Tooltip ===== */
+.tipWrap{ position:relative; display:inline-block; }
+.tooltip{
+  position:absolute;
+  right:0;
+  top:calc(100% + 10px);
+  min-width: 240px;
+  max-width: 320px;
+  padding:10px 12px;
+  border-radius:16px;
+  background: rgba(255,255,255,.95);
+  border:1px solid rgba(0,0,0,.06);
+  box-shadow: 0 10px 24px rgba(0,0,0,.14);
+  font-weight:900;
+  font-size:12px;
+  line-height:1.45;
+  opacity:0;
+  transform: translateY(-4px);
+  pointer-events:none;
+  transition: opacity .12s ease, transform .12s ease;
+  z-index: 80;
+}
+.tipWrap:hover .tooltip{
+  opacity:1;
+  transform: translateY(0);
+}
+.tooltip::before{
+  content:"";
+  position:absolute;
+  right:16px;
+  top:-7px;
+  width:12px;
+  height:12px;
+  background: rgba(255,255,255,.95);
+  border-left:1px solid rgba(0,0,0,.06);
+  border-top:1px solid rgba(0,0,0,.06);
+  transform: rotate(45deg);
+}
+
 
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
 .shopItemDesc{ opacity:.85; margin-bottom:12px; }
