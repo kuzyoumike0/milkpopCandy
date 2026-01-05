@@ -30,6 +30,22 @@ const coinLayer = document.getElementById("coinLayer");
 // ===== 状態 =====
 const save = loadSave();
 
+// 放置時間でコインの種類が変わる（秒）
+const COIN_TIERS = [
+  { name: "銅", emoji: "🪙", value: 1,  minIdle: 0,   className: "" },
+  { name: "銀", emoji: "🥈", value: 3,  minIdle: 60,  className: "silver" },   // 1分放置
+  { name: "金", emoji: "🥇", value: 8,  minIdle: 180, className: "gold" },     // 3分放置
+  { name: "虹", emoji: "🌈", value: 20, minIdle: 420, className: "rainbow" }   // 7分放置
+];
+
+function getCoinTierByIdleSeconds(idleSec) {
+  // minIdle が大きいものほど優先
+  for (let i = COIN_TIERS.length - 1; i >= 0; i--) {
+    if (idleSec >= COIN_TIERS[i].minIdle) return COIN_TIERS[i];
+  }
+  return COIN_TIERS[0];
+}
+
 const state = {
   bankCoins: save.coins,     // 所持コイン（HUDに出る）
   lastInteractAt: Date.now(),
