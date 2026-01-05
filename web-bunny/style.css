@@ -290,4 +290,27 @@ button:disabled{ opacity:.55; cursor:not-allowed; }
   max-width: 320px;
   white-space: normal;
 }
+/* 重要：coinLayerがクリックを吸わないようにする */
+#coinLayer{
+  pointer-events: none;
+}
+
+/* でもコイン自体は回収できるようにする */
+.coin{
+  pointer-events: auto;
+}
+
+/* ついで：エフェクト等はクリック不要なので通す */
+.spark, .candy, .gainPop, .puff{
+  pointer-events: none;
+}
+
+/* うさぎはクリックできる */
+#bunnyLayer{
+  pointer-events: auto;
+}
+.bunnyWrap{
+  pointer-events: auto;
+  cursor: pointer;
+}
 
