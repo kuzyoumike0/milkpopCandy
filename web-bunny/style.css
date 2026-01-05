@@ -481,7 +481,7 @@ button.iconBtn{
 }
 
 .departMsg.show{
-  animation: depart-msg 1100ms ease-out forwards;
+  animation: depart-msg 2200ms ease-out forwards;
 }
 
 @keyframes depart-msg{
