@@ -111,7 +111,9 @@
       this.x = x;
       this.y = yStart;
       this.yFloor = yFloor;
-      this.vy = 0;
+      // ★生成時にピョン（上向き初速）
+      this.vy = -(flashy ? 520 : 420);
+
       this.gravity = 2400;
 
       this.el = document.createElement("img");
