@@ -47,7 +47,7 @@
   let rafId = 0;
 
   // -----------------------
-  // Audio（SE）
+  // Audio
   // -----------------------
   const sePoyo = new Audio(ASSETS.poyoSE);
   const seCoin = new Audio(ASSETS.coinSE);
@@ -61,30 +61,26 @@
   function unlockAudioOnce() {
     if (audioUnlocked) return;
     audioUnlocked = true;
-
-    // ユーザー操作のタイミングで一度だけ鳴らして即停止（音声許可の“解錠”）
     try {
-      const a = sePoyo;
-      a.muted = true;
-      a.currentTime = 0;
-      const p = a.play();
+      sePoyo.muted = true;
+      sePoyo.currentTime = 0;
+      const p = sePoyo.play();
       if (p && typeof p.then === "function") {
         p.then(() => {
-          a.pause();
-          a.currentTime = 0;
-          a.muted = false;
+          sePoyo.pause();
+          sePoyo.currentTime = 0;
+          sePoyo.muted = false;
         }).catch(() => {
-          a.muted = false;
+          sePoyo.muted = false;
         });
       } else {
-        a.pause();
-        a.currentTime = 0;
-        a.muted = false;
+        sePoyo.pause();
+        sePoyo.currentTime = 0;
+        sePoyo.muted = false;
       }
     } catch (_) {}
   }
 
-  // どこでも最初の操作で解錠
   window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
 
   function playSE(aud) {
@@ -94,13 +90,7 @@
       if (p && typeof p.catch === "function") p.catch(() => {});
     } catch (_) {}
   }
-  function clampXInField(x, bunnyWidth) {
-  const fr = fieldRect();
-  return clamp(x, 0, fr.width - bunnyWidth);
-}
 
-
-  
   // -----------------------
   // Helpers
   // -----------------------
@@ -153,7 +143,13 @@
   }
 
   function randomAutoIntervalMs() {
-    return 2200 + Math.random() * 2800;
+    return 2200 + Math.random() * 2800; // 2.2〜5.0秒
+  }
+
+  function getEdgeVisibleRatio() {
+    const v = getComputedStyle(document.documentElement).getPropertyValue("--edgeVisibleRatio").trim();
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? clamp(n, 0.2, 0.95) : 0.55;
   }
 
   // -----------------------
@@ -183,8 +179,8 @@
 
       // 個体差
       this.dir = Math.random() < 0.5 ? -1 : 1;
-      this.baseSpeed = 55 + Math.random() * 65;     // 見える速さ
-      this.roamRange = 90 + Math.random() * 260;
+      this.baseSpeed = 55 + Math.random() * 65;     // 55〜120 px/s
+      this.roamRange = 90 + Math.random() * 260;    // 90〜350 px
       this.turnChancePerSec = 0.08 + Math.random() * 0.35;
       this.pauseChancePerSec = 0.02 + Math.random() * 0.12;
       this.pauseLeft = 0;
@@ -194,19 +190,44 @@
 
       this.nextAutoAt = nowMs() + randomAutoIntervalMs();
 
-      // ★ click だと取りこぼす環境があるので pointerdown + capture で確実化
+      this.lastHopAt = 0;
+
       this.wrap.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        unlockAudioOnce();           // 念のため
+        unlockAudioOnce();
         this.tryClickDrop();
       }, { capture: true });
     }
 
+    bunnyW() {
+      return this.wrap.getBoundingClientRect().width || 140;
+    }
+
     setHome(x, y) {
-      this.homeX = x;
+      const fr = fieldRect();
+      const w = this.bunnyW();
+      const visible = getEdgeVisibleRatio();
+
+      // “首だけ”見せるために、端は少しだけ外側へ許可
+      const minX = -(w * (1 - visible));
+      const maxX = fr.width - (w * visible);
+
+      this.homeX = clamp(x, minX, maxX);
       this.y = y;
-      if (this.x === 0 && this.y === 0) this.x = x;
+
+      if (this.x === 0 && this.y === 0) this.x = this.homeX;
+    }
+
+    hop() {
+      const t = nowMs();
+      if (t - this.lastHopAt < 260) return; // 連打防止
+      this.lastHopAt = t;
+
+      this.el.classList.remove("hop");
+      // reflowで確実に再発火
+      void this.el.offsetWidth;
+      this.el.classList.add("hop");
     }
 
     tryClickDrop() {
@@ -216,10 +237,7 @@
       this.lastClickSpawnAt = t;
       this.lastClickAt = Date.now();
 
-      // 先に音（ユーザー体感優先）
       playSE(sePoyo);
-
-      // コイン生成
       spawnCoinAtBunny(this, "click");
     }
 
@@ -228,19 +246,33 @@
     }
 
     update(dt) {
+      // auto coin
       const t = nowMs();
       if (t >= this.nextAutoAt) {
         this.nextAutoAt = t + randomAutoIntervalMs();
         spawnCoinAtBunny(this, "auto");
       }
 
+      // 混雑時調整
       const crowd = bunnies.length;
       const speedMul = crowd <= 6 ? 1 : Math.max(0.32, 1 / Math.sqrt(crowd / 6));
       const rangeMul = crowd <= 6 ? 1 : Math.max(0.28, 1 / (crowd / 6));
 
       const spd = this.baseSpeed * speedMul;
-      const roam = this.roamRange * rangeMul;
 
+      const fr = fieldRect();
+      const w = this.bunnyW();
+      const visible = getEdgeVisibleRatio();
+
+      // 端の“首だけ”領域
+      const edgeMinX = -(w * (1 - visible));
+      const edgeMaxX = fr.width - (w * visible);
+
+      // roamは画面幅に応じて制限
+      const maxRoam = Math.max(20, (fr.width - w) / 2);
+      const roam = Math.min(this.roamRange * rangeMul, maxRoam);
+
+      // pause
       if (this.pauseLeft > 0) {
         this.pauseLeft -= dt;
       } else {
@@ -253,14 +285,27 @@
         this.x += this.dir * spd * dt;
       }
 
-      const minX = this.homeX - roam;
-      const maxX = this.homeX + roam;
-      if (this.x < minX) { this.x = minX; this.dir = 1; }
-      if (this.x > maxX) { this.x = maxX; this.dir = -1; }
+      // home中心の往復範囲（ただし端の“首だけ”範囲も考慮）
+      const minX = clamp(this.homeX - roam, edgeMinX, edgeMaxX);
+      const maxX = clamp(this.homeX + roam, edgeMinX, edgeMaxX);
 
+      let hitEdge = false;
+
+      if (this.x < minX) { this.x = minX; this.dir = 1; hitEdge = true; }
+      if (this.x > maxX) { this.x = maxX; this.dir = -1; hitEdge = true; }
+
+      // さらに画面端の“首だけ”範囲も超えない最終ガード
+      if (this.x <= edgeMinX) { this.x = edgeMinX; this.dir = 1; hitEdge = true; }
+      if (this.x >= edgeMaxX) { this.x = edgeMaxX; this.dir = -1; hitEdge = true; }
+
+      // 端にぶつかったら「ぴょこん」
+      if (hitEdge) this.hop();
+
+      // flip（親）
       if (this.dir < 0) this.wrap.classList.add("flip");
       else this.wrap.classList.remove("flip");
 
+      // render
       this.wrap.style.left = `${this.x}px`;
       this.wrap.style.top = `${this.y}px`;
     }
@@ -435,16 +480,15 @@
   // -----------------------
   // Loop
   // -----------------------
- function tick(ts) {
-  const dt = Math.min(0.033, (ts - lastFrame) / 1000);
-  lastFrame = ts;
+  function tick(ts) {
+    const dt = Math.min(0.033, (ts - lastFrame) / 1000);
+    lastFrame = ts;
 
-  for (const b of bunnies) b.update(dt);
-  for (const c of coinsOnField) c.update(dt);
+    for (const b of bunnies) b.update(dt);
+    for (const c of coinsOnField) c.update(dt);
 
-  rafId = requestAnimationFrame(tick);
-}
-
+    rafId = requestAnimationFrame(tick);
+  }
 
   // -----------------------
   // UI
@@ -468,6 +512,7 @@
   // Init
   // -----------------------
   function init() {
+    // SWはそのままでもいいけど、更新が反映されない時はCACHE_NAMEも上げてね
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
     }
@@ -521,4 +566,3 @@
 
   init();
 })();
-
