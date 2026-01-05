@@ -1,7 +1,7 @@
 (() => {
   const ASSETS = {
     bunny: "./assets/bunny.png",
-    babyBunny: "./assets/babybunny.png", // ★追加
+    babyBunny: "./assets/babybunny.png",
     hart: "./assets/hart.png",
     candy: "./assets/candy.png",
     coinSE: "./assets/coin.mp3",
@@ -15,14 +15,16 @@
   const LS_KEYS = {
     coins: "webBunny_coins_v1",
     bunnyCount: "webBunny_bunnyCount_v1",
-    bunnyMeta: "webBunny_bunnyMeta_v1", // ★追加（各うさぎの生誕時刻を保存）
+    bunnyMeta: "webBunny_bunnyMeta_v1",
     stats: "webBunny_stats_v1",
     unlocked: "webBunny_achUnlocked_v1",
     daily: "webBunny_daily_v1",
   };
 
-  // ★baby進化時間（3分）
-  const BABY_DURATION_MS = 3 * 60 * 1000;
+  // ★ baby仕様
+  const BABY_DURATION_MS = 3 * 60 * 1000;     // 3分で進化
+  const BABY_SPEED_MUL = 0.68;                // ★babyの歩く速度（遅くする倍率）
+  const EVOLVE_SPARK_COUNT = 14;              // ★進化キラキラ粒子数
 
   const field = document.getElementById("field");
   const bunnyLayer = document.getElementById("bunnyLayer");
@@ -63,13 +65,11 @@
   // 互換：旧データ（bunnyCountのみ）から補完
   let bunnyCount = clamp(safeInt(localStorage.getItem(LS_KEYS.bunnyCount), 2), 2, 9999);
   if (!Array.isArray(bunnyMeta) || bunnyMeta.length === 0) {
-    // 旧状態なら「初期2匹は大人」扱いで bornAt を古くする
     bunnyMeta = Array.from({ length: bunnyCount }, (_, i) => ({
       bornAt: Date.now() - (BABY_DURATION_MS + 1000) - i * 1000
     }));
     saveBunnyMeta();
   } else {
-    // meta優先
     bunnyCount = clamp(bunnyMeta.length, 2, 9999);
     localStorage.setItem(LS_KEYS.bunnyCount, String(bunnyCount));
   }
@@ -336,18 +336,27 @@
     setTimeout(() => d.remove(), 800);
   }
 
-  function spawnSparks(x, y) {
-    for (let i = 0; i < 8; i++) {
+  function spawnSparks(x, y, count = 8, spread = 70) {
+    for (let i = 0; i < count; i++) {
       const s = document.createElement("div");
       s.className = "spark show";
       s.style.left = `${x}px`;
       s.style.top = `${y}px`;
-      s.style.setProperty("--dx", `${(Math.random()*2-1)*70}px`);
-      s.style.setProperty("--dy", `${(Math.random()*2-1)*70-30}px`);
+      s.style.setProperty("--dx", `${(Math.random()*2-1)*spread}px`);
+      s.style.setProperty("--dy", `${(Math.random()*2-1)*spread-30}px`);
       s.style.background = `rgba(255,255,255,${0.7 + Math.random()*0.3})`;
       coinLayer.appendChild(s);
       setTimeout(() => s.remove(), 700);
     }
+  }
+
+  // ★進化キラキラ（ちょっと派手）
+  function spawnEvolveSparksAtBunny(bunny) {
+    const fr = fieldRect();
+    const r = bunny.wrap.getBoundingClientRect();
+    const x = (r.left - fr.left) + r.width * 0.5;
+    const y = (r.top - fr.top) + r.height * 0.55;
+    spawnSparks(x, y, EVOLVE_SPARK_COUNT, 90);
   }
 
   function spawnDepartFx(x, y) {
@@ -377,7 +386,6 @@
     d.style.left = `${clamp(x, 0, fr.width)}px`;
     d.style.top  = `${clamp(y, 0, fr.height)}px`;
     coinLayer.appendChild(d);
-    // ★修正：括弧抜けてた
     setTimeout(() => d.remove(), 2200);
   }
 
@@ -469,22 +477,29 @@
       });
     }
 
-    // ★見た目切り替え
     syncSprite() {
       this.el.src = this.isBaby ? ASSETS.babyBunny : ASSETS.bunny;
       this.wrap.classList.toggle("baby", this.isBaby);
     }
 
-    // ★進化チェック
     updateEvolve() {
       if (!this.isBaby) return;
       if ((Date.now() - this.bornAt) >= BABY_DURATION_MS) {
         this.isBaby = false;
         this.syncSprite();
-        // 進化演出：ちょいホップ
+
+        // ★進化したらチャージを再初期化
+        this.charged = false;
+        this.gauge = 0;
+        this.gaugePeriod = randomGaugeSeconds();
+        this.heart.classList.remove("ready", "show");
+
+        // ★進化演出：ちょいホップ＋キラキラ
         this.el.classList.remove("sniff");
         this.el.classList.add("hop");
         setTimeout(() => this.el.classList.remove("hop"), 240);
+
+        spawnEvolveSparksAtBunny(this);
       }
     }
 
@@ -497,7 +512,16 @@
     idleSeconds() { return (Date.now() - this.lastClickAt) / 1000; }
 
     updateGauge(dt) {
+      // ★babyはチャージしない（ハートも出さない）
+      if (this.isBaby) {
+        this.charged = false;
+        this.gauge = 0;
+        this.heart.classList.remove("ready", "show");
+        return;
+      }
+
       if (this.charged) return;
+
       this.gauge += dt / this.gaugePeriod;
       if (this.gauge >= 1) {
         this.gauge = 1;
@@ -515,7 +539,13 @@
       playSE(sePoyo);
 
       const wasCharged = this.charged;
-      if (wasCharged) {
+
+      // ★babyはチャージしないので、常に false 扱い
+      if (this.isBaby) {
+        this.charged = false;
+        this.gauge = 0;
+        this.heart.classList.remove("ready", "show");
+      } else if (wasCharged) {
         this.charged = false;
         this.gauge = 0;
         this.gaugePeriod = randomGaugeSeconds();
@@ -524,7 +554,7 @@
         setTimeout(() => this.heart.classList.remove("show"), 700);
       }
 
-      spawnCoinAtBunny(this, wasCharged);
+      spawnCoinAtBunny(this, wasCharged && !this.isBaby);
     }
 
     maybeGestureDuringContest(dt, isContest) {
@@ -565,14 +595,21 @@
       const roam = (candyTargetXOrNull != null) ? 35 : this.roamRange;
       const min = homeX - roam, max = homeX + roam;
 
-      // babyは少し遅い（争奪で不利に見える）
-      const babyMul = this.isBaby ? 0.88 : 1.0;
+      // ★babyは歩く速度が遅い
+      const babyMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
 
       const spd = this.baseSpeed * babyMul * (candyTargetXOrNull != null ? 1.25 : 1.0);
 
       this.x += this.dir * spd * dt;
       if (this.x < min) this.dir = 1;
       if (this.x > max) this.dir = -1;
+
+      // ★画面外に出ない（左右クランプ）
+      const fr = fieldRect();
+      const bunnySize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bunnySize")) || 140;
+      const minX = 0;
+      const maxX = Math.max(0, fr.width - bunnySize);
+      this.x = clamp(this.x, minX, maxX);
 
       this.wrap.classList.toggle("flip", this.dir < 0);
       this.wrap.style.left = `${this.x}px`;
@@ -668,7 +705,7 @@
     if (bunny.isBaby) {
       tier = 1;
       value = 1;
-      isFlashy = false; // babyの間は派手演出なし（必要なら true に戻してもOK）
+      isFlashy = false;
     } else {
       const baseTier = coinTierFromIdleSeconds(bunny.idleSeconds());
       tier = isFlashy ? applyRareBoost(baseTier) : baseTier;
@@ -687,7 +724,7 @@
     coinsOnField.push(c);
   }
 
-  /* ===== Candy ===== */
+  /* ===== Candy UI ===== */
   function flashButtonText(btn, text, ms = 650) {
     const prev = btn.textContent;
     btn.textContent = text;
@@ -711,7 +748,7 @@
 
     if (coins < COST.CANDY) {
       flashButtonText(candyBtn, "コイン不足…");
-      // ★キャンディは「もう一度クリックするまで」継続：OFFにしない
+      // キャンディはトグルOFFにしない（連続で落とせる）
       return;
     }
 
@@ -763,7 +800,6 @@
     onDepart(msg.rare);
 
     setTimeout(() => {
-      // ★最後尾を旅立ち＝metaも削る
       bunnyMeta.pop();
       saveBunnyMeta();
 
@@ -802,7 +838,7 @@
 
     coins -= price;
 
-    // ★購入＝babyで追加（bornAt=今）
+    // ★購入＝baby（bornAt=今）
     bunnyMeta.push({ bornAt: Date.now() });
     saveBunnyMeta();
 
@@ -825,10 +861,8 @@
     bunnies.length = 0;
     bunnyIdSeq = 1;
 
-    // metaと数を同期
     if (!Array.isArray(bunnyMeta)) bunnyMeta = [];
     if (bunnyMeta.length < n) {
-      // 足りない分は「大人扱い」で補完
       while (bunnyMeta.length < n) bunnyMeta.push({ bornAt: Date.now() - BABY_DURATION_MS - 9999 });
       saveBunnyMeta();
     } else if (bunnyMeta.length > n) {
@@ -849,8 +883,16 @@
   function layoutBunnies() {
     const fr = fieldRect();
     const gY = groundY();
+
+    const bunnySize = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bunnySize")) || 140;
+    const minX = 0;
+    const maxX = Math.max(0, fr.width - bunnySize);
+
     const step = Math.max(70, fr.width / Math.max(1, bunnies.length));
-    bunnies.forEach((b, i) => b.setBaseHome(20 + step * i, gY - 120));
+    bunnies.forEach((b, i) => {
+      const x = clamp(20 + step * i, minX, maxX);
+      b.setBaseHome(x, gY - 120);
+    });
   }
 
   // ★争奪中の押し合い（近距離でゆるく反発）
@@ -892,7 +934,6 @@
       bunnies[i].update(dt, i, bunnies.length, targetX);
     }
 
-    // ★押し合いを反映
     applyCrowdPush(targetX);
 
     for (const c of coinsOnField) c.update(dt);
@@ -916,7 +957,7 @@
       if (!confirm("リセットしますか？")) return;
       coins = 0;
 
-      // ★初期2匹は大人
+      // 初期2匹は大人
       bunnyMeta = [
         { bornAt: Date.now() - BABY_DURATION_MS - 9999 },
         { bornAt: Date.now() - BABY_DURATION_MS - 9999 },
