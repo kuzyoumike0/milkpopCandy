@@ -313,6 +313,31 @@ button.iconBtn{
   padding:14px;
   background: linear-gradient(180deg, #fff, #fff6fb);
 }
+
+/* 取得値ポップ（+100など） */
+.gainPop{
+  position:absolute;
+  font-weight:900;
+  font-size:18px;
+  line-height:1;
+  pointer-events:none;
+  user-select:none;
+  text-shadow: 0 2px 0 rgba(0,0,0,.12);
+  filter: drop-shadow(0 10px 10px rgba(0,0,0,.12));
+  opacity:0;
+}
+
+.gainPop.show{
+  animation: gain-pop 720ms ease-out forwards;
+}
+
+@keyframes gain-pop{
+  0%   { opacity:0; transform: translate(-50%, 6px) scale(.9); }
+  15%  { opacity:1; transform: translate(-50%, 0px) scale(1.05); }
+  100% { opacity:0; transform: translate(-50%, -34px) scale(1.0); }
+}
+
+
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
 .shopItemDesc{ opacity:.85; margin-bottom:12px; }
 .shopRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
