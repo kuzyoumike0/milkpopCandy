@@ -313,4 +313,40 @@ button:disabled{ opacity:.55; cursor:not-allowed; }
   pointer-events: auto;
   cursor: pointer;
 }
+/* ===== 図鑑 ===== */
+.dexGrid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
+  gap:12px;
+  padding:8px;
+}
+
+.dexCard{
+  background:rgba(255,255,255,0.85);
+  border-radius:14px;
+  padding:10px;
+  text-align:center;
+  box-shadow:0 6px 18px rgba(0,0,0,.12);
+}
+
+.dexCard img{
+  width:80px;
+  height:80px;
+  object-fit:contain;
+}
+
+.dexName{
+  font-weight:900;
+  margin-top:6px;
+}
+
+.dexDesc{
+  font-size:12px;
+  opacity:.85;
+}
+
+.dexCard.unknown{
+  filter:grayscale(1);
+  opacity:.6;
+}
 
