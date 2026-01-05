@@ -6,8 +6,11 @@
   --text:#3a2a33;
   --shadow: 0 10px 30px rgba(0,0,0,.12);
 
-  /* ★ うさぎの表示サイズ（ここを変えるだけで拡大縮小できる） */
+  /* ★ うさぎの表示サイズ */
   --bunnySize: 140px;
+
+  /* 端に出ても“首だけ”見せるための可視率（0.55なら55%見える） */
+  --edgeVisibleRatio: 0.55;
 }
 
 *{ box-sizing:border-box; }
@@ -25,7 +28,7 @@ body{
 
 #hud{
   position:relative;
-  z-index:10;
+  z-index:50;
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -91,19 +94,119 @@ button.iconBtn{
   overflow:hidden;
 }
 
-#bunnyLayer, #coinLayer{
+/* レイヤー順
+   decorBack(1) -> bunny(10) -> coin(15) -> decorFront(30) -> ground(35)
+*/
+#decorBack{
   position:absolute;
   inset:0;
+  z-index:1;
+  pointer-events:none;
 }
 
+/* 木っぽい装飾（画像なしでCSSだけで） */
+#decorBack::before{
+  content:"";
+  position:absolute;
+  left:-40px;
+  bottom:18%;
+  width:240px;
+  height:280px;
+  opacity:.9;
+  background:
+    radial-gradient(circle at 45% 30%, #4caf50 0 38%, transparent 39%),
+    radial-gradient(circle at 65% 40%, #43a047 0 34%, transparent 35%),
+    radial-gradient(circle at 45% 55%, #388e3c 0 34%, transparent 35%),
+    linear-gradient(#8d6e63, #6d4c41);
+  background-size: 240px 200px, 200px 180px, 220px 170px, 34px 140px;
+  background-position: 0 0, 30px 10px, 10px 50px, 110px 140px;
+  background-repeat:no-repeat;
+  filter: drop-shadow(0 14px 14px rgba(0,0,0,.12));
+  border-radius: 40px;
+}
+#decorBack::after{
+  content:"";
+  position:absolute;
+  right:-60px;
+  bottom:16%;
+  width:260px;
+  height:310px;
+  opacity:.9;
+  background:
+    radial-gradient(circle at 40% 26%, #66bb6a 0 38%, transparent 39%),
+    radial-gradient(circle at 60% 40%, #4caf50 0 34%, transparent 35%),
+    radial-gradient(circle at 48% 58%, #2e7d32 0 36%, transparent 37%),
+    linear-gradient(#8d6e63, #6d4c41);
+  background-size: 260px 210px, 210px 190px, 240px 180px, 36px 150px;
+  background-position: 0 0, 20px 10px, 0 60px, 120px 160px;
+  background-repeat:no-repeat;
+  filter: drop-shadow(0 14px 14px rgba(0,0,0,.12));
+  border-radius: 40px;
+}
+
+#bunnyLayer{
+  position:absolute;
+  inset:0;
+  z-index:10;
+}
+
+#coinLayer{
+  position:absolute;
+  inset:0;
+  z-index:15;
+  /* coinLayer自体はクリック透過（下のうさぎを押せるように） */
+  pointer-events:none;
+}
+
+#decorFront{
+  position:absolute;
+  inset:0;
+  z-index:30;
+  pointer-events:none;
+}
+
+/* 端の柵（前面）＋“首だけ”演出用の隠し板 */
+.edgeCover{
+  position:absolute;
+  top:0;
+  bottom:0;
+  width:90px;
+  opacity:.95;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(210,170,120,.95) 0 10px,
+      rgba(190,150,100,.95) 10px 20px
+    );
+  box-shadow: 0 0 18px rgba(0,0,0,.12);
+}
+.edgeCover.left{ left:0; }
+.edgeCover.right{ right:0; }
+
+/* 柵っぽい棒 */
+.edgeCover::before{
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  top:18%;
+  height:12px;
+  background: rgba(160,120,80,.92);
+  box-shadow: 0 10px 0 rgba(160,120,80,.92), 0 20px 0 rgba(160,120,80,.92);
+  opacity:.9;
+}
+
+/* 地面 */
 #ground{
   position:absolute;
   left:0;
   right:0;
   bottom:0;
   height:26%;
+  z-index:35;
   pointer-events:none;
 }
+
 #groundLine{
   position:absolute;
   left:0;
@@ -114,11 +217,30 @@ button.iconBtn{
   opacity:.9;
 }
 
-/* -----------------------
-   Bunny（transform衝突を避けるため、親wrapに反転、imgに揺れ）
------------------------ */
+#grassStrip{
+  position:absolute;
+  left:-20px;
+  right:-20px;
+  top:4px;
+  height:62px;
+  opacity:.95;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(46,125,50,.0) 0 6px,
+      rgba(46,125,50,.25) 6px 8px
+    ),
+    radial-gradient(circle at 20px 52px, rgba(76,175,80,.85) 0 60%, transparent 61%),
+    radial-gradient(circle at 60px 54px, rgba(56,142,60,.9) 0 58%, transparent 59%),
+    radial-gradient(circle at 100px 56px, rgba(102,187,106,.85) 0 62%, transparent 63%);
+  background-size: auto, 120px 70px, 140px 70px, 160px 70px;
+  background-repeat: repeat, repeat, repeat, repeat;
+  filter: drop-shadow(0 10px 10px rgba(0,0,0,.10));
+}
 
-/* 親：位置(left/top)と反転(scaleX)担当 */
+/* -----------------------
+   Bunny（wrapで反転、imgで揺れ）
+----------------------- */
 .bunnyWrap{
   position:absolute;
   left:0;
@@ -129,12 +251,10 @@ button.iconBtn{
   filter: drop-shadow(0 10px 8px rgba(0,0,0,.16));
 }
 
-/* 反転は親に付与（img側のアニメtransformと干渉しない） */
 .bunnyWrap.flip{
   transform: scaleX(-1);
 }
 
-/* 子：画像本体（上下揺れ担当） */
 .bunny{
   width:100%;
   height:auto;
@@ -145,14 +265,24 @@ button.iconBtn{
   transform-origin: 50% 100%;
 }
 
-/* 歩行っぽい上下揺れ（transformはここだけ） */
+/* 歩行っぽい上下揺れ */
 .bunny.walk{
   animation: bunny-walk-bob 0.35s ease-in-out infinite alternate;
 }
-
 @keyframes bunny-walk-bob{
   from{ transform: translateY(0); }
   to{ transform: translateY(3px); }
+}
+
+/* 端にぶつかった時の“ぴょこん” */
+.bunny.hop{
+  animation: bunny-hop 220ms ease-out;
+}
+@keyframes bunny-hop{
+  0%   { transform: translateY(0) scale(1,1); }
+  30%  { transform: translateY(-12px) scale(1.03,.97); }
+  60%  { transform: translateY(0) scale(.98,1.03); }
+  100% { transform: translateY(0) scale(1,1); }
 }
 
 /* -----------------------
@@ -167,6 +297,7 @@ button.iconBtn{
   cursor:pointer;
   filter: drop-shadow(0 10px 8px rgba(0,0,0,.18));
   will-change: transform;
+  pointer-events:auto; /* 回収できる */
 }
 
 /* -----------------------
@@ -178,7 +309,7 @@ button.iconBtn{
   position:absolute;
   inset:0;
   background: rgba(0,0,0,.28);
-  z-index:30;
+  z-index:60;
 }
 
 #shopModal{
@@ -190,7 +321,7 @@ button.iconBtn{
   background:#fff;
   border-radius:20px;
   box-shadow: var(--shadow);
-  z-index:40;
+  z-index:70;
   overflow:hidden;
 }
 
@@ -238,13 +369,4 @@ button.iconBtn{
   font-size:12px;
   opacity:.8;
   line-height:1.5;
-}
-/* coinLayer自体はクリックを透過（下のうさぎを押せるようにする） */
-#coinLayer{
-  pointer-events: none;
-}
-
-/* ただしコイン本体は回収できるようにする */
-.coin{
-  pointer-events: auto;
 }
