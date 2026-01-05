@@ -1,5 +1,6 @@
-
-const hud = document.getElementById("hud");
+// app.js（全内容）
+// ※ index.html には <div id="coinLayer"></div> があり、HUDは id="hud"、フィールドは id="field"
+// ※ style.css には .coin / .coin.collecting / レア用クラス(rainbow等) が入っている前提
 
 // ===== 保存 =====
 const KEY = "web_bunny_save_v2";
@@ -26,44 +27,43 @@ const resetBtn = document.getElementById("resetBtn");
 const field = document.getElementById("field");
 const bunny = document.getElementById("bunny");
 const coinLayer = document.getElementById("coinLayer");
+const hud = document.getElementById("hud");
 
 // ===== 状態 =====
 const save = loadSave();
 
-// 放置時間でコインの種類が変わる（秒）
-const COIN_TIERS = [
-  { name: "銅", emoji: "🪙", value: 1,  minIdle: 0,   className: "" },
-  { name: "銀", emoji: "🥈", value: 3,  minIdle: 60,  className: "silver" },   // 1分放置
-  { name: "金", emoji: "🥇", value: 8,  minIdle: 180, className: "gold" },     // 3分放置
-  { name: "虹", emoji: "🌈", value: 20, minIdle: 420, className: "rainbow" }   // 7分放置
-];
-
-function getCoinTierByIdleSeconds(idleSec) {
-  // minIdle が大きいものほど優先
-  for (let i = COIN_TIERS.length - 1; i >= 0; i--) {
-    if (idleSec >= COIN_TIERS[i].minIdle) return COIN_TIERS[i];
-  }
-  return COIN_TIERS[0];
-}
-
 const state = {
-  bankCoins: save.coins,     // 所持コイン（HUDに出る）
+  bankCoins: save.coins, // 所持コイン（HUDに出る）
   lastInteractAt: Date.now(),
 
-  // 放置で“落ちる”設定
+  // 放置で“落ちる”設定（この秒数を超えると1回ドロップ）
   idleSecondsToDrop: 20,
-  dropValue: 1,
 
   // フィールドに落ちているコイン数上限（増えすぎ防止）
   maxDropped: 12,
 
   // 歩行
   x: 20,
-  vx: 40,
-  facing: 1,
+  vx: 40, // px/sec
+  facing: 1, // 1:右, -1:左
   t: 0,
   marginX: 10
 };
+
+// 放置時間でコインの種類が変わる（秒）
+const COIN_TIERS = [
+  { name: "銅", emoji: "🪙", value: 1, minIdle: 0, className: "" },
+  { name: "銀", emoji: "🥈", value: 3, minIdle: 60, className: "silver" }, // 1分放置
+  { name: "金", emoji: "🥇", value: 8, minIdle: 180, className: "gold" }, // 3分放置
+  { name: "虹", emoji: "🌈", value: 20, minIdle: 420, className: "rainbow" } // 7分放置
+];
+
+function getCoinTierByIdleSeconds(idleSec) {
+  for (let i = COIN_TIERS.length - 1; i >= 0; i--) {
+    if (idleSec >= COIN_TIERS[i].minIdle) return COIN_TIERS[i];
+  }
+  return COIN_TIERS[0];
+}
 
 function renderCoins() {
   coinValue.textContent = String(state.bankCoins);
@@ -88,8 +88,8 @@ function countDroppedCoins() {
   return coinLayer.querySelectorAll(".coin").length;
 }
 
-// ===== コインを“ぽろっ”と落とす =====
-function dropCoin(value) {
+// ===== コインを“ぽろっ”と落とす（種類付き） =====
+function dropCoin(tier) {
   if (countDroppedCoins() >= state.maxDropped) return;
 
   const frect = field.getBoundingClientRect();
@@ -103,8 +103,9 @@ function dropCoin(value) {
   const dropDist = Math.min(170, Math.max(90, frect.height - (startY + 70)));
 
   const coin = document.createElement("div");
-  coin.className = "coin";
-  coin.textContent = "🪙";
+  coin.className = `coin ${tier.className || ""}`.trim();
+  coin.textContent = tier.emoji;
+
   coin.style.left = `${Math.max(8, Math.min(frect.width - 64, startX))}px`;
   coin.style.top = `${Math.max(8, Math.min(frect.height - 64, startY))}px`;
 
@@ -114,52 +115,40 @@ function dropCoin(value) {
   coin.style.setProperty("--fall", `${fallMs}ms`);
 
   // 値を保持（回収時に加算）
-  coin.dataset.value = String(value);
+  coin.dataset.value = String(tier.value);
 
-  // 回収
-    const collect = () => {
+  // 回収（HUDへ吸い込み）
+  const collect = () => {
     const v = Number(coin.dataset.value || "1");
-
-    // すでに回収中なら二重発火防止
     if (coin.classList.contains("collecting")) return;
     coin.classList.add("collecting");
 
-    // コイン中心（field内座標）
+    // coin中心（field内座標）
     const coinX = parseFloat(coin.style.left) + 28;
-    const coinY = parseFloat(coin.style.top) + 28 + dropDist; // 落下後の位置っぽく
+    const coinY = parseFloat(coin.style.top) + 28 + dropDist;
 
-    // HUDのコイン表示あたりへ飛ばす（画面座標→field内座標に変換）
-    const frect = field.getBoundingClientRect();
+    // HUD座標→field内へ
     const hrect = hud.getBoundingClientRect();
-
-    // HUD左側あたり（coin表示付近）をゴールにする
     const targetScreenX = hrect.left + 30;
     const targetScreenY = hrect.top + hrect.height / 2;
 
     const targetX = targetScreenX - frect.left;
     const targetY = targetScreenY - frect.top;
 
-    // 変位（現在→ゴール）
     const dx = targetX - coinX;
     const dy = targetY - coinY;
 
-    // 飛ぶ（translate＋縮小）
     coin.style.transform = `translate(${dx}px, ${dy}px) scale(0.35)`;
     coin.style.opacity = "0.2";
 
-    // 到着したら加算して消す
     setTimeout(() => {
       state.bankCoins += v;
       renderCoins();
-
-      // +n演出（HUD付近に出す）
       spark(`+${v}`, Math.max(8, targetX - 10), Math.max(8, targetY - 20));
-
       coin.remove();
       touch();
     }, 420);
   };
-
 
   coin.addEventListener("pointerdown", (e) => {
     e.preventDefault();
@@ -177,14 +166,16 @@ function dropCoin(value) {
 // ===== ボタン =====
 petBtn.addEventListener("click", () => {
   touch();
-  // なでると“コインを1枚落とす”（所持に直で入らないのが牧場感）
-  dropCoin(1);
+  // なでると“銅”を1枚落とす（所持に直で入らないのが牧場感）
+  dropCoin(getCoinTierByIdleSeconds(0));
 
   // 反応（ちょい弾む）
   bunny.animate(
-    [{ transform: `translate(${state.x}px, 0) scaleX(${state.facing})` },
-     { transform: `translate(${state.x}px, -6px) scaleX(${state.facing})` },
-     { transform: `translate(${state.x}px, 0) scaleX(${state.facing})` }],
+    [
+      { transform: `translate(${state.x}px, 0) scaleX(${state.facing})` },
+      { transform: `translate(${state.x}px, -6px) scaleX(${state.facing})` },
+      { transform: `translate(${state.x}px, 0) scaleX(${state.facing})` }
+    ],
     { duration: 260, easing: "ease-out" }
   );
 });
@@ -196,15 +187,16 @@ resetBtn.addEventListener("click", () => {
 });
 
 // 触ったら放置解除（ユーザー操作全般）
-["pointerdown", "pointermove", "keydown"].forEach(evt => {
+["pointerdown", "pointermove", "keydown"].forEach((evt) => {
   window.addEventListener(evt, touch, { passive: true });
 });
 
-// ===== 放置で“ぽろっ” =====
+// ===== 放置で“ぽろっ”（放置が長いほどレア度UP） =====
 setInterval(() => {
   const idleSec = (Date.now() - state.lastInteractAt) / 1000;
   if (idleSec >= state.idleSecondsToDrop) {
-    dropCoin(state.dropValue);
+    const tier = getCoinTierByIdleSeconds(idleSec);
+    dropCoin(tier);
     state.lastInteractAt = Date.now();
   }
 }, 1000);
@@ -241,5 +233,6 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
+// 初期表示
 renderCoins();
 requestAnimationFrame(loop);
