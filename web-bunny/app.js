@@ -5,24 +5,27 @@ let coins = 0;
 let lastClickTime = 0;
 
 // ===============================
-// コイン表示更新
+// コイン表示更新（HUD対応）
 // ===============================
 function updateCoinUI() {
-  const counter = document.getElementById("coin-counter");
-  if (counter) counter.textContent = coins;
+  const v1 = document.getElementById("coinValue");
+  const v2 = document.getElementById("coin-counter");
+
+  if (v1) v1.textContent = coins;
+  if (v2) v2.textContent = coins;
 }
 
 // ===============================
-// 効果音
+// 効果音（assets配下）
 // ===============================
-const poyoSE = new Audio("poyo.mp3");
+const poyoSE = new Audio("./assets/poyo.mp3");
 poyoSE.volume = 0.6;
 
 function playPoyoSE() {
   try {
     poyoSE.currentTime = 0;
     const p = poyoSE.play();
-    if (p && typeof p.catch === "function") p.catch(() => {});
+    if (p && p.catch) p.catch(() => {});
   } catch (e) {}
 }
 
@@ -59,7 +62,7 @@ function dropCoinFromRabbit(rabbitEl) {
 
   document.body.appendChild(coin);
 
-  // 💫 ぽよん
+  // ぽよんバウンド
   coin.animate(
     [
       { transform: "translate(-50%, -50%) translateY(0)" },
@@ -69,14 +72,14 @@ function dropCoinFromRabbit(rabbitEl) {
     { duration: 300, easing: "ease-out" }
   );
 
-  // 🧲 ホバーで回収
+  // ホバーで回収
   coin.addEventListener("mouseenter", () => {
     coin.remove();
     coins++;
     updateCoinUI();
   });
 
-  // ⏳ 放置消滅
+  // 放置消滅
   setTimeout(() => {
     if (coin.isConnected) coin.remove();
   }, 8000);
@@ -88,7 +91,7 @@ function dropCoinFromRabbit(rabbitEl) {
 window.addEventListener("DOMContentLoaded", () => {
   updateCoinUI();
 
-  // イベント委譲（画像内クリックでもOK）
+  // イベント委譲（画像内クリックも拾う）
   document.addEventListener("click", (e) => {
     const rabbit = e.target.closest(".rabbit");
     if (!rabbit) return;
