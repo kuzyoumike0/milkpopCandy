@@ -263,7 +263,8 @@ findLeaderForBaby() {
       const maxX = Math.max(0, fr.width - bunnySize);
 
       if (this.isBaby) {
-        const leader = this.findLeaderAdult();
+        const leader = this.findLeaderForBaby();
+
         if (leader) {
           const desiredX = leader.x - leader.dir * BABY_FOLLOW_GAP;
           const dx = desiredX - this.x;
