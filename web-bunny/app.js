@@ -226,19 +226,29 @@
       }
     }
 
-    findLeaderAdult() {
-      let best = null;
-      let bestD = Infinity;
-      for (const b of bunnies) {
-        if (b === this || b.isBaby) continue;
-        const d = Math.abs(b.x - this.x);
-        if (d < bestD) {
-          bestD = d;
-          best = b;
-        }
-      }
-      return best;
+    // ★baby行列：大人 or 先に生まれたbaby をリーダーにする（最寄り）
+findLeaderForBaby() {
+  let best = null;
+  let bestD = Infinity;
+
+  for (const b of bunnies) {
+    if (b === this) continue;
+
+    // babyは「大人」か「自分より先に生まれたbaby」を追う
+    const canLead =
+      (!b.isBaby) || (b.isBaby && (b.bornAt < this.bornAt));
+
+    if (!canLead) continue;
+
+    const d = Math.abs(b.x - this.x);
+    if (d < bestD) {
+      bestD = d;
+      best = b;
     }
+  }
+  return best;
+}
+
 
     update(dt) {
       this.updateEvolve();
