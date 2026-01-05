@@ -1,7 +1,7 @@
 (() => {
   const ASSETS = {
     bunny: "./assets/bunny.png",
-    hart: "./assets/hart.png", // ★追加
+    hart: "./assets/hart.png",
     coinSE: "./assets/coin.mp3",
     poyoSE: "./assets/poyo.mp3",
     coins: [
@@ -54,8 +54,6 @@
   const seCoin = new Audio(ASSETS.coinSE);
   sePoyo.preload = "auto";
   seCoin.preload = "auto";
-  sePoyo.volume = 1.0;
-  seCoin.volume = 1.0;
 
   let audioUnlocked = false;
 
@@ -71,9 +69,7 @@
           sePoyo.pause();
           sePoyo.currentTime = 0;
           sePoyo.muted = false;
-        }).catch(() => {
-          sePoyo.muted = false;
-        });
+        }).catch(() => { sePoyo.muted = false; });
       } else {
         sePoyo.pause();
         sePoyo.currentTime = 0;
@@ -100,7 +96,6 @@
     return Number.isFinite(n) ? n : def;
   }
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
-  function nowMs() { return performance.now(); }
 
   function save() {
     localStorage.setItem(LS_KEYS.coins, String(coins));
@@ -119,12 +114,27 @@
     return Math.floor(base * Math.pow(growth, extra));
   }
 
-  // 放置時間（最後のクリックから）で coin1〜4
+  // 放置判定（最後のクリックから）で coin1〜4 の“ベース”
   function coinTierFromIdleSeconds(idleSec) {
     if (idleSec >= 90) return 4;
     if (idleSec >= 45) return 3;
     if (idleSec >= 18) return 2;
     return 1;
+  }
+
+  // ★満タン時のレア確率UP（coin3/coin4に寄せる）
+  function applyRareBoost(baseTier) {
+    // baseTierから“上げる”抽選（最大4）
+    // 体感：満タン時は coin3〜4 がかなり出る
+    const r = Math.random();
+
+    let up = 0;
+    if (r < 0.10) up = 3;       // 10%：+3（ほぼcoin4）
+    else if (r < 0.35) up = 2;  // 25%：+2
+    else if (r < 0.75) up = 1;  // 40%：+1
+    else up = 0;               // 25%：据え置き
+
+    return clamp(baseTier + up, 1, 4);
   }
 
   function coinValueFromTier(tier) {
@@ -144,7 +154,7 @@
     return groundLine.top - fr.top;
   }
 
-  // ゲージの1周にかかる時間（秒）＝ 2.2〜5.0
+  // ゲージ満タンまで：2.2〜5.0秒（個体ごとに変える）
   function randomGaugeSeconds() {
     return 2.2 + Math.random() * 2.8;
   }
@@ -167,28 +177,27 @@
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
 
-      // ★ゲージ
+      // gauge
       this.gaugeWrap = document.createElement("div");
       this.gaugeWrap.className = "bunnyGauge";
       this.gaugeFill = document.createElement("div");
       this.gaugeFill.className = "bunnyGaugeFill";
       this.gaugeWrap.appendChild(this.gaugeFill);
 
-      // ★ハート
+      // heart
       this.heart = document.createElement("img");
       this.heart.className = "bunnyHeart";
       this.heart.src = ASSETS.hart;
       this.heart.alt = "heart";
       this.heart.draggable = false;
 
-      // うさぎ本体
+      // bunny
       this.el = document.createElement("img");
       this.el.className = "bunny walk";
       this.el.src = ASSETS.bunny;
       this.el.alt = "bunny";
       this.el.draggable = false;
 
-      // レイヤー順：ゲージ→ハート→本体（見た目が自然）
       this.wrap.appendChild(this.gaugeWrap);
       this.wrap.appendChild(this.heart);
       this.wrap.appendChild(this.el);
@@ -198,21 +207,23 @@
       this.y = 0;
       this.homeX = 0;
 
-      // 個体差（歩行）
+      // walk individuality
       this.dir = Math.random() < 0.5 ? -1 : 1;
-      this.baseSpeed = 55 + Math.random() * 65;     // 55〜120 px/s
-      this.roamRange = 90 + Math.random() * 260;    // 90〜350 px
+      this.baseSpeed = 55 + Math.random() * 65;
+      this.roamRange = 90 + Math.random() * 260;
       this.turnChancePerSec = 0.08 + Math.random() * 0.35;
       this.pauseChancePerSec = 0.02 + Math.random() * 0.12;
       this.pauseLeft = 0;
 
-      // ★ゲージ（個体）
-      this.gauge = Math.random() * 0.25;   // 少しだけバラす
-      this.gaugePeriod = randomGaugeSeconds(); // 1周の秒数
-      this.lastFullAt = 0;
+      // gauge (fills while idle, NO auto drop)
+      this.gauge = Math.random() * 0.25;
+      this.gaugePeriod = randomGaugeSeconds();
+      this.charged = false;
 
-      // 放置判定（クリックから）
+      // idle time for tier base
       this.lastClickAt = Date.now();
+
+      // click cooldown (1s/匹)
       this.lastClickSpawnAt = 0;
 
       this.lastHopAt = 0;
@@ -225,6 +236,7 @@
       }, { capture: true });
 
       this.renderGauge();
+      this.updateChargeUI();
     }
 
     bunnyW() {
@@ -246,7 +258,7 @@
     }
 
     hop() {
-      const t = nowMs();
+      const t = performance.now();
       if (t - this.lastHopAt < 260) return;
       this.lastHopAt = t;
 
@@ -255,10 +267,17 @@
       this.el.classList.add("hop");
     }
 
-    showHeart() {
+    showHeartPop() {
+      // readyを外してからポップ
+      this.heart.classList.remove("ready");
       this.heart.classList.remove("show");
       void this.heart.offsetWidth;
       this.heart.classList.add("show");
+    }
+
+    updateChargeUI() {
+      if (this.charged) this.heart.classList.add("ready");
+      else this.heart.classList.remove("ready");
     }
 
     renderGauge() {
@@ -266,44 +285,56 @@
       this.gaugeFill.style.width = `${Math.round(p * 100)}%`;
     }
 
-    // クリックでコイン（1秒制限/匹）
-    tryClickDrop() {
-      const t = nowMs();
-      if (t - this.lastClickSpawnAt < 1000) return;
-
-      this.lastClickSpawnAt = t;
-      this.lastClickAt = Date.now();
-
-      playSE(sePoyo);
-      spawnCoinAtBunny(this, "click");
-    }
-
     idleSeconds() {
       return Math.max(0, (Date.now() - this.lastClickAt) / 1000);
     }
 
-    // ★ゲージ満タンで自動ドロップ（クリックとは別）
+    // ★放置でゲージだけ貯まる（満タンで止まる）
     updateGauge(dt) {
-      // dt秒でゲージ進行
+      if (this.charged) return;
+
       this.gauge += dt / this.gaugePeriod;
 
       if (this.gauge >= 1) {
-        // ちょうど満タン演出
-        this.gauge = 0;
-        this.gaugePeriod = randomGaugeSeconds();
-
-        spawnCoinAtBunny(this, "autoGauge");
-        this.showHeart();
+        this.gauge = 1;
+        this.charged = true;
+        this.updateChargeUI();
       }
-
       this.renderGauge();
     }
 
+    // ★クリックでコイン（満タンならレアUPして消費）
+    tryClickDrop() {
+      const t = performance.now();
+      if (t - this.lastClickSpawnAt < 1000) return;
+
+      this.lastClickSpawnAt = t;
+
+      // クリックしたら「放置タイマー」は更新（従来仕様）
+      this.lastClickAt = Date.now();
+
+      playSE(sePoyo);
+
+      const wasCharged = this.charged;
+
+      // 満タンなら：消費してゲージリセット
+      if (wasCharged) {
+        this.charged = false;
+        this.gauge = 0;
+        this.gaugePeriod = randomGaugeSeconds();
+        this.renderGauge();
+        this.showHeartPop();
+        this.updateChargeUI();
+      }
+
+      spawnCoinAtBunny(this, { rareBoost: wasCharged });
+    }
+
     update(dt) {
-      // ★ゲージを進める（放置ドロップはゲージ方式に変更）
+      // 放置で貯まる（自動ドロップしない）
       this.updateGauge(dt);
 
-      // 混雑時調整
+      // crowd adjust
       const crowd = bunnies.length;
       const speedMul = crowd <= 6 ? 1 : Math.max(0.32, 1 / Math.sqrt(crowd / 6));
       const rangeMul = crowd <= 6 ? 1 : Math.max(0.28, 1 / (crowd / 6));
@@ -323,12 +354,8 @@
       if (this.pauseLeft > 0) {
         this.pauseLeft -= dt;
       } else {
-        if (Math.random() < this.pauseChancePerSec * dt) {
-          this.pauseLeft = 0.15 + Math.random() * 0.9;
-        }
-        if (Math.random() < this.turnChancePerSec * dt) {
-          this.dir *= -1;
-        }
+        if (Math.random() < this.pauseChancePerSec * dt) this.pauseLeft = 0.15 + Math.random() * 0.9;
+        if (Math.random() < this.turnChancePerSec * dt) this.dir *= -1;
         this.x += this.dir * spd * dt;
       }
 
@@ -381,10 +408,7 @@
         e.stopPropagation();
         this.collect();
       });
-
-      this.el.addEventListener("pointerenter", () => {
-        this.collect();
-      });
+      this.el.addEventListener("pointerenter", () => this.collect());
 
       coinLayer.appendChild(this.el);
       this.render();
@@ -437,19 +461,17 @@
       this.el.style.left = `${this.x - 22}px`;
       this.el.style.top = `${this.y - 22}px`;
 
-      if (!this.resting && this.y > this.yFloor - 16) {
-        this.el.style.transform = `scale(1.05,0.95)`;
-      } else {
-        this.el.style.transform = `scale(1,1)`;
-      }
+      if (!this.resting && this.y > this.yFloor - 16) this.el.style.transform = `scale(1.05,0.95)`;
+      else this.el.style.transform = `scale(1,1)`;
     }
   }
 
-  // -----------------------
-  // Spawning / Layout
-  // -----------------------
-  function spawnCoinAtBunny(bunny, reason) {
-    const tier = coinTierFromIdleSeconds(bunny.idleSeconds());
+  function spawnCoinAtBunny(bunny, opts) {
+    const rareBoost = !!opts?.rareBoost;
+
+    // ベースtierは「最後のクリックからの放置時間」
+    const baseTier = coinTierFromIdleSeconds(bunny.idleSeconds());
+    const tier = rareBoost ? applyRareBoost(baseTier) : baseTier;
     const value = coinValueFromTier(tier);
 
     const fr = fieldRect();
@@ -511,17 +533,10 @@
 
   function debounce(fn, wait = 150) {
     let t = 0;
-    return () => {
-      clearTimeout(t);
-      t = setTimeout(fn, wait);
-    };
+    return () => { clearTimeout(t); t = setTimeout(fn, wait); };
   }
-
   const onResize = debounce(() => layoutBunnies(), 120);
 
-  // -----------------------
-  // Loop
-  // -----------------------
   function tick(ts) {
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
@@ -532,9 +547,6 @@
     rafId = requestAnimationFrame(tick);
   }
 
-  // -----------------------
-  // UI
-  // -----------------------
   function updateShopUI() {
     bunnyPriceEl.textContent = String(getBunnyPrice(bunnies.length));
   }
@@ -550,9 +562,6 @@
     }
   }
 
-  // -----------------------
-  // Init
-  // -----------------------
   function init() {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("./sw.js").catch(() => {});
