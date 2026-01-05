@@ -375,3 +375,39 @@ html,body{
   }
 }
 
+/* ===== 旅立ち節目 通知 ===== */
+.farewellMilestone{
+  position: fixed;
+  left: 50%;
+  bottom: 180px;
+  transform: translateX(-50%);
+  padding: 12px 20px;
+  background: rgba(255,255,255,0.9);
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 12px 36px rgba(0,0,0,.18);
+  pointer-events: none;
+  z-index: 1000;
+  opacity: 0;
+  animation: milestoneFloat 3.0s ease-out forwards;
+}
+
+.farewellMilestone.rea{
+  background: rgba(60,40,45,0.95);
+  color: #f3dede;
+}
+
+@keyframes milestoneFloat{
+  0%{
+    opacity: 0;
+    transform: translate(-50%, 16px);
+  }
+  15%{
+    opacity: 1;
+  }
+  100%{
+    opacity: 0;
+    transform: translate(-50%, -48px);
+  }
+}
