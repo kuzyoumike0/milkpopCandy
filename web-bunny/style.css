@@ -489,6 +489,20 @@ button.iconBtn{
   15%  { opacity:1; transform: translate(-50%, 0px) scale(1.00); }
   100% { opacity:0; transform: translate(-50%, -46px) scale(.98); }
 }
+/* レア台詞（きんきら） */
+.departMsg.rare{
+  background: linear-gradient(90deg,
+    rgba(255,220,120,1),
+    rgba(255,245,180,1),
+    rgba(255,200,80,1)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 10px rgba(255,230,150,.75))
+          drop-shadow(0 0 18px rgba(255,180,80,.45));
+}
 
 
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
