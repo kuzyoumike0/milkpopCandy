@@ -333,7 +333,17 @@
     const maxTier = gaugeToTier(gauge01);
 
     // 大量（好みで増やしてOK）
-    const countByTier = [0, 10, 18, 28, 44];
+    const baseCountByTier = [0, 10, 18, 28, 44];
+
+// ★種類による倍率
+const mul = BUNNY_DEFS[bunny.kind]?.coinMul ?? 1;
+
+// ★枚数を倍率で増減（最低1は保証）
+const count = Math.max(
+  1,
+  Math.floor(baseCountByTier[maxTier] * mul)
+);
+
     const count = countByTier[maxTier];
 
     // 上tierほど出やすい混合
