@@ -363,6 +363,38 @@ button.iconBtn{
   100% { transform: translateY(0) scale(1); }
 }
 
+/* 満タンクリック時：HUDがキラッ */
+#coinHud.shine{
+  position: relative;
+  overflow: hidden;
+  animation: hud-shine-pop 420ms ease-out;
+}
+@keyframes hud-shine-pop{
+  0%   { box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+  30%  { box-shadow: 0 10px 26px rgba(255,255,255,.35), 0 10px 26px rgba(255,135,184,.25); }
+  100% { box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+}
+
+#coinHud.shine::after{
+  content:"";
+  position:absolute;
+  top:-20%;
+  left:-60%;
+  width:45%;
+  height:160%;
+  transform: rotate(18deg);
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0),
+    rgba(255,255,255,.75),
+    rgba(255,255,255,0)
+  );
+  animation: hud-shine-sweep 420ms ease-out;
+}
+@keyframes hud-shine-sweep{
+  0%   { left:-60%; opacity:0; }
+  15%  { opacity:1; }
+  100% { left:140%; opacity:0; }
+}
 
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
 .shopItemDesc{ opacity:.85; margin-bottom:12px; }
