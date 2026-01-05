@@ -503,6 +503,42 @@ button.iconBtn{
   filter: drop-shadow(0 0 10px rgba(255,230,150,.75))
           drop-shadow(0 0 18px rgba(255,180,80,.45));
 }
+/* ===== Rank/Achievements modal ===== */
+.rankGrid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
+}
+.rankCard{
+  border:1px solid rgba(0,0,0,.06);
+  border-radius:18px;
+  padding:12px;
+  background: linear-gradient(180deg, #fff, #fff6fb);
+}
+.rankCard.wide{ grid-column: 1 / -1; }
+.rankTitle{ font-weight:900; margin-bottom:8px; }
+.rankList{ display:flex; flex-direction:column; gap:6px; font-weight:800; }
+.rankRow{ display:flex; justify-content:space-between; gap:10px; opacity:.92; }
+.rankRow small{ opacity:.75; font-weight:800; }
+
+.achList{ display:flex; flex-direction:column; gap:8px; }
+.achItem{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  padding:10px 12px;
+  border-radius:16px;
+  background:#fff;
+  border:1px solid rgba(0,0,0,.06);
+}
+.achItem.locked{ opacity:.55; }
+.achName{ font-weight:900; }
+.achDesc{ opacity:.78; font-weight:800; font-size:12px; margin-top:2px; }
+.achRight{ text-align:right; font-weight:900; white-space:nowrap; }
+.achRare{ background: linear-gradient(90deg,#ffd66a,#fff1a6,#ffcf4d); -webkit-background-clip:text; background-clip:text; color:transparent; }
+@media (max-width: 720px){
+  .rankGrid{ grid-template-columns: 1fr; }
+}
 
 
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
