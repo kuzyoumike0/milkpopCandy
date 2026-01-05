@@ -30,6 +30,9 @@
   const candyBtn = document.getElementById("candyBtn");
   const hintEl = document.getElementById("hint");
 
+  const departBtn = document.getElementById("departBtn");
+  const departTip = document.getElementById("departTip");
+
   const rankBtn = document.getElementById("rankBtn");
   const rankModal = document.getElementById("rankModal");
   const closeRankBtn = document.getElementById("closeRankBtn");
@@ -45,8 +48,6 @@
   const closeShopBtn = document.getElementById("closeShopBtn");
   const bunnyPriceEl = document.getElementById("bunnyPrice");
   const buyBunnyBtn = document.getElementById("buyBunnyBtn");
-  const departPriceEl = document.getElementById("departPrice");
-  const departBunnyBtn = document.getElementById("departBunnyBtn");
 
   /* ===== State ===== */
   let coins = safeInt(localStorage.getItem(LS_KEYS.coins), 0);
@@ -59,7 +60,6 @@
   let lastFrame = performance.now();
   let rafId = 0;
 
-  // candy drop mode
   let candyArmed = false;
 
   /* ===== Audio ===== */
@@ -84,9 +84,7 @@
   }
   window.addEventListener("pointerdown", unlockAudioOnce, { once: true });
 
-  function playSE(aud) {
-    try { aud.currentTime = 0; aud.play().catch(() => {}); } catch {}
-  }
+  function playSE(aud) { try { aud.currentTime = 0; aud.play().catch(() => {}); } catch {} }
 
   /* ===== Helpers ===== */
   function safeInt(v, def) {
@@ -151,7 +149,6 @@
     return 1;
   }
 
-  // gauge slower (8-16s)
   function randomGaugeSeconds() { return 8.0 + Math.random() * 8.0; }
 
   /* ===== Stats / Ranking / Achievements ===== */
@@ -175,22 +172,19 @@
       return { totalEarned:0,totalSpent:0,totalCandies:0,totalDepartures:0,totalRareDepartMsgs:0,maxCoinsHeld:coins,maxBunniesHeld:bunnyCount,maxSingleGain:0 };
     }
   }
-  function saveStats() {
-    localStorage.setItem(LS_KEYS.stats, JSON.stringify(stats));
-  }
+  function saveStats() { localStorage.setItem(LS_KEYS.stats, JSON.stringify(stats)); }
+
   function loadUnlockedSet() {
     try {
       const arr = JSON.parse(localStorage.getItem(LS_KEYS.unlocked) || "[]");
       return new Set(Array.isArray(arr) ? arr : []);
     } catch { return new Set(); }
   }
-  function saveUnlockedSet() {
-    localStorage.setItem(LS_KEYS.unlocked, JSON.stringify(Array.from(unlocked)));
-  }
+  function saveUnlockedSet() { localStorage.setItem(LS_KEYS.unlocked, JSON.stringify(Array.from(unlocked))); }
 
   function todayKeyJST() {
     const dtf = new Intl.DateTimeFormat("sv-SE", { timeZone:"Asia/Tokyo", year:"numeric", month:"2-digit", day:"2-digit" });
-    return dtf.format(new Date()); // YYYY-MM-DD
+    return dtf.format(new Date());
   }
   function loadDaily() {
     try {
@@ -198,9 +192,7 @@
       return typeof o === "object" && o ? o : {};
     } catch { return {}; }
   }
-  function saveDaily(obj) {
-    localStorage.setItem(LS_KEYS.daily, JSON.stringify(obj));
-  }
+  function saveDaily(obj) { localStorage.setItem(LS_KEYS.daily, JSON.stringify(obj)); }
 
   function onGain(value) {
     stats.totalEarned += value;
@@ -215,20 +207,8 @@
 
     checkAchievements();
   }
-
-  function onSpend(value) {
-    stats.totalSpent += value;
-    stats.maxCoinsHeld = Math.max(stats.maxCoinsHeld, coins);
-    saveStats();
-    checkAchievements();
-  }
-
-  function onCandy() {
-    stats.totalCandies += 1;
-    saveStats();
-    checkAchievements();
-  }
-
+  function onSpend(value) { stats.totalSpent += value; saveStats(); checkAchievements(); }
+  function onCandy() { stats.totalCandies += 1; saveStats(); checkAchievements(); }
   function onDepart(isRareMsg) {
     stats.totalDepartures += 1;
     if (isRareMsg) stats.totalRareDepartMsgs += 1;
@@ -250,10 +230,7 @@
   function checkAchievements() {
     let changed = false;
     for (const a of ACH) {
-      if (!unlocked.has(a.id) && a.ok()) {
-        unlocked.add(a.id);
-        changed = true;
-      }
+      if (!unlocked.has(a.id) && a.ok()) { unlocked.add(a.id); changed = true; }
     }
     if (changed) saveUnlockedSet();
     if (!rankModal.classList.contains("hidden")) renderRankModal();
@@ -262,7 +239,6 @@
   function fmt(n) { return (n || 0).toLocaleString("ja-JP"); }
 
   function renderRankModal() {
-    // best
     const bestRows = [
       ["累計獲得", `${fmt(stats.totalEarned)} 🪙`],
       ["累計消費", `${fmt(stats.totalSpent)} 🪙`],
@@ -277,18 +253,14 @@
       `<div class="rankRow"><span>${k}</span><span><small>${v}</small></span></div>`
     ).join("");
 
-    // daily (latest 7)
     const d = loadDaily();
-    const entries = Object.entries(d)
-      .map(([k,v]) => ({ k, v }))
+    const entries = Object.entries(d).map(([k,v]) => ({k,v}))
       .sort((a,b) => b.k.localeCompare(a.k))
       .slice(0, 7);
-
     dailyBox.innerHTML = entries.length
       ? entries.map(e => `<div class="rankRow"><span>${e.k}</span><span><small>${fmt(e.v)} 🪙</small></span></div>`).join("")
       : `<div class="rankRow"><span>まだ記録がありません</span><span><small>—</small></span></div>`;
 
-    // achievements
     achBox.innerHTML = ACH.map(a => {
       const isOn = unlocked.has(a.id);
       return `
@@ -303,16 +275,14 @@
     }).join("");
   }
 
-  /* ===== Message (depart) ===== */
+  /* ===== Depart messages ===== */
   const DEPART_MESSAGES = ["ありがとう…","またね…","いってきます…","だいすき…","たのしかった…","ばいばい…","げんきでね…"];
   const DEPART_RARE_MESSAGES = ["伝説になるね…✨","星になって見守るよ…🌟","また会おうね、約束…💛","この牧場、最高だった…👑","…君のコインは輝いてる…✨"];
   const DEPART_RARE_CHANCE = 0.03;
-
   function pickDepartMessageObj() {
     const rare = Math.random() < DEPART_RARE_CHANCE;
     const arr = rare ? DEPART_RARE_MESSAGES : DEPART_MESSAGES;
-    const text = arr[Math.floor(Math.random() * arr.length)];
-    return { text, rare };
+    return { text: arr[Math.floor(Math.random() * arr.length)], rare };
   }
 
   /* ===== FX ===== */
@@ -347,8 +317,7 @@
       const p = document.createElement("div");
       p.className = "puff show";
       const a = 0.65 + Math.random() * 0.25;
-      const pink = Math.random() < 0.35;
-      p.style.background = pink ? `rgba(255,195,220,${a})` : `rgba(255,255,255,${a})`;
+      p.style.background = (Math.random() < 0.35) ? `rgba(255,195,220,${a})` : `rgba(255,255,255,${a})`;
       const sz = 10 + Math.random() * 14;
       p.style.width = `${sz}px`;
       p.style.height = `${sz}px`;
@@ -376,13 +345,9 @@
   /* ===== Candy ===== */
   class Candy {
     constructor(x, ttlMs = 10000) {
-      this.x = x;
-      this.y = -60;
-      this.vy = 0;
-      this.gravity = 2600;
-      this.resting = false;
-      this.spawnAt = performance.now();
-      this.ttlMs = ttlMs;
+      this.x = x; this.y = -60; this.vy = 0;
+      this.gravity = 2600; this.resting = false;
+      this.spawnAt = performance.now(); this.ttlMs = ttlMs;
 
       this.el = document.createElement("img");
       this.el.className = "candy";
@@ -399,11 +364,7 @@
         this.vy += this.gravity * dt;
         this.y += this.vy * dt;
         const fy = this.floorY();
-        if (this.y >= fy) {
-          this.y = fy;
-          this.vy = 0;
-          this.resting = true;
-        }
+        if (this.y >= fy) { this.y = fy; this.vy = 0; this.resting = true; }
       }
       this.render();
     }
@@ -505,8 +466,8 @@
 
       if (candyTargetXOrNull != null) {
         const spread = 52;
-        const centerIndex = (crowdCount - 1) / 2;
-        const offset = (crowdIndex - centerIndex) * spread;
+        const center = (crowdCount - 1) / 2;
+        const offset = (crowdIndex - center) * spread;
         this.targetHomeX = candyTargetXOrNull + offset;
       } else {
         this.targetHomeX = this.baseHomeX;
@@ -539,10 +500,7 @@
       this.el.src = ASSETS.coins[tier - 1];
       this.el.draggable = false;
 
-      this.x = x;
-      this.y = yStart;
-      this.yFloor = yFloor;
-
+      this.x = x; this.y = yStart; this.yFloor = yFloor;
       this.vx = (Math.random() * 2 - 1) * (flashy ? 22 : 10);
       this.vy = 0;
       this.gravity = flashy ? 2400 : 2100;
@@ -571,7 +529,6 @@
       bumpCoinHud();
       playSE(seCoin);
 
-      // stats
       stats.maxCoinsHeld = Math.max(stats.maxCoinsHeld, coins);
       stats.maxSingleGain = Math.max(stats.maxSingleGain, this.value);
       saveStats();
@@ -592,13 +549,8 @@
 
       if (this.y >= this.yFloor) {
         this.y = this.yFloor;
-        if (Math.abs(this.vy) > 260) {
-          this.vy = -this.vy * this.bounce;
-        } else {
-          this.resting = true;
-          this.vy = 0;
-          this.vx = 0;
-        }
+        if (Math.abs(this.vy) > 260) this.vy = -this.vy * this.bounce;
+        else { this.resting = true; this.vy = 0; this.vx = 0; }
       }
       this.render();
     }
@@ -607,7 +559,6 @@
       this.el.style.left = `${this.x - 22}px`;
       this.el.style.top  = `${this.y - 22}px`;
       const squash = (!this.resting && this.y > this.yFloor - 16);
-
       if (this.flashy) {
         const rot = this.angle * 180 / Math.PI;
         const scale = squash ? "scale(1.18,0.88)" : "scale(1.08,1.08)";
@@ -629,16 +580,13 @@
     const x = (r.left - fr.left) + (r.width / 2);
     const startY = gY - (flashy ? 220 : 150);
 
-    if (flashy) {
-      spawnSparks(x, startY);
-      shineCoinHud();
-    }
+    if (flashy) { spawnSparks(x, startY); shineCoinHud(); }
 
     const c = new Coin(x, startY, gY - 2, tier, value, flashy);
     coinsOnField.push(c);
   }
 
-  /* ===== Candy UI ===== */
+  /* ===== Candy ===== */
   function flashButtonText(btn, text, ms = 650) {
     const prev = btn.textContent;
     btn.textContent = text;
@@ -653,21 +601,14 @@
   }
 
   candyBtn.addEventListener("click", () => {
-    if (!candyArmed && coins < COST.CANDY) {
-      flashButtonText(candyBtn, "コイン不足…");
-      return;
-    }
+    if (!candyArmed && coins < COST.CANDY) { flashButtonText(candyBtn, "コイン不足…"); return; }
     setCandyMode(!candyArmed);
   });
 
   field.addEventListener("pointerdown", (e) => {
     if (!candyArmed) return;
 
-    if (coins < COST.CANDY) {
-      setCandyMode(false);
-      flashButtonText(candyBtn, "コイン不足…");
-      return;
-    }
+    if (coins < COST.CANDY) { setCandyMode(false); flashButtonText(candyBtn, "コイン不足…"); return; }
 
     coins -= COST.CANDY;
     saveCore();
@@ -679,10 +620,51 @@
     const fr = fieldRect();
     const x = clamp(e.clientX - fr.left, 30, fr.width - 30);
 
-    const c = new Candy(x, 10000);
-    candies.push(c);
-
+    candies.push(new Candy(x, 10000));
     setCandyMode(false);
+  });
+
+  /* ===== Depart (HUD button) ===== */
+  function updateDepartTip() {
+    if (!departTip) return;
+    departTip.innerHTML =
+      `${COST.DEPART}🪙 消費で うさぎを1匹送り出します。<br/>` +
+      `※最後の1匹は旅立ちできません。`;
+  }
+  updateDepartTip();
+
+  departBtn.addEventListener("click", () => {
+    if (bunnies.length <= 1) { flashButtonText(departBtn, "ムリ…"); return; }
+    if (coins < COST.DEPART) { flashButtonText(departBtn, "不足…"); return; }
+
+    const victim = bunnies[bunnies.length - 1];
+    const fr = fieldRect();
+    const r = victim.wrap.getBoundingClientRect();
+    const fxX = (r.left - fr.left) + r.width * 0.5;
+    const fxY = (r.top - fr.top) + r.height * 0.65;
+
+    coins -= COST.DEPART;
+    saveCore();
+    updateHud();
+    bumpCoinHud();
+    onSpend(COST.DEPART);
+
+    departBtn.disabled = true;
+
+    const msg = pickDepartMessageObj();
+    victim.wrap.classList.add("departing");
+    playSE(seTabidati);
+    spawnDepartFx(fxX, fxY);
+    spawnDepartMsg(fxX, fxY - 40, msg);
+    onDepart(msg.rare);
+
+    setTimeout(() => {
+      bunnyCount = bunnies.length - 1;
+      saveCore();
+      rebuildBunnies(bunnyCount);
+      updateHud();
+      departBtn.disabled = false;
+    }, 420);
   });
 
   /* ===== Modals ===== */
@@ -704,7 +686,6 @@
   /* ===== Shop ===== */
   function updateShopUI() {
     bunnyPriceEl.textContent = String(getBunnyPrice(bunnies.length));
-    if (departPriceEl) departPriceEl.textContent = String(COST.DEPART);
   }
 
   buyBunnyBtn.addEventListener("click", () => {
@@ -723,41 +704,6 @@
     updateShopUI();
     updateHud();
     bumpCoinHud();
-  });
-
-  departBunnyBtn.addEventListener("click", () => {
-    if (bunnies.length <= 1) { flashButtonText(departBunnyBtn, "これ以上ムリ…"); return; }
-    if (coins < COST.DEPART) { flashButtonText(departBunnyBtn, "コイン不足…"); return; }
-
-    const victim = bunnies[bunnies.length - 1];
-    const fr = fieldRect();
-    const r = victim.wrap.getBoundingClientRect();
-    const fxX = (r.left - fr.left) + r.width * 0.5;
-    const fxY = (r.top - fr.top) + r.height * 0.65;
-
-    coins -= COST.DEPART;
-    saveCore();
-    updateHud();
-    bumpCoinHud();
-    onSpend(COST.DEPART);
-
-    departBunnyBtn.disabled = true;
-
-    const msg = pickDepartMessageObj();
-    victim.wrap.classList.add("departing");
-    playSE(seTabidati);
-    spawnDepartFx(fxX, fxY);
-    spawnDepartMsg(fxX, fxY - 40, msg);
-    onDepart(msg.rare);
-
-    setTimeout(() => {
-      bunnyCount = bunnies.length - 1;
-      saveCore();
-      rebuildBunnies(bunnyCount);
-      updateShopUI();
-      updateHud();
-      departBunnyBtn.disabled = false;
-    }, 420);
   });
 
   /* ===== Init & Loop ===== */
@@ -787,7 +733,6 @@
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
-    // candies
     const now = performance.now();
     for (let i = candies.length - 1; i >= 0; i--) {
       const c = candies[i];
@@ -795,23 +740,19 @@
       if (c.isExpired(now)) { c.remove(); candies.splice(i, 1); }
     }
 
-    // target candy (latest)
     const targetCandy = candies.length ? candies[candies.length - 1] : null;
     const targetX = targetCandy ? targetCandy.x : null;
 
-    // bunnies
     for (let i = 0; i < bunnies.length; i++) {
       bunnies[i].update(dt, i, bunnies.length, targetX);
     }
 
-    // coins
     for (const c of coinsOnField) c.update(dt);
 
     rafId = requestAnimationFrame(tick);
   }
 
   function init() {
-    // bootstrap max stats
     stats.maxCoinsHeld = Math.max(stats.maxCoinsHeld, coins);
     stats.maxBunniesHeld = Math.max(stats.maxBunniesHeld, bunnyCount);
     saveStats();
