@@ -1,345 +1,287 @@
-/* =========================
-  ROOT / RESET
-========================= */
 :root{
   --bunnySize: 140px;
 }
 
-*{
-  box-sizing: border-box;
-  user-select: none;
-}
+*{ box-sizing:border-box; user-select:none; }
+body{ margin:0; background:linear-gradient(#ffeaf4,#fff); font-family:"M PLUS Rounded 1c",system-ui,sans-serif; }
 
-body{
-  margin: 0;
-  background: linear-gradient(#ffeaf4, #fff);
-  font-family: "M PLUS Rounded 1c", system-ui, sans-serif;
-}
+.hidden{ display:none !important; }
 
-/* =========================
-  LAYOUT
-========================= */
-#app{
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  position: relative;
-}
+/* ===== APP ===== */
+#app{ width:100vw; height:100vh; overflow:hidden; position:relative; }
 
+/* ===== HUD ===== */
 #hud{
   position: fixed;
-  top: 8px;
+  top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  background: rgba(255,255,255,0.85);
-  padding: 8px 14px;
+  display:flex;
+  gap:10px;
+  align-items:center;
+  background: rgba(255,255,255,0.88);
+  padding: 10px 14px;
   border-radius: 16px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-  z-index: 10;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+  z-index: 50;
+  backdrop-filter: blur(6px);
 }
 
-#coinHud.bump{
-  animation: bump 0.25s ease;
-}
-#coinHud.shine{
-  animation: shine 0.6s ease;
+#coinHud.bump{ animation:bump .25s ease; }
+#coinHud.shine{ animation:shine .6s ease; }
+@keyframes bump{ 0%{transform:scale(1)} 40%{transform:scale(1.15)} 100%{transform:scale(1)} }
+@keyframes shine{ 0%{filter:brightness(1)} 50%{filter:brightness(1.55)} 100%{filter:brightness(1)} }
+
+/* ===== Hint（上の説明） ===== */
+#hint{
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30,30,40,0.92);
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.35;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.22);
+  z-index: 49;
+  max-width: min(520px, 92vw);
 }
 
-@keyframes bump{
-  0%{transform: scale(1)}
-  40%{transform: scale(1.15)}
-  100%{transform: scale(1)}
+/* ===== Buttons ===== */
+button{
+  border:none;
+  border-radius: 14px;
+  padding: 7px 14px;
+  background:#ffd6e7;
+  font-weight:800;
+  cursor:pointer;
+  white-space:nowrap;
 }
-@keyframes shine{
-  0%{filter: brightness(1)}
-  50%{filter: brightness(1.5)}
-  100%{filter: brightness(1)}
+button:hover{ filter:brightness(1.05); }
+button:disabled{ opacity:.55; cursor:not-allowed; }
+
+#candyBtn.armed{
+  background: #ffe08a;
 }
 
-/* =========================
-  FIELD
-========================= */
-#field{
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
+/* ===== Hover Tip（お迎え詳細） ===== */
+.hasTip{ position:relative; }
+.hasTip .tip{
+  position:absolute;
+  left:50%;
+  top:calc(100% + 10px);
+  transform:translateX(-50%);
+  min-width:240px;
+  max-width:300px;
+  padding:10px 12px;
+  border-radius:12px;
+  background: rgba(30,30,40,0.92);
+  color:#fff;
+  font-size:12px;
+  line-height:1.45;
+  box-shadow:0 12px 30px rgba(0,0,0,0.22);
+  border:1px solid rgba(255,255,255,0.12);
+  opacity:0;
+  pointer-events:none;
+  transition: opacity .15s ease, transform .15s ease;
+  z-index:60;
 }
+.hasTip:hover .tip{ opacity:1; transform:translateX(-50%) translateY(2px); }
+.tip .priceBad{ color:#ff5a5a; font-weight:900; }
 
-#groundLine{
-  position: absolute;
-  bottom: 60px;
-  left: 0;
-  right: 0;
-  height: 4px;
-}
+/* ===== Field ===== */
+#field{ position:absolute; inset:0; overflow:hidden; }
+#bunnyLayer, #coinLayer{ position:absolute; inset:0; }
+#groundLine{ position:absolute; bottom:60px; left:0; right:0; height:4px; }
 
-/* =========================
-  BUNNY
-========================= */
+/* ===== Bunny ===== */
 .bunnyWrap{
-  position: absolute;
+  position:absolute;
   width: var(--bunnySize);
   height: var(--bunnySize);
-  pointer-events: auto;
+  pointer-events:auto;
 }
-
 .bunny{
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  transition: transform 0.18s ease;
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  transition: transform .18s ease;
 }
+.bunnyWrap.flip .bunny{ transform: scaleX(-1); }
 
-.bunnyWrap.flip .bunny{
-  transform: scaleX(-1);
-}
-
-/* baby は小さい */
 .bunnyWrap.baby{
   transform: scale(0.82);
   transform-origin: 50% 100%;
 }
 
-/* =========================
-  HEART (チャージ表示)
-========================= */
+/* ===== Heart ===== */
 .bunnyHeart{
-  position: absolute;
-  top: -28px;
-  left: 50%;
+  position:absolute;
+  top:-28px;
+  left:50%;
   transform: translateX(-50%);
-  width: 28px;
-  opacity: 0;
-  pointer-events: none;
+  width:28px;
+  opacity:0;
+  pointer-events:none;
 }
-
 .bunnyHeart.show{
-  opacity: 1;
+  opacity:1;
   animation: heartFloat 1.4s ease-in-out infinite;
 }
-
 @keyframes heartFloat{
-  0%{transform: translateX(-50%) translateY(0)}
-  50%{transform: translateX(-50%) translateY(-6px)}
-  100%{transform: translateX(-50%) translateY(0)}
+  0%{transform:translateX(-50%) translateY(0)}
+  50%{transform:translateX(-50%) translateY(-6px)}
+  100%{transform:translateX(-50%) translateY(0)}
 }
 
-/* =========================
-  BUNNY GESTURES
-========================= */
-.bunny.hop{
-  animation: hop 0.22s ease;
-}
+/* ===== Gestures ===== */
+.bunny.hop{ animation: hop .22s ease; }
 @keyframes hop{
-  0%{transform: translateY(0)}
-  50%{transform: translateY(-14px)}
-  100%{transform: translateY(0)}
+  0%{transform:translateY(0)}
+  50%{transform:translateY(-14px)}
+  100%{transform:translateY(0)}
 }
-
-.bunny.sniff{
-  animation: sniff 0.3s ease;
-}
+.bunny.sniff{ animation: sniff .3s ease; }
 @keyframes sniff{
-  0%{transform: translateY(0)}
-  50%{transform: translateY(-6px)}
-  100%{transform: translateY(0)}
+  0%{transform:translateY(0)}
+  50%{transform:translateY(-6px)}
+  100%{transform:translateY(0)}
 }
 
-/* =========================
-  COIN
-========================= */
+/* ===== Coin ===== */
 .coin{
-  position: absolute;
-  width: 44px;
-  height: 44px;
-  pointer-events: auto;
-  cursor: pointer;
-  transition: transform 0.12s ease;
+  position:absolute;
+  width:44px;
+  height:44px;
+  pointer-events:auto;
+  cursor:pointer;
+  transition: transform .12s ease;
 }
+.coin:hover{ transform:scale(1.15); }
 
-.coin:hover{
-  transform: scale(1.15);
-}
-
-/* =========================
-  CANDY
-========================= */
+/* ===== Candy ===== */
 .candy{
-  position: absolute;
-  width: 52px;
-  height: 52px;
-  pointer-events: none;
+  position:absolute;
+  width:52px;
+  height:52px;
+  pointer-events:none;
 }
 
-/* =========================
-  SPARK / FX
-========================= */
+/* ===== Spark / FX ===== */
 .spark{
-  position: absolute;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  opacity: 0;
+  position:absolute;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  opacity:0;
 }
-
 .spark.show{
-  opacity: 1;
-  animation: spark 0.7s ease-out forwards;
+  opacity:1;
+  animation: spark .7s ease-out forwards;
 }
-
 @keyframes spark{
-  from{
-    transform: translate(0,0) scale(1);
-    opacity: 1;
-  }
-  to{
-    transform: translate(var(--dx), var(--dy)) scale(0.3);
-    opacity: 0;
-  }
+  from{ transform:translate(0,0) scale(1); opacity:1; }
+  to{ transform:translate(var(--dx), var(--dy)) scale(.3); opacity:0; }
 }
 
-/* =========================
-  GAIN POP
-========================= */
-.gainPop{
-  position: absolute;
-  font-weight: 800;
-  font-size: 18px;
-  color: #ffb400;
-  pointer-events: none;
-  opacity: 0;
+/* ===== Modal Backdrop + Modal Card ===== */
+#modalBackdrop{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.28);
+  z-index: 80;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 18px;
 }
 
-.gainPop.show{
-  opacity: 1;
-  animation: gainPop 0.8s ease forwards;
+.modal{
+  width: min(520px, 92vw);
+  max-height: min(72vh, 640px);
+  overflow:auto;
+  background: rgba(255,255,255,0.95);
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.25);
+  border: 1px solid rgba(0,0,0,0.06);
+  padding: 14px 14px 12px;
 }
 
-.gainPop.rainbow{
-  background: linear-gradient(90deg, red, orange, yellow, green, cyan, blue, violet);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+.modalHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom: 8px;
 }
 
-@keyframes gainPop{
-  from{
-    transform: translateY(0);
-    opacity: 1;
-  }
-  to{
-    transform: translateY(-30px);
-    opacity: 0;
-  }
+.modalTitle{
+  font-weight: 900;
 }
 
-/* =========================
-  SHOP / HOVER TIP
-========================= */
-.hasTip{
-  position: relative;
-}
-
-.hasTip .tip{
-  position: absolute;
-  left: 50%;
-  top: calc(100% + 10px);
-  transform: translateX(-50%);
-  min-width: 220px;
-  padding: 10px 12px;
-  background: rgba(30,30,40,0.92);
-  color: #fff;
+.modalClose{
+  width: 34px;
+  height: 34px;
   border-radius: 12px;
-  font-size: 12px;
-  line-height: 1.4;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  z-index: 20;
+  background: #ffe1ee;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 
-.hasTip:hover .tip{
-  opacity: 1;
-  transform: translateX(-50%) translateY(2px);
-}
-
-.tip .priceBad{
-  color: #ff5a5a;
-  font-weight: 800;
-}
-
-/* =========================
-  BUTTONS
-========================= */
-button{
-  border: none;
+.modalSection{
+  background: rgba(255,220,235,0.35);
+  border: 1px solid rgba(0,0,0,0.06);
   border-radius: 14px;
-  padding: 6px 14px;
-  background: #ffd6e7;
-  font-weight: 700;
-  cursor: pointer;
+  padding: 10px 12px;
+  margin: 10px 0;
 }
 
-button:hover{
-  filter: brightness(1.05);
+.rankRow{
+  display:flex;
+  justify-content:space-between;
+  padding: 6px 0;
+  border-bottom: 1px dashed rgba(0,0,0,0.08);
 }
+.rankRow:last-child{ border-bottom:none; }
 
-/* =========================
-  DEPART / MESSAGE
-========================= */
+.achItem{
+  display:flex;
+  justify-content:space-between;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.7);
+  border: 1px solid rgba(0,0,0,0.06);
+  margin: 8px 0;
+}
+.achItem.locked{ opacity: .55; }
+.achName{ font-weight: 900; }
+.achRare{ color: #d94; }
+
+/* ===== Depart Message ===== */
 .departMsg{
-  position: absolute;
-  background: rgba(255,255,255,0.9);
+  position:absolute;
+  background: rgba(255,255,255,0.92);
   padding: 6px 12px;
   border-radius: 12px;
   font-size: 14px;
-  pointer-events: none;
-  opacity: 0;
+  pointer-events:none;
+  opacity:0;
 }
-
-.departMsg.show{
-  opacity: 1;
-  animation: departMsg 2.2s ease forwards;
-}
-
-.departMsg.rare{
-  background: linear-gradient(90deg,#ffd700,#ff9);
-}
-
+.departMsg.show{ opacity:1; animation: departMsg 2.2s ease forwards; }
+.departMsg.rare{ background: linear-gradient(90deg,#ffd700,#ff9); }
 @keyframes departMsg{
-  from{
-    transform: translateY(0);
-    opacity: 1;
-  }
-  to{
-    transform: translateY(-40px);
-    opacity: 0;
-  }
+  from{ transform: translateY(0); opacity:1; }
+  to{ transform: translateY(-40px); opacity:0; }
 }
 
-/* =========================
-  PUFF
-========================= */
-.puff{
-  position: absolute;
-  border-radius: 50%;
-  opacity: 0;
-}
-
-.puff.show{
-  opacity: 1;
-  animation: puff 0.65s ease forwards;
-}
-
+/* ===== Puff ===== */
+.puff{ position:absolute; border-radius:50%; opacity:0; }
+.puff.show{ opacity:1; animation: puff .65s ease forwards; }
 @keyframes puff{
-  from{
-    transform: translate(0,0);
-    opacity: 1;
-  }
-  to{
-    transform: translate(var(--dx), var(--dy));
-    opacity: 0;
-  }
+  from{ transform: translate(0,0); opacity:1; }
+  to{ transform: translate(var(--dx), var(--dy)); opacity:0; }
 }
