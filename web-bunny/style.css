@@ -10,6 +10,10 @@
   --edgeVisibleRatio: 0.55;
 }
 
+/* 任意：ショップカード間の余白を統一したい場合 */
+.shopCard + .shopCard{ margin-top:12px; }
+
+
 *{ box-sizing:border-box; }
 html,body{ height:100%; margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif; color:var(--text); }
 body{
