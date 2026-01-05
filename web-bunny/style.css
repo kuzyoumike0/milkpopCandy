@@ -336,6 +336,32 @@ button.iconBtn{
   15%  { opacity:1; transform: translate(-50%, 0px) scale(1.05); }
   100% { opacity:0; transform: translate(-50%, -34px) scale(1.0); }
 }
+/* coin4（+100）だけ虹っぽく光る */
+.gainPop.rainbow{
+  background: linear-gradient(90deg,
+    rgba(255,140,170,1),
+    rgba(255,220,120,1),
+    rgba(140,255,180,1),
+    rgba(140,200,255,1),
+    rgba(220,140,255,1)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 10px rgba(255,255,255,.65))
+          drop-shadow(0 0 18px rgba(255,135,184,.45));
+}
+
+/* HUDコイン数：回収時にバウンス */
+#coinHud.bump{
+  animation: hud-bump 220ms ease-out;
+}
+@keyframes hud-bump{
+  0%   { transform: translateY(0) scale(1); }
+  40%  { transform: translateY(-2px) scale(1.06); }
+  100% { transform: translateY(0) scale(1); }
+}
 
 
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
