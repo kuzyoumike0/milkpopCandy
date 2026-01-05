@@ -592,6 +592,17 @@ button.iconBtn{
   transform: rotate(45deg);
 }
 
+/* ★baby期間はハート（チャージ）を出さない */
+.bunnyWrap.baby .bunnyHeart{
+  display: none !important;
+}
+.bunnyWrap.baby{
+  transform: scale(0.82) translateY(6px);
+}
+.bunnyWrap.baby.flip{
+  transform: scaleX(-1) scale(0.82) translateY(6px);
+}
+
 .shopItemTitle{ font-size:16px; font-weight:900; margin-bottom:6px; }
 .shopItemDesc{ opacity:.85; margin-bottom:12px; }
 .shopRow{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
