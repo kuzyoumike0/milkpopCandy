@@ -429,15 +429,16 @@
   // -----------------------
   // Loop
   // -----------------------
-  function tick(ts) {
-    const dt = Math.min(0.033, (ts - lastFrame) / 1000);
-    lastFrame = ts;
+ function tick(ts) {
+  const dt = Math.min(0.033, (ts - lastFrame) / 1000);
+  lastFrame = ts;
 
-    for (const b of bunnies) b.update(dt);
-    for (const c of coinsOnField) c.update(dt);
+  for (const b of bunnies) b.update(dt);
+  for (const c of coinsOnField) c.update(dt);
 
-    rafId = requestAnimationFrame(tick);
-  }
+  rafId = requestAnimationFrame(tick);
+}
+
 
   // -----------------------
   // UI
