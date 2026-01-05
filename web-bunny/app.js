@@ -2,6 +2,7 @@
   const ASSETS = {
     bunny: "./assets/bunny.png",
     hart: "./assets/hart.png",
+    candy: "./assets/candy.png",
     coinSE: "./assets/coin.mp3",
     poyoSE: "./assets/poyo.mp3",
     coins: [
@@ -25,6 +26,9 @@
   const bunnyValueEl = document.getElementById("bunnyValue");
   const coinHudEl = document.getElementById("coinHud");
 
+  const candyBtn = document.getElementById("candyBtn");
+  const hintEl = document.getElementById("hint");
+
   const shopBtn = document.getElementById("shopBtn");
   const resetBtn = document.getElementById("resetBtn");
 
@@ -42,9 +46,13 @@
 
   const bunnies = [];
   const coinsOnField = [];
+  const candies = [];
 
   let lastFrame = performance.now();
   let rafId = 0;
+
+  // キャンディ投下モード
+  let candyArmed = false;
 
   /* =======================
      Audio
@@ -86,9 +94,8 @@
     const n = parseInt(String(v ?? ""), 10);
     return Number.isFinite(n) ? n : def;
   }
-  function clamp(n, a, b) {
-    return Math.max(a, Math.min(b, n));
-  }
+  function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+  function lerp(a, b, t) { return a + (b - a) * t; }
 
   function save() {
     localStorage.setItem(LS_KEYS.coins, String(coins));
@@ -118,6 +125,7 @@
     return Math.floor(base * Math.pow(growth, Math.max(0, nextIndex - 1)));
   }
 
+  // 「最後にクリックした時刻」からの放置時間でベースTier
   function coinTierFromIdleSeconds(sec) {
     if (sec >= 90) return 4;
     if (sec >= 45) return 3;
@@ -134,6 +142,7 @@
     return clamp(baseTier + up, 1, 4);
   }
 
+  // ★コイン価値（指定）
   function coinValueFromTier(tier) {
     if (tier === 4) return 100;
     if (tier === 3) return 10;
@@ -141,9 +150,7 @@
     return 1;
   }
 
-  function fieldRect() {
-    return field.getBoundingClientRect();
-  }
+  function fieldRect() { return field.getBoundingClientRect(); }
 
   function groundY() {
     const fr = fieldRect();
@@ -151,8 +158,9 @@
     return gl.top - fr.top;
   }
 
+  // ★ゲージ充電：遅くする（満タンまで 8〜16秒）
   function randomGaugeSeconds() {
-    return 2.2 + Math.random() * 2.8;
+    return 8.0 + Math.random() * 8.0;
   }
 
   /* =======================
@@ -167,6 +175,7 @@
 
     d.style.left = `${clamp(x, 0, fr.width)}px`;
     d.style.top = `${clamp(y, 0, fr.height)}px`;
+
     coinLayer.appendChild(d);
     setTimeout(() => d.remove(), 800);
   }
@@ -186,6 +195,66 @@
   }
 
   /* =======================
+     Candy
+  ======================= */
+  class Candy {
+    constructor(x, ttlMs = 10000) {
+      this.x = x;
+      this.y = -60;
+      this.vy = 0;
+      this.gravity = 2600;
+      this.resting = false;
+      this.spawnAt = performance.now();
+      this.ttlMs = ttlMs;
+
+      this.el = document.createElement("img");
+      this.el.className = "candy";
+      this.el.src = ASSETS.candy;
+      this.el.alt = "candy";
+      this.el.draggable = false;
+
+      coinLayer.appendChild(this.el);
+      this.render();
+    }
+
+    floorY() {
+      return groundY() - 2;
+    }
+
+    isExpired(now) {
+      return (now - this.spawnAt) >= this.ttlMs;
+    }
+
+    remove() {
+      this.el.remove();
+    }
+
+    update(dt) {
+      if (!this.resting) {
+        this.vy += this.gravity * dt;
+        this.y += this.vy * dt;
+
+        const fy = this.floorY();
+        if (this.y >= fy) {
+          this.y = fy;
+          this.vy = 0;
+          this.resting = true;
+        }
+      }
+      this.render();
+    }
+
+    render() {
+      this.el.style.left = `${this.x - 26}px`;
+      this.el.style.top = `${this.y - 26}px`;
+      // ちょい揺れ
+      const t = performance.now() / 200;
+      const rot = Math.sin(t) * 6;
+      this.el.style.transform = `rotate(${rot}deg)`;
+    }
+  }
+
+  /* =======================
      Bunny
   ======================= */
   let bunnyIdSeq = 1;
@@ -200,27 +269,41 @@
       this.heart = document.createElement("img");
       this.heart.className = "bunnyHeart";
       this.heart.src = ASSETS.hart;
+      this.heart.alt = "heart";
+      this.heart.draggable = false;
 
       this.el = document.createElement("img");
       this.el.className = "bunny walk";
       this.el.src = ASSETS.bunny;
+      this.el.alt = "bunny";
+      this.el.draggable = false;
 
       this.wrap.appendChild(this.heart);
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
+      // 位置
       this.x = 0;
       this.y = 0;
-      this.homeX = 0;
 
+      // 通常のホーム（整列結果）
+      this.baseHomeX = 0;
+      this.baseHomeY = 0;
+
+      // 集合時ターゲット
+      this.targetHomeX = 0;
+
+      // 歩き個体差
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 65;
       this.roamRange = 90 + Math.random() * 260;
 
+      // ゲージ（内部・貯まるだけ）
       this.gauge = Math.random() * 0.25;
       this.gaugePeriod = randomGaugeSeconds();
       this.charged = false;
 
+      // tier基準用
       this.lastClickAt = Date.now();
       this.lastClickSpawnAt = 0;
 
@@ -231,10 +314,13 @@
       });
     }
 
-    setHome(x, y) {
-      this.homeX = x;
-      this.y = y;
-      if (this.x === 0) this.x = x;
+    setBaseHome(x, y) {
+      this.baseHomeX = x;
+      this.baseHomeY = y;
+      if (this.x === 0 && this.y === 0) {
+        this.x = x;
+        this.y = y;
+      }
     }
 
     idleSeconds() {
@@ -255,11 +341,12 @@
       const t = performance.now();
       if (t - this.lastClickSpawnAt < 1000) return;
       this.lastClickSpawnAt = t;
-      this.lastClickAt = Date.now();
 
+      this.lastClickAt = Date.now();
       playSE(sePoyo);
 
       const wasCharged = this.charged;
+
       if (wasCharged) {
         this.charged = false;
         this.gauge = 0;
@@ -272,15 +359,43 @@
       spawnCoinAtBunny(this, wasCharged);
     }
 
-    update(dt) {
+    update(dt, crowdIndex, crowdCount, candyTargetXOrNull) {
       this.updateGauge(dt);
 
-      this.x += this.dir * this.baseSpeed * dt;
-      if (Math.abs(this.x - this.homeX) > this.roamRange) this.dir *= -1;
+      // 集合ターゲットがあるなら、そこに寄る（個体ごとに横ズレを付ける）
+      if (candyTargetXOrNull != null) {
+        const spread = 52; // うさぎ同士の間隔
+        const centerIndex = (crowdCount - 1) / 2;
+        const offset = (crowdIndex - centerIndex) * spread;
+        this.targetHomeX = candyTargetXOrNull + offset;
+      } else {
+        // 通常は整列ホーム
+        this.targetHomeX = this.baseHomeX;
+      }
 
-      this.wrap.style.left = `${this.x}px`;
-      this.wrap.style.top = `${this.y}px`;
+      // ホームをスムーズに追従（急にワープしない）
+      const homeX = lerp(this.x, this.targetHomeX, 0.03);
+
+      // 歩行：ホーム周辺をちょこちょこ
+      const roam = (candyTargetXOrNull != null) ? 35 : this.roamRange;
+      const targetMin = homeX - roam;
+      const targetMax = homeX + roam;
+
+      // スピードも集合時は少し上げる
+      const spd = this.baseSpeed * (candyTargetXOrNull != null ? 1.25 : 1.0);
+
+      this.x += this.dir * spd * dt;
+
+      // 範囲を越えたら折り返し
+      if (this.x < targetMin) this.dir = 1;
+      if (this.x > targetMax) this.dir = -1;
+
+      // 向き
       this.wrap.classList.toggle("flip", this.dir < 0);
+
+      // 描画
+      this.wrap.style.left = `${this.x}px`;
+      this.wrap.style.top = `${this.baseHomeY}px`;
     }
   }
 
@@ -291,10 +406,13 @@
     constructor(x, yStart, yFloor, tier, value, flashy) {
       this.value = value;
       this.flashy = flashy;
+      this.collected = false;
 
       this.el = document.createElement("img");
       this.el.className = "coin";
       this.el.src = ASSETS.coins[tier - 1];
+      this.el.alt = `coin${tier}`;
+      this.el.draggable = false;
 
       this.x = x;
       this.y = yStart;
@@ -306,29 +424,41 @@
       this.bounce = flashy ? 0.62 : 0.38;
       this.resting = false;
 
+      this.spin = flashy ? (Math.random() < 0.5 ? -1 : 1) * (8 + Math.random() * 10) : 0;
+      this.angle = 0;
+
       this.el.addEventListener("pointerenter", () => this.collect());
-      this.el.addEventListener("click", () => this.collect());
+      this.el.addEventListener("click", (e) => { e.preventDefault(); this.collect(); });
 
       coinLayer.appendChild(this.el);
+      this.render();
     }
 
     collect() {
+      if (this.collected) return;
+      this.collected = true;
+
+      spawnGainPop(this.x, this.y, this.value);
+
       coins += this.value;
       save();
       updateHud();
       bumpCoinHud();
-      spawnGainPop(this.x, this.y, this.value);
       playSE(seCoin);
 
       this.el.remove();
-      coinsOnField.splice(coinsOnField.indexOf(this), 1);
+      const idx = coinsOnField.indexOf(this);
+      if (idx >= 0) coinsOnField.splice(idx, 1);
     }
 
     update(dt) {
-      if (this.resting) return;
+      if (this.collected || this.resting) return;
+
       this.vy += this.gravity * dt;
       this.x += this.vx * dt;
       this.y += this.vy * dt;
+
+      if (this.flashy) this.angle += this.spin * dt;
 
       if (this.y >= this.yFloor) {
         this.y = this.yFloor;
@@ -336,11 +466,26 @@
           this.vy = -this.vy * this.bounce;
         } else {
           this.resting = true;
+          this.vy = 0;
+          this.vx = 0;
         }
       }
+      this.render();
+    }
 
+    render() {
       this.el.style.left = `${this.x - 22}px`;
       this.el.style.top = `${this.y - 22}px`;
+
+      const squash = (!this.resting && this.y > this.yFloor - 16);
+
+      if (this.flashy) {
+        const rot = this.angle * 180 / Math.PI;
+        const scale = squash ? "scale(1.18,0.88)" : "scale(1.08,1.08)";
+        this.el.style.transform = `${scale} rotate(${rot}deg)`;
+      } else {
+        this.el.style.transform = squash ? `scale(1.05,0.95)` : `scale(1,1)`;
+      }
     }
   }
 
@@ -352,7 +497,7 @@
     const fr = fieldRect();
     const gY = groundY();
     const r = bunny.wrap.getBoundingClientRect();
-    const x = r.left - fr.left + r.width / 2;
+    const x = (r.left - fr.left) + (r.width / 2);
     const startY = gY - (flashy ? 220 : 150);
 
     if (flashy) {
@@ -365,12 +510,42 @@
   }
 
   /* =======================
+     Candy Drop UI
+  ======================= */
+  function setCandyMode(on) {
+    candyArmed = on;
+    candyBtn.classList.toggle("armed", on);
+    hintEl.classList.toggle("hidden", !on);
+  }
+
+  candyBtn.addEventListener("click", () => {
+    setCandyMode(!candyArmed);
+  });
+
+  field.addEventListener("pointerdown", (e) => {
+    if (!candyArmed) return;
+
+    // キャンディ投下：クリック位置Xで落とす
+    const fr = fieldRect();
+    const x = clamp(e.clientX - fr.left, 30, fr.width - 30);
+
+    const c = new Candy(x, 10000); // ★10秒で消える
+    candies.push(c);
+
+    // モード解除
+    setCandyMode(false);
+  });
+
+  /* =======================
      Init & Loop
   ======================= */
   function rebuildBunnies(n) {
     bunnyLayer.innerHTML = "";
     bunnies.length = 0;
+    bunnyIdSeq = 1;
+
     for (let i = 0; i < n; i++) bunnies.push(new Bunny());
+
     layoutBunnies();
     updateHud();
   }
@@ -378,23 +553,56 @@
   function layoutBunnies() {
     const fr = fieldRect();
     const gY = groundY();
-    const step = Math.max(60, fr.width / Math.max(1, bunnies.length));
+    const step = Math.max(70, fr.width / Math.max(1, bunnies.length));
+
     bunnies.forEach((b, i) => {
-      b.setHome(20 + step * i, gY - 120);
+      const x = 20 + step * i;
+      const y = gY - 120;
+      b.setBaseHome(x, y);
     });
   }
 
   function tick(ts) {
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
-    bunnies.forEach(b => b.update(dt));
-    coinsOnField.forEach(c => c.update(dt));
+
+    // キャンディ更新＆期限切れ削除
+    const now = performance.now();
+    for (let i = candies.length - 1; i >= 0; i--) {
+      const c = candies[i];
+      c.update(dt);
+      if (c.isExpired(now)) {
+        c.remove();
+        candies.splice(i, 1);
+      }
+    }
+
+    // うさぎが集まるターゲット（最新のキャンディを優先）
+    const targetCandy = candies.length ? candies[candies.length - 1] : null;
+    const targetX = targetCandy ? targetCandy.x : null;
+
+    // うさぎ更新（集合）
+    for (let i = 0; i < bunnies.length; i++) {
+      bunnies[i].update(dt, i, bunnies.length, targetX);
+    }
+
+    // コイン更新
+    for (const c of coinsOnField) c.update(dt);
+
     rafId = requestAnimationFrame(tick);
+  }
+
+  function openShop(open) {
+    modalBackdrop.classList.toggle("hidden", !open);
+    shopModal.classList.toggle("hidden", !open);
+    bunnyPriceEl.textContent = String(getBunnyPrice(bunnies.length));
   }
 
   function init() {
     rebuildBunnies(bunnyCount);
     updateHud();
+
+    window.addEventListener("resize", () => layoutBunnies());
 
     shopBtn.onclick = () => openShop(true);
     closeShopBtn.onclick = () => openShop(false);
@@ -414,18 +622,22 @@
       coins = 0;
       bunnyCount = 2;
       save();
+
+      // 画面上のコイン/キャンディも消す
+      for (const c of coinsOnField) c.el.remove();
+      coinsOnField.length = 0;
+
+      for (const c of candies) c.remove();
+      candies.length = 0;
+
       rebuildBunnies(bunnyCount);
     };
+
+    setCandyMode(false);
 
     cancelAnimationFrame(rafId);
     lastFrame = performance.now();
     rafId = requestAnimationFrame(tick);
-  }
-
-  function openShop(open) {
-    modalBackdrop.classList.toggle("hidden", !open);
-    shopModal.classList.toggle("hidden", !open);
-    bunnyPriceEl.textContent = getBunnyPrice(bunnies.length);
   }
 
   init();
