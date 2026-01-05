@@ -140,6 +140,31 @@ function droppedCoinCount(){
 }
 
 // ==============================
+// 足元に「溜まる」演出パラメータ
+// ==============================
+// 同じ足元付近(半径)にあるコイン数を数えて、着地点を少し上げる（積み上げに見せる）
+const PILE_RADIUS = 46;      // この範囲内を「同じ足元の山」とみなす
+const PILE_STEP_Y = 12;      // 1枚積むごとの上がり幅
+const PILE_MAX = 10;         // 山の最大段数（増え過ぎると画面外に出るので）
+const PILE_JITTER_X = 10;    // 少し横ブレして自然に
+
+function getPileCountNearX(baseX){
+  const coins = coinLayer.querySelectorAll(".coin");
+  let count = 0;
+  coins.forEach(c=>{
+    const lx = parseFloat(c.style.left || "0");
+    // coinのleftは「コイン左上」なので中心へ
+    const cx = lx + COIN_SIZE/2;
+    if(Math.abs(cx - baseX) <= PILE_RADIUS){
+      const h = Number(c.dataset.pileLevel || "0");
+      // pileLevelを付けてるものだけ数える（フィールドクリック等も積みたいならここを外す）
+      if(!Number.isNaN(h)) count++;
+    }
+  });
+  return Math.min(PILE_MAX, count);
+}
+
+// ==============================
 // レア定義
 // ==============================
 const TIERS = [
@@ -194,11 +219,12 @@ function createBunny(i){
     lastDrop: now
   };
 
-  // うさぎクリックでコインを足元に置く（SE：poyo.mp3）
-  el.addEventListener("pointerdown", (e)=>{
+  // ✅ bunny.png（画像）クリックで：足元にコイン＋SE poyo
+  img.addEventListener("pointerdown", (e)=>{
     e.preventDefault();
     e.stopPropagation(); // フィールドクリック処理に流れない
     b.lastInteract = Date.now();
+
     dropCoinFromBunny(b, true);
     playSE("poyo", 0.9);
   });
@@ -217,7 +243,8 @@ function initBunnies(){
 // ==============================
 // コイン生成（床に落として置いておく）
 // ==============================
-function createCoin(startX, startY, tier, userGesture){
+// landY を指定できるようにして、「積み上げ」の着地位置を変える
+function createCoin(startX, startY, landY, tier, userGesture){
   // 上限チェック（置きすぎ防止）
   if(droppedCoinCount() >= MAX_DROPPED_COINS) return;
 
@@ -228,13 +255,16 @@ function createCoin(startX, startY, tier, userGesture){
   const x = Math.max(0, Math.min(frect.width - COIN_SIZE, startX));
   const y = Math.max(0, Math.min(frect.height - COIN_SIZE, startY));
 
-  const floorY = getFloorY();
+  // 着地Y（積み上げ用）
+  const floorY = Math.max(0, Math.min(getFloorY(), landY));
+
   const drop = Math.max(0, floorY - y);
 
   const c = document.createElement("div");
   c.className = `coin ${tier.className}`;
   c.textContent = tier.emoji;
   c.dataset.value = String(tier.value);
+  c.dataset.landY = String(floorY); // 回収アニメの中心計算に使う
 
   c.style.left = `${x}px`;
   c.style.top  = `${y}px`;
@@ -249,8 +279,9 @@ function createCoin(startX, startY, tier, userGesture){
     if(c.classList.contains("collecting")) return;
     c.classList.add("collecting");
 
+    const land = Number(c.dataset.landY || String(getFloorY()));
     const cx = x + COIN_SIZE/2;
-    const cy = floorY + COIN_SIZE/2;
+    const cy = land + COIN_SIZE/2;
 
     const tx = hrect.left + 30 - frect.left;
     const ty = hrect.top + hrect.height/2 - frect.top;
@@ -280,32 +311,54 @@ function createCoin(startX, startY, tier, userGesture){
   });
 
   coinLayer.appendChild(c);
-
-  // ★消さない：床に置いておく（setTimeout remove は入れない）
 }
 
+// ==============================
+// うさぎ足元：コインを「溜める」
+// ==============================
 function dropCoinFromBunny(b, userGesture=false){
   const frect = field.getBoundingClientRect();
   const brect = b.el.getBoundingClientRect();
 
-  // うさぎ要素の「中央」＝足元付近にコインの中心が来るように
-  const centerX = (brect.left - frect.left) + (brect.width / 2);
+  // うさぎ要素の中心X（足元の中心）
+  const baseX = (brect.left - frect.left) + (brect.width / 2);
 
-  // 足元（要素のbottom）にコインが“置かれる”位置
+  // 足元開始Y（落下開始位置）
   const footY = (brect.bottom - frect.top) - COIN_SIZE;
 
-  const startX = centerX - (COIN_SIZE / 2);
+  // 同じ足元付近のコイン数を数えて積み上げYを決める
+  const pileCount = getPileCountNearX(baseX);
+  const landY = getFloorY() - (pileCount * PILE_STEP_Y);
+
+  // 横に少しブレさせて“山”感を出す（中心合わせ）
+  const jitter = (Math.random()*2 - 1) * PILE_JITTER_X;
+  const startX = (baseX - COIN_SIZE/2) + jitter;
   const startY = footY;
 
   const idleSec = (Date.now() - b.lastInteract)/1000;
   const tier = getTier(idleSec);
 
-  createCoin(startX, startY, tier, userGesture);
+  // pileLevel を付与して、次回のカウントに使う
+  // ※ createCoin後に要素へ付けたいので、一旦生成してから最後の1枚を拾う
+  const before = droppedCoinCount();
+  createCoin(startX, startY, landY, tier, userGesture);
+  const after = droppedCoinCount();
+
+  if(after > before){
+    const coins = coinLayer.querySelectorAll(".coin");
+    const lastCoin = coins[coins.length - 1];
+    if(lastCoin){
+      lastCoin.dataset.pileLevel = String(pileCount + 1);
+      // “うさぎ足元の山”として判定するため、pile用タグを付けておく
+      lastCoin.dataset.pile = "1";
+    }
+  }
 }
 
 function dropCoinAt(x,y, userGesture=false){
   const tier = getTier(0);
-  createCoin(x - COIN_SIZE/2, y - COIN_SIZE/2, tier, userGesture);
+  const floorY = getFloorY();
+  createCoin(x - COIN_SIZE/2, y - COIN_SIZE/2, floorY, tier, userGesture);
 }
 
 // ==============================
