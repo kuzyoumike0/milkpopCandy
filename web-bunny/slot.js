@@ -252,17 +252,13 @@
 /* ★スマホ縦画面で窓位置補正（ズレ対策） */
 @media (max-width: 520px){
   #${PANEL_ID}{
-    --winX: 52%;
-    --winTop: 38.5%;
+    --winX: 54%;8.5%;
     --winH: 33%;
   }
   #${PANEL_ID} .grid,
   #${PANEL_ID} .paylines{
     width:69%;
-  }
-}
-
-/* ★背景（クリックで閉じる） */
+     width:67%;リックで閉じる） */
 #${PANEL_ID} .backdrop{
   position:fixed;
   inset:0;
