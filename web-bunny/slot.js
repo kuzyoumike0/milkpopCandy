@@ -162,18 +162,21 @@
 #${PANEL_ID} .btn:disabled{ opacity:0.6; cursor:not-allowed; }
 
 /* ===== 3×3表示窓（ズレ修正版） ===== */
-#${PANEL_ID} .grid{
+/* ★3×3表示窓：下に食い込むのを防ぐ（上に移動＋高さを少し縮める） */
+#slotStarMachinePanel3x3 .grid{
   position:absolute;
   left:50%;
-  top:49.2%;
+  top:47.2%;                 /* ★49.2% → 47.2%（上へ） */
   transform:translate(-50%,-50%);
   width:72%;
-  height:40%;
+  height:37.5%;              /* ★40% → 37.5%（下段の食い込み防止） */
+
   display:grid;
   grid-template-columns:repeat(3, 1fr);
   grid-template-rows:repeat(3, 1fr);
   gap:4.0%;
 }
+
 
 /* 1マス */
 #${PANEL_ID} .cell{
