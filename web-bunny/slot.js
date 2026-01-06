@@ -122,7 +122,7 @@
     }, fadeStart);
   }
 
-  /* ===== 豪華演出 ===== */
+  /* ===== FX ===== */
   let fxTimer = null;
 
   function clearWinHighlights(panel) {
@@ -132,9 +132,7 @@
   }
 
   function vibrate(pattern) {
-    try {
-      if (navigator.vibrate) navigator.vibrate(pattern);
-    } catch {}
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {}
   }
 
   function spawnConfetti(panel, amount = 28) {
@@ -195,10 +193,7 @@
   }
 
   function triggerWinFx(panel, winLines, totalPay, totalLines) {
-    if (fxTimer) {
-      clearTimeout(fxTimer);
-      fxTimer = null;
-    }
+    if (fxTimer) { clearTimeout(fxTimer); fxTimer = null; }
 
     const big = totalPay >= 1000 || totalLines >= 3;
     const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
@@ -247,7 +242,7 @@
   user-select:none;
   isolation:isolate;
 
-  display:none; /* クリック表示 */
+  display:none;
 }
 
 @media (max-width: 520px){
@@ -290,7 +285,6 @@
 #${PANEL_ID} .machine{ position:relative; }
 #${PANEL_ID} .machineImg{ width:600px; max-width:92vw; display:block; }
 
-/* UI */
 #${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
@@ -326,7 +320,6 @@
 }
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
 
-/* result anim */
 #${PANEL_ID} .result{ display:inline-block; will-change:transform,opacity,filter; opacity:1; transform:translateY(0) scale(1); }
 #${PANEL_ID} .result.fadeOut{ transition: opacity 650ms ease; opacity:0.25; }
 #${PANEL_ID} .result.popNum{ animation: popNum 420ms cubic-bezier(.2,1.3,.2,1) 1; }
@@ -334,7 +327,6 @@
 @keyframes popNum{ 0%{transform:translateY(0) scale(1)} 35%{transform:translateY(-6px) scale(1.12)} 100%{transform:translateY(0) scale(1)} }
 @keyframes popBig{ 0%{transform:translateY(0) scale(1)} 30%{transform:translateY(-10px) scale(1.20)} 60%{transform:translateY(2px) scale(1.08)} 100%{transform:translateY(0) scale(1)} }
 
-/* grid */
 #${PANEL_ID} .grid{
   position:absolute;
   left:var(--winX);
@@ -347,7 +339,6 @@
   grid-template-rows:repeat(3,1fr);
   gap:4%;
 }
-
 #${PANEL_ID} .cell{
   position:relative;
   overflow:hidden;
@@ -356,7 +347,6 @@
   align-items:center;
   justify-content:center;
 }
-
 #${PANEL_ID} .strip{
   position:absolute;
   inset:0;
@@ -368,7 +358,6 @@
 #${PANEL_ID}.spinning img.sym{ animation:jitter .12s infinite; }
 @keyframes jitter{ 0%{transform:translateY(0)} 50%{transform:translateY(1px)} 100%{transform:translateY(0)} }
 
-/* ★はみ出し防止を強化 */
 #${PANEL_ID} img.sym{
   width:78%;
   height:78%;
@@ -384,7 +373,6 @@
 }
 @keyframes winPulse{ 0%{transform:scale(1)} 50%{transform:scale(1.02)} 100%{transform:scale(1)} }
 
-/* paylines */
 #${PANEL_ID} .paylines{
   position:absolute;
   left:var(--winX);
@@ -405,7 +393,6 @@
 }
 @keyframes lineDraw{ to { stroke-dashoffset: 0; } }
 
-/* machine shake */
 #${PANEL_ID}.winFx{ animation: machineShake 520ms ease-in-out 1; }
 #${PANEL_ID}.winBig{ animation: machineShakeBig 720ms ease-in-out 1; }
 @keyframes machineShake{
@@ -426,7 +413,6 @@
   100%{ transform: translate(-50%,-50%); }
 }
 
-/* flash */
 #${PANEL_ID} .flash{
   position:absolute;
   inset:0;
@@ -438,7 +424,6 @@
 #${PANEL_ID}.flashOn .flash{ animation:flash .38s ease-out; }
 @keyframes flash{ 0%{opacity:0} 25%{opacity:1} 100%{opacity:0} }
 
-/* confetti */
 #${PANEL_ID} .confetti{
   position:absolute;
   inset:0;
@@ -466,9 +451,10 @@
     document.head.appendChild(s);
   }
 
-  /* ===== DOM ===== */
+  /* ===== Panel ===== */
   function buildPanel() {
-    if (document.getElementById(PANEL_ID)) return document.getElementById(PANEL_ID);
+    const exist = document.getElementById(PANEL_ID);
+    if (exist) return exist;
 
     const p = document.createElement("div");
     p.id = PANEL_ID;
@@ -508,7 +494,6 @@
     $(".spin", p).onclick = () => spin(p, 1);
     $(".spin10", p).onclick = () => spin(p, 10);
 
-    // 初期表示の絵柄（data-sym を入れる）
     p.querySelectorAll(".cell").forEach((c) => {
       const sym = pickSymbol();
       setStrip(c.querySelector(".strip"), [sym], c);
@@ -525,7 +510,6 @@
 
   /* ===== Strip ===== */
   function cellH(c) {
-    // 表示直後の0pxを避ける（最低でも 40）
     const h = (c.getBoundingClientRect().height | 0);
     return Math.max(40, h);
   }
@@ -549,7 +533,6 @@
       d.appendChild(i);
       strip.appendChild(d);
     }
-    // 1枚表示時は「現在絵柄」を保存
     if (cell && seq.length === 1 && seq[0]?.name) {
       cell.dataset.sym = seq[0].name;
     }
@@ -632,7 +615,6 @@
     let totalLines = 0;
     let totalPay = 0;
     let lastWinLines = [];
-    let lastPay = 0;
 
     for (let t = 0; t < count; t++) {
       const finals = Array.from({ length: 9 }, () => pickSymbol());
@@ -653,12 +635,11 @@
       for (const line of w) {
         const sym = res[line[0]];
         if (sym.pay) payThis += sym.pay;
-      debating
+      }
+
       totalLines += w.length;
       totalPay += payThis;
-
       lastWinLines = w;
-      lastPay = payThis;
 
       if (w.length > 0 && count > 1) {
         triggerWinFx(panel, w, payThis, w.length);
@@ -670,11 +651,7 @@
 
     if (totalPay > 0) {
       setCoin(getCoin() + totalPay);
-      if (lastWinLines.length > 0) {
-        triggerWinFx(panel, lastWinLines, totalPay, totalLines);
-      } else {
-        triggerWinFx(panel, [], totalPay, totalLines);
-      }
+      triggerWinFx(panel, lastWinLines, totalPay, totalLines);
     }
 
     if (totalLines > 0) {
@@ -687,20 +664,16 @@
     spinning = false;
   }
 
-  /* ===== open/close（ここが今回の核心） ===== */
+  /* ===== open/close（巨大化バグ対策） ===== */
   let panelRef = null;
 
   function refreshStripsAfterOpen() {
     if (!panelRef) return;
-
     const cells = Array.from(panelRef.querySelectorAll(".cell"));
     cells.forEach(cell => {
       const strip = cell.querySelector(".strip");
       if (!strip) return;
-
-      // 回転中（複数要素）の時は触らない
-      if (strip.children.length > 1) return;
-
+      if (strip.children.length > 1) return; // 回転中は触らない
       const name = cell.dataset.sym || strip.querySelector("img.sym")?.alt || "";
       const sym = findSymbolByName(name) || pickSymbol();
       setStrip(strip, [sym], cell);
@@ -714,7 +687,7 @@
     panelRef.style.display = "block";
     syncHave(panelRef);
 
-    // ★レイアウト確定を2フレーム待ってから高さを再計算（巨大化バグ根絶）
+    // 2フレーム待って cell 高さ確定後に strip を作り直す
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         refreshStripsAfterOpen();
@@ -729,22 +702,31 @@
     panelRef.style.display = "none";
   }
 
-  /* ===== 起動 ===== */
-  window.addEventListener("load", () => {
+  /* ===== init（load済みでも確実に起動） ===== */
+  function init() {
     injectStyles();
     panelRef = buildPanel();
-    if (panelRef) {
-      syncHave(panelRef);
-      panelRef.style.display = "none";
+    if (!panelRef) return;
 
-      const cv = $("#coinValue");
-      if (cv) {
-        const mo = new MutationObserver(() => syncHave(panelRef));
-        mo.observe(cv, { childList: true, subtree: true, characterData: true });
-      }
+    syncHave(panelRef);
+    panelRef.style.display = "none";
+
+    const cv = $("#coinValue");
+    if (cv) {
+      const mo = new MutationObserver(() => syncHave(panelRef));
+      mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
 
-    document.getElementById("slotBtn")?.addEventListener("click", () => openPanel());
+    // スロットボタンで開く
+    const btn = document.getElementById("slotBtn");
+    if (btn) {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        openPanel();
+      });
+    } else {
+      console.warn("[slot] #slotBtn not found");
+    }
 
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closePanel();
@@ -753,5 +735,11 @@
     window.SLOT = window.SLOT || {};
     window.SLOT.open = openPanel;
     window.SLOT.close = closePanel;
-  });
+  }
+
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    setTimeout(init, 0);
+  } else {
+    document.addEventListener("DOMContentLoaded", init, { once: true });
+  }
 })();
