@@ -706,6 +706,16 @@ html,body{
     bottom: 4px;
   }
 }
+#slotStarMachinePanel3x3{
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: none;       /* 初期は閉じる */
+}
+
+#slotStarMachinePanel3x3.show{
+  display: block;
+}
 
 /* ===== ゲームレイヤー ===== */
 #bunnyLayer { position: relative; z-index: 3; }
