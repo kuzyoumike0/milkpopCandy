@@ -2,83 +2,34 @@
   if (!window.WB) return;
   const WB = window.WB;
 
-  let running = false;
+  // 旅立ちモードON/OFF
+  let departMode = false;
 
+  // 軽い通知（CSSが無くても表示はされる）
   function toast(msg) {
     const el = document.createElement("div");
     el.className = "farewellMilestone";
     el.textContent = msg;
     document.body.appendChild(el);
-    setTimeout(() => { try { el.remove(); } catch {} }, 1800);
+    setTimeout(() => { try { el.remove(); } catch {} }, 1600);
   }
 
-  function showFarewellMessage(kind) {
-    const texts = [
-      "またどこかで会えるよ。",
-      "ありがとう。元気でね。",
-      "やさしい時間をありがとう。",
-      "旅立ちは、はじまり。",
-      "ずっと忘れないよ。",
-    ];
-    const def = WB.BUNNY_DEFS[kind];
-    const name = def?.label ?? "うさぎ";
-    const msg = `${name} は旅立っていった…`;
-
-    const el = document.createElement("div");
-    el.className = "farewellMsg";
-    el.textContent = msg + " " + texts[Math.floor(Math.random() * texts.length)];
-    document.body.appendChild(el);
-
-    setTimeout(() => { try { el.remove(); } catch {} }, 2600);
+  function setDepartMode(on) {
+    departMode = !!on;
+    try { WB.departBtn?.classList.toggle("on", departMode); } catch {}
+    toast(departMode ? "✈️ 旅立ちモード：ON（うさぎをクリック）" : "🛑 旅立ちモード：OFF");
   }
 
-  function showFarewellMilestone(kind, count) {
-    const isRea = kind === "reabunny";
-    let text = "";
-    if (count === 10) text = "たくさんの別れが、記憶になった。";
-    if (count === 20) text = "見送ることにも、意味が宿りはじめた。";
-    if (count === 50) text = "それでも忘れなかった。その名前を。";
-    if (!text) return;
-
-    const el = document.createElement("div");
-    el.className = "farewellMilestone" + (isRea ? " rea" : "");
-    el.textContent = isRea ? `reabunny ─ ${text}` : `${kind} ─ ${text}`;
-    document.body.appendChild(el);
-
-    setTimeout(() => { try { el.remove(); } catch {} }, 3200);
-  }
-
-  function recordFarewell(kind) {
-    const dex = WB.dex || {};
-    if (!dex[kind]) dex[kind] = { seen: true, farewell: 0 };
-    dex[kind].seen = true;
-    dex[kind].farewell = (dex[kind].farewell || 0) + 1;
-
-    const c = dex[kind].farewell;
-    if (c === 10 || c === 20 || c === 50) showFarewellMilestone(kind, c);
-
-    WB.dex = dex;
-    WB.saveDex();
-  }
-
-  function setMode(on) {
-    running = !!on;
-    try {
-      WB.departBtn?.classList.toggle("on", running);
-    } catch {}
-    toast(running ? "✈️ 旅立ちモード：ON（うさぎをクリック）" : "🛑 旅立ちモード：OFF");
-  }
-
-  function toggle() {
+  function toggleDepartMode() {
     WB.unlockAudioOnce();
-    setMode(!running);
+    setDepartMode(!departMode);
   }
 
-  // 旅立たせる本体（クリックした個体）
+  // 指定のうさぎを旅立たせる
   function departBunny(bunny) {
     if (!bunny) return false;
 
-    // 最後の1匹は不可
+    // 最後の1匹は残す
     if (WB.bunnies.length <= 1) {
       toast("最後の1匹は旅立たせられないよ");
       return false;
@@ -94,61 +45,64 @@
     WB.coins -= WB.DEPART_COST;
     WB.saveCoins();
     WB.updateHud();
+    WB.refreshShopUI?.();
 
     // SE
     WB.playSE(WB.seTabidati);
 
-    // 記録＆メッセージ
-    recordFarewell(bunny.kind);
-    showFarewellMessage(bunny.kind);
+    // 記録＆メッセージ（app.js側の関数を使用）
+    WB.recordFarewell?.(bunny.kind);
+    WB.showFarewellMessage?.(bunny.kind);
 
-    // 削除
-    WB.removeBunnyInstance(bunny);
+    // 配列から削除
+    const idx = WB.bunnies.indexOf(bunny);
+    if (idx >= 0) WB.bunnies.splice(idx, 1);
+
+    // DOM削除
+    try { bunny.wrap?.remove(); } catch {}
+
+    // 保存＆実績チェック
+    WB.saveBunnyMeta?.();
+    WB.checkUnlocks?.();
 
     return true;
   }
 
-  // 旅立ちモード中の「うさぎクリック」を横取り（キャプチャで先に取る）
-  function onFieldPointerDownCapture(e) {
-    if (!running) return;
+  // 旅立ちモード中：うさぎクリックを横取り（通常クリックでコインが出る処理を止める）
+  function onPointerDownCapture(e) {
+    if (!departMode) return;
 
     // 左クリック/タップのみ
     if (e.button != null && e.button !== 0) return;
 
-    const t = e.target;
-    if (!t) return;
-
-    // bunnyWrap / bunny を特定
-    const wrap = t.closest?.(".bunnyWrap");
+    const wrap = e.target?.closest?.(".bunnyWrap");
     if (!wrap) return;
 
-    // ★通常の「コイン生成クリック」を止める
+    // ★通常のクリック処理（コイン生成）を止める
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
 
-    // wrap→インスタンス特定（WB.bunnies から探す）
+    // wrapから対象インスタンスを特定
     const bunny = WB.bunnies.find(b => b.wrap === wrap);
     if (!bunny) return;
 
     departBunny(bunny);
   }
 
-  // ボタン
+  // 旅立ちボタン
   if (WB.departBtn) {
-    WB.departBtn.addEventListener("click", toggle);
+    WB.departBtn.addEventListener("click", toggleDepartMode);
   }
 
-  // クリック横取り（キャプチャが重要）
-  WB.field.addEventListener("pointerdown", onFieldPointerDownCapture, true);
+  // うさぎクリック横取り（キャプチャが重要）
+  document.addEventListener("pointerdown", onPointerDownCapture, true);
 
-  // 外部API
+  // 外部に出したいなら
   WB.tabidati = {
-    setMode,
-    toggle,
+    setDepartMode,
+    toggleDepartMode,
     departBunny,
-    recordFarewell,
-    showFarewellMessage,
-    get running() { return running; },
+    get departMode() { return departMode; },
   };
 })();
