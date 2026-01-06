@@ -209,30 +209,38 @@
     const big = totalPay >= 1000 || totalLines >= 3;
     const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
 
-    const machine = panel.querySelector(".machine") || panel;
-
-    machine.classList.add("winFx");
-    if (big) machine.classList.add("winBig");
-    else machine.classList.remove("winBig");
-
-    panel.classList.add("flashOn");
-    setTimeout(() => panel.classList.remove("flashOn"), 420);
-
-    vibrate(big ? [80, 60, 120] : [50, 40, 60]);
-
-    coinBurst(big ? 22 : 14, big ? 55 : 65);
-    spawnConfetti(panel, big ? 48 : 30);
-
-    const cells = Array.from(panel.querySelectorAll(".cell"));
-    winLines.flat().forEach((i) => cells[i]?.classList.add("winCell"));
-
-    drawPaylines(panel, winLines, intensity);
-
-    fxTimer = setTimeout(() => {
-      panel.classList.remove("winFx", "winBig");
-      clearWinHighlights(panel);
-    }, big ? 2400 : 1700);
+   function triggerWinFx(panel, winLines, totalPay, totalLines) {
+  if (fxTimer) {
+    clearTimeout(fxTimer);
+    fxTimer = null;
   }
+
+  const big = totalPay >= 1000 || totalLines >= 3;
+  const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
+
+  const machine = panel.querySelector(".machine") || panel;
+
+  machine.classList.add("winFx");
+  if (big) machine.classList.add("winBig");
+  else machine.classList.remove("winBig");
+
+  panel.classList.add("flashOn");
+  setTimeout(() => panel.classList.remove("flashOn"), 420);
+
+  vibrate(big ? [80, 60, 120] : [50, 40, 60]);
+  coinBurst(big ? 22 : 14, big ? 55 : 65);
+  spawnConfetti(panel, big ? 48 : 30);
+
+  const cells = Array.from(panel.querySelectorAll(".cell"));
+  winLines.flat().forEach((i) => cells[i]?.classList.add("winCell"));
+  drawPaylines(panel, winLines, intensity);
+
+  fxTimer = setTimeout(() => {
+    machine.classList.remove("winFx", "winBig"); // ★ここ
+    clearWinHighlights(panel);
+  }, big ? 2400 : 1700);
+}
+
 
   /* =========================
    * 判定
