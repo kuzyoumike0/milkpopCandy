@@ -633,6 +633,33 @@ html,body{
   filter: brightness(1.05);
 }
 
+/* =========================
+ * 花火演出（みきれ防止・中央表示）
+ * ========================= */
+.fireworks {
+  position: fixed;
+  inset: 0;                 /* 上下左右 0 */
+  width: 100vw;
+  height: 100vh;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  pointer-events: none;
+  z-index: 5;
+  overflow: visible;        /* ★ここが重要 */
+}
+
+.fireworks img {
+  max-width: 100vmin;       /* 画面に収まる最大サイズ */
+  max-height: 100vmin;
+
+  width: auto;
+  height: auto;
+
+  object-fit: contain;      /* ★みきれ防止の核心 */
+}
 
 /* ===== ゲームレイヤー ===== */
 #bunnyLayer { position: relative; z-index: 3; }
