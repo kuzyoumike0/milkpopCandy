@@ -40,7 +40,21 @@
 
   <!-- ===== メインフィールド ===== -->
   <main id="field">
+
+    <!-- ★ 背景動画（最背面） -->
+    <video
+      id="bgVideo"
+      src="./assets/bg/city-silhouette.mp4"
+      autoplay
+      muted
+      loop
+      playsinline
+    ></video>
+
+    <!-- 天気 -->
     <div id="tenkiLayer"></div>
+
+    <!-- ゲーム要素 -->
     <div id="bunnyLayer"></div>
     <div id="coinLayer"></div>
   </main>
@@ -61,17 +75,17 @@
     };
   </script>
 
-  <!-- ===== 天気 ===== -->
+  <!-- 天気 -->
   <script src="./tenki.js"></script>
 
-  <!-- ===== 花火 ===== -->
+  <!-- 花火 -->
   <script src="./hanabi.js"></script>
 
-  <!-- ===== 既存ロジック ===== -->
+  <!-- 既存ロジック -->
   <script src="./app.js"></script>
   <script src="./slot.js"></script>
 
-  <!-- ===== Service Worker ===== -->
+  <!-- Service Worker -->
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
