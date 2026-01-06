@@ -2,116 +2,57 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <meta name="theme-color" content="#ffd6e7" />
-  <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./style.css" />
   <title>Bunny牧場</title>
+
+  <!-- viewport -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#ffd6e7" />
+
+  <!-- style -->
+  <link rel="stylesheet" href="./style.css" />
+
+  <!-- セキュリティ系（RailwayでのCSP事故防止：最低限） -->
+  <meta http-equiv="Content-Security-Policy"
+        content="
+          default-src 'self';
+          img-src 'self' data:;
+          media-src 'self';
+          style-src 'self' 'unsafe-inline';
+          script-src 'self' 'unsafe-inline';
+        ">
 </head>
 
 <body>
-  <div id="app">
+  <!-- ===== HUD（既存 app.js が使用） ===== -->
+  <header id="hud">
+    <div id="coin">
+      🪙 <span id="coinValue">2187540</span>
+    </div>
+  </header>
 
-    <!-- ====== HUD（上部UI）====== -->
-    <header id="hud">
-      <div id="coin">🪙 <span id="coinValue">0</span></div>
+  <!-- ===== メインフィールド（既存うさぎ表示） ===== -->
+  <main id="field">
+    <div id="bunnyLayer"></div>
+    <div id="coinLayer"></div>
+  </main>
 
-      <div id="hudBtns">
-        <button id="petBtn" type="button">なでる</button>
-        <button id="shopBtn" type="button">ショップ</button>
+  <!-- ===== スロットは slot.js が body 直下に自動生成 ===== -->
+  <!-- ここには何も書かない -->
 
-        <!-- 旅立ち（演出中は特別BGMに切り替える想定） -->
-        <button id="departBtn" type="button" title="旅立ち（演出中は特別BGM）">旅立ち</button>
+  <!-- ===== 既存ロジック ===== -->
+  <script src="./app.js"></script>
 
-        <!-- スロット（開く/閉じる） -->
-        <button id="slotBtn" type="button" title="スロットを開く">スロット</button>
+  <!-- ===== スロット拡張（常に最前面） ===== -->
+  <script src="./slot.js"></script>
 
-        <button id="resetBtn" type="button">リセット</button>
-      </div>
-    </header>
-
-    <!-- ====== フィールド（兎・コイン・演出）====== -->
-    <main id="field">
-      <!-- 兎表示レイヤー -->
-      <div id="bunnyLayer"></div>
-
-      <!-- コイン表示レイヤー -->
-      <div id="coinLayer"></div>
-
-      <!-- ふわっと通知や旅立ちメッセなど（既存実装がある想定） -->
-      <div id="toastLayer" aria-live="polite"></div>
-    </main>
-
-    <!-- ====== スロット（モーダル/パネル）====== -->
-    <!-- 既存JSが「slotStarMachinePanel3x3」を探してるのでID固定 -->
-    <section id="slotStarMachinePanel3x3" class="slotPanel" aria-hidden="true">
-      <div class="slotPanelInner">
-
-        <div class="slotHeader">
-          <div class="slotTitle">🐰 うさぎスロット</div>
-          <button id="slotCloseBtn" type="button" class="slotClose" aria-label="閉じる">✕</button>
-        </div>
-
-        <!-- マシン表示エリア（背景画像などはJS/CSS側で） -->
-        <div id="slotMachineArea" class="slotMachineArea">
-          <!-- Canvas/DOMどちらでも使えるようにコンテナを用意 -->
-          <canvas id="slotCanvas" width="420" height="520"></canvas>
-
-          <!-- 当たり演出テキスト（「被ってる」対策で上寄せできるよう別枠） -->
-          <div id="slotMessage" class="slotMessage" aria-live="polite"></div>
-        </div>
-
-        <div class="slotFooter">
-          <div class="slotCost">
-            1回 <span id="slotCostValue">50</span> 🪙
-          </div>
-
-          <div class="slotBtns">
-            <button id="slotSpinBtn" type="button">回す</button>
-            <button id="slotStopBtn" type="button" disabled>止める</button>
-          </div>
-        </div>
-
-        <!-- 役/払い出しなど表示したい場合の枠（任意） -->
-        <div id="slotResult" class="slotResult"></div>
-      </div>
-    </section>
-
-  </div>
-
-  <!-- ====== Scripts ====== -->
-  <script type="module">
-    /**
-     * BGM（朝昼夜＋設定＋旅立ち専用）
-     * - index.html 側から window.BGM に生やして app.js から呼べるようにする
-     */
-    import {
-      bgmMountSettingsUI,
-      bgmPlaySpecial,
-      bgmClearSpecial
-    } from "./BGM.js";
-
-    // 設定UI（不要ならコメントアウトOK）
-    bgmMountSettingsUI({ position: "top-right", title: "BGM" });
-
-    // app.js / add.js 等から使えるように公開
-    window.BGM = {
-      playSpecial: bgmPlaySpecial,
-      clearSpecial: bgmClearSpecial
-    };
-
-    /**
-     * メインゲーム（兎出現・コイン・旅立ち等）
-     * 既存が app.js ならこれだけでOK
-     */
-    import "./app.js";
-
-    /**
-     * スロットが別ファイルなら読み込み
-     * （既に app.js 内に統合済みなら不要）
-     * 例：以前のスロットコードが別ファイルだった場合用
-     */
-    // import "./slot.js";
+  <!-- ===== Service Worker ===== -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
   </script>
 </body>
 </html>
