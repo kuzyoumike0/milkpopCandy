@@ -57,10 +57,10 @@
     reelLoop = null;
   }
 
-  function coinBurst(n = 12, i = 70) {
+  function coinBurst(n = 14, i = 65) {
     let c = 0;
     const id = setInterval(() => {
-      oneShot(COIN_SE, 0.8);
+      oneShot(COIN_SE, 0.85);
       if (++c >= n) clearInterval(id);
     }, i);
   }
@@ -104,12 +104,12 @@
     }
 
     resultLock = true;
-    el.classList.remove("fadeOut", "popNum");
+    el.classList.remove("fadeOut", "popNum", "popBig");
     el.textContent = text;
 
     const coins = parseCoins(text);
     if (coins !== null && coins > 0) {
-      requestAnimationFrame(() => el.classList.add("popNum"));
+      requestAnimationFrame(() => el.classList.add(coins >= 500 ? "popBig" : "popNum"));
     }
 
     const fadeMs = 650;
@@ -120,6 +120,122 @@
     }, fadeStart);
   }
 
+  /* ===== 豪華演出 ===== */
+  let fxTimer = null;
+
+  function clearWinHighlights(panel) {
+    panel.querySelectorAll(".cell").forEach((c) => c.classList.remove("winCell"));
+    const lines = $(".paylines", panel);
+    if (lines) lines.innerHTML = "";
+  }
+
+  function vibrate(pattern) {
+    try {
+      if (navigator.vibrate) navigator.vibrate(pattern);
+    } catch {}
+  }
+
+  function spawnConfetti(panel, amount = 28) {
+    const box = $(".confetti", panel);
+    if (!box) return;
+    box.innerHTML = "";
+    const w = box.getBoundingClientRect().width || 300;
+    for (let i = 0; i < amount; i++) {
+      const p = document.createElement("i");
+      p.className = "confettiPiece";
+      const x = Math.random() * w;
+      const d = 700 + Math.random() * 800;
+      const s = 0.8 + Math.random() * 0.9;
+      const r = (Math.random() * 360) | 0;
+      p.style.left = `${x}px`;
+      p.style.animationDuration = `${d}ms`;
+      p.style.transform = `scale(${s}) rotate(${r}deg)`;
+      p.style.opacity = `${0.7 + Math.random() * 0.3}`;
+      box.appendChild(p);
+    }
+    // 自動掃除
+    setTimeout(() => (box.innerHTML = ""), 1800);
+  }
+
+  function drawPaylines(panel, winLines, intensity = 1) {
+    const layer = $(".paylines", panel);
+    if (!layer) return;
+    layer.innerHTML = "";
+
+    // 3x3 の中心点をセルから取る
+    const cells = Array.from(panel.querySelectorAll(".cell"));
+    const centers = cells.map((c) => {
+      const r = c.getBoundingClientRect();
+      const pr = layer.getBoundingClientRect();
+      return { x: r.left - pr.left + r.width / 2, y: r.top - pr.top + r.height / 2 };
+    });
+
+    winLines.forEach((line, idx) => {
+      const a = centers[line[0]];
+      const b = centers[line[1]];
+      const c = centers[line[2]];
+      if (!a || !b || !c) return;
+
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "lineSvg");
+      svg.setAttribute("viewBox", `0 0 ${layer.clientWidth} ${layer.clientHeight}`);
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M ${a.x} ${a.y} L ${b.x} ${b.y} L ${c.x} ${c.y}`);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      path.setAttribute("class", "paylinePath");
+      path.style.strokeWidth = `${Math.max(4, 5 + intensity * 1.5)}px`;
+      path.style.animationDelay = `${idx * 90}ms`;
+
+      svg.appendChild(path);
+      layer.appendChild(svg);
+    });
+  }
+
+  function triggerWinFx(panel, winLines, totalPay, totalLines) {
+    // 既存タイマーを止める
+    if (fxTimer) {
+      clearTimeout(fxTimer);
+      fxTimer = null;
+    }
+
+    // 強さ（当たりライン数 / 払い戻し）
+    const big = totalPay >= 1000 || totalLines >= 3;
+    const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
+
+    // クラス付与（ランプ点滅/筐体フラッシュ/シェイク）
+    panel.classList.add("winFx");
+    if (big) panel.classList.add("winBig");
+    else panel.classList.remove("winBig");
+
+    // 画面フラッシュ＋振動
+    panel.classList.add("flashOn");
+    setTimeout(() => panel.classList.remove("flashOn"), 420);
+
+    vibrate(big ? [80, 60, 120] : [50, 40, 60]);
+
+    // コインSE連打（豪華）
+    coinBurst(big ? 22 : 14, big ? 55 : 65);
+
+    // 紙吹雪
+    spawnConfetti(panel, big ? 48 : 30);
+
+    // 勝ちセルを光らせる
+    const cells = Array.from(panel.querySelectorAll(".cell"));
+    winLines.flat().forEach((i) => cells[i]?.classList.add("winCell"));
+
+    // 当たりラインを描画
+    drawPaylines(panel, winLines, intensity);
+
+    // 一定時間で解除
+    fxTimer = setTimeout(() => {
+      panel.classList.remove("winFx", "winBig");
+      clearWinHighlights(panel);
+    }, big ? 2400 : 1700);
+  }
+
   /* ===== CSS ===== */
   function injectStyles() {
     const s = document.createElement("style");
@@ -128,18 +244,13 @@
   --winTop: 38%;
   --winH: 34%;
 
-  /* ▼▼▼ 下パネル比で自動計算するための変数 ▼▼▼
-     下パネルは「筐体画像の高さに対して何%か」という比率で扱う。
-     - panelTop: 下パネル上端の位置（筐体画像の上からの割合）
-     - panelH  : 下パネルの高さ（筐体画像の高さに対する割合）
-     この2つを決めれば、UI位置は比率で自動配置できる。
-  */
-  --panelTop: 68%;     /* ★下パネル開始位置（要調整ポイント） */
-  --panelH:   18%;     /* ★下パネル高さ（要調整ポイント） */
+  /* ▼▼▼ 下パネル比で自動計算するための変数 ▼▼▼ */
+  --panelTop: 68%;
+  --panelH:   18%;
 
   /* UIは「下パネル内でのY比率」で置く（0=上端, 1=下端） */
-  --resY: 0.55;        /* 結果：下パネルの上から35%の位置 */
-  --uiY:  0.78;        /* ボタン：下パネルの上から78%の位置 */
+  --resY: 0.55;
+  --uiY:  0.78;
 
   position:fixed;
   left:50%;
@@ -169,9 +280,6 @@
   pointer-events:auto;
 }
 
-/* ▼ 計算式：
-   top = panelTop + panelH * (resY or uiY)
-*/
 #${PANEL_ID} .results{
   top: calc(var(--panelTop) + var(--panelH) * var(--resY));
 }
@@ -203,7 +311,7 @@
 /* ===== 結果演出 ===== */
 #${PANEL_ID} .result{
   display:inline-block;
-  will-change: transform, opacity;
+  will-change: transform, opacity, filter;
   opacity: 1;
   transform: translateY(0) scale(1);
 }
@@ -214,9 +322,19 @@
 #${PANEL_ID} .result.popNum{
   animation: popNum 420ms cubic-bezier(.2,1.3,.2,1) 1;
 }
+#${PANEL_ID} .result.popBig{
+  animation: popBig 520ms cubic-bezier(.15,1.6,.15,1) 1;
+  filter: drop-shadow(0 10px 14px rgba(255,200,0,.45));
+}
 @keyframes popNum{
   0%{ transform: translateY(0) scale(1); }
   35%{ transform: translateY(-6px) scale(1.12); }
+  100%{ transform: translateY(0) scale(1); }
+}
+@keyframes popBig{
+  0%{ transform: translateY(0) scale(1); }
+  30%{ transform: translateY(-10px) scale(1.20); }
+  60%{ transform: translateY(2px) scale(1.08); }
   100%{ transform: translateY(0) scale(1); }
 }
 
@@ -242,12 +360,14 @@
   align-items:center;
   justify-content:center;
 }
+
 #${PANEL_ID} .strip{
   position:absolute;
   inset:0;
   transform:translateY(0);
   will-change:transform,filter,opacity;
 }
+
 #${PANEL_ID}.spinning .strip{
   filter:blur(2px);
   opacity:.65;
@@ -260,6 +380,7 @@
   50%{transform:translateY(1px)}
   100%{transform:translateY(0)}
 }
+
 #${PANEL_ID} img.sym{
   width:78%;
   height:78%;
@@ -267,26 +388,112 @@
   filter: drop-shadow(0 8px 10px rgba(0,0,0,0.18));
 }
 
-#${PANEL_ID} .win{
-  box-shadow:0 0 18px rgba(255,200,0,.75);
+/* ===== 当たり豪華：セル発光 ===== */
+#${PANEL_ID} .cell.winCell{
+  box-shadow:
+    0 0 0 2px rgba(255,220,120,.55) inset,
+    0 0 18px rgba(255,200,0,.55);
+  animation: winPulse 680ms ease-in-out infinite;
+}
+@keyframes winPulse{
+  0%{ transform: translateZ(0) scale(1); }
+  50%{ transform: translateZ(0) scale(1.02); }
+  100%{ transform: translateZ(0) scale(1); }
+}
+
+/* ===== 当たりライン描画レイヤ ===== */
+#${PANEL_ID} .paylines{
+  position:absolute;
+  left:50%;
+  top:var(--winTop);
+  transform:translate(-50%,-50%);
+  width:72%;
+  height:var(--winH);
+  pointer-events:none;
+  z-index:2147483645;
+}
+#${PANEL_ID} .lineSvg{
+  position:absolute;
+  inset:0;
+}
+#${PANEL_ID} .paylinePath{
+  stroke: rgba(255,210,90,.92);
+  filter: drop-shadow(0 4px 8px rgba(255,200,0,.35));
+  stroke-dasharray: 999;
+  stroke-dashoffset: 999;
+  animation: lineDraw 520ms ease forwards;
+}
+@keyframes lineDraw{
+  to { stroke-dashoffset: 0; }
+}
+
+/* ===== さらに豪華：筐体を軽く揺らす＆ランプ点滅風 ===== */
+#${PANEL_ID}.winFx{
+  animation: machineShake 520ms ease-in-out 1;
+}
+#${PANEL_ID}.winBig{
+  animation: machineShakeBig 720ms ease-in-out 1;
+}
+@keyframes machineShake{
+  0%{ transform: translate(-50%,-50%); }
+  20%{ transform: translate(calc(-50% - 2px), calc(-50% + 1px)); }
+  40%{ transform: translate(calc(-50% + 2px), calc(-50% - 1px)); }
+  60%{ transform: translate(calc(-50% - 1px), calc(-50% - 2px)); }
+  80%{ transform: translate(calc(-50% + 1px), calc(-50% + 2px)); }
+  100%{ transform: translate(-50%,-50%); }
+}
+@keyframes machineShakeBig{
+  0%{ transform: translate(-50%,-50%); }
+  15%{ transform: translate(calc(-50% - 4px), calc(-50% + 2px)); }
+  30%{ transform: translate(calc(-50% + 4px), calc(-50% - 2px)); }
+  45%{ transform: translate(calc(-50% - 3px), calc(-50% - 4px)); }
+  60%{ transform: translate(calc(-50% + 3px), calc(-50% + 4px)); }
+  75%{ transform: translate(calc(-50% - 2px), calc(-50% + 2px)); }
+  100%{ transform: translate(-50%,-50%); }
 }
 
 /* フラッシュ */
 #${PANEL_ID} .flash{
   position:absolute;
   inset:0;
-  background:rgba(255,255,255,.65);
+  background:rgba(255,255,255,.68);
   opacity:0;
   pointer-events:none;
   z-index: 2147483646;
 }
 #${PANEL_ID}.flashOn .flash{
-  animation:flash .35s ease-out;
+  animation:flash .38s ease-out;
 }
 @keyframes flash{
   0%{opacity:0}
   25%{opacity:1}
   100%{opacity:0}
+}
+
+/* ===== 紙吹雪 ===== */
+#${PANEL_ID} .confetti{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:2147483646;
+  overflow:hidden;
+}
+#${PANEL_ID} .confettiPiece{
+  position:absolute;
+  top:-18px;
+  width:10px;
+  height:16px;
+  border-radius:2px;
+  background: rgba(255, 210, 90, .92);
+  box-shadow: 0 10px 18px rgba(0,0,0,.12);
+  animation: confettiFall 1200ms ease-in forwards;
+}
+#${PANEL_ID} .confettiPiece:nth-child(3n){ background: rgba(255, 140, 200, .92); }
+#${PANEL_ID} .confettiPiece:nth-child(3n+1){ background: rgba(120, 210, 255, .92); }
+
+@keyframes confettiFall{
+  0%{ transform: translateY(0) rotate(0deg); opacity:1; }
+  100%{ transform: translateY(700px) rotate(520deg); opacity:0; }
 }
 `;
     document.head.appendChild(s);
@@ -302,6 +509,12 @@
 <div class="machine">
   <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
   <div class="flash"></div>
+
+  <!-- 当たりライン表示 -->
+  <div class="paylines"></div>
+
+  <!-- 紙吹雪 -->
+  <div class="confetti"></div>
 
   <div class="grid">
     ${Array.from({ length: 9 }).map((_, i) => `
@@ -422,6 +635,9 @@
       return;
     }
 
+    // 既存の当たりハイライトを消す
+    clearWinHighlights(panel);
+
     setCoin(have - cost);
     syncHave(panel);
 
@@ -435,6 +651,10 @@
 
     let totalLines = 0;
     let totalPay = 0;
+
+    // ★最後に揃ったライン（10連時は最後の結果を見せる）
+    let lastWinLines = [];
+    let lastPay = 0;
 
     for (let t = 0; t < count; t++) {
       const finals = Array.from({ length: 9 }, () => pickSymbol());
@@ -450,11 +670,23 @@
 
       const names = res.map((r) => r.name);
       const w = wins(names);
-      totalLines += w.length;
 
+      let payThis = 0;
       for (const line of w) {
         const sym = res[line[0]];
-        if (sym.pay) totalPay += sym.pay;
+        if (sym.pay) payThis += sym.pay;
+      }
+
+      totalLines += w.length;
+      totalPay += payThis;
+
+      // 最後の回の当たりを保持
+      lastWinLines = w;
+      lastPay = payThis;
+
+      // ★途中当たりでも軽く演出（10連の“ワクワク”）
+      if (w.length > 0 && count > 1) {
+        triggerWinFx(panel, w, payThis, w.length);
       }
     }
 
@@ -463,13 +695,17 @@
 
     if (totalPay > 0) {
       setCoin(getCoin() + totalPay);
-      panel.classList.add("flashOn");
-      coinBurst(12, 70);
-      setTimeout(() => panel.classList.remove("flashOn"), 400);
+      // 最後の当たりラインをしっかり見せる（なければ全体当たりでも軽演出）
+      if (lastWinLines.length > 0) {
+        triggerWinFx(panel, lastWinLines, totalPay, totalLines);
+      } else {
+        // 10連合算で当たりがあるが最後が外れの場合でも一応豪華に
+        triggerWinFx(panel, [], totalPay, totalLines);
+      }
     }
 
     if (totalLines > 0) {
-      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, 3600);
+      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, totalPay >= 1000 ? 4600 : 3600);
     } else {
       showResult(panel, "はずれ！", 2400);
     }
