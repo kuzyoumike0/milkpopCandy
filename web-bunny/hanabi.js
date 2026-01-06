@@ -3,7 +3,7 @@
 // assets/hanabi 配下を使用
 
 (() => {
-  const COST = 200; // 花火1発のコスト
+  const COST = 2000; // 花火1発のコスト
   const BTN_ID = "hanabiBtn";
 
   const FIREWORKS = [
