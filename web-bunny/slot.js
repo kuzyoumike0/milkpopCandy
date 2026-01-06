@@ -4,27 +4,26 @@
 
   const MACHINE_SRC = "/web-bunny/assets/slot_machine.png";
 
-  // ===== 音 =====
+  /* ===== SE ===== */
   const START_SE = "/web-bunny/assets/slotse.mp3";
   const REEL_SE  = "/web-bunny/assets/reelse.mp3";
   const STOP_SE  = "/web-bunny/assets/stop.mp3";
   const COIN_SE  = "/web-bunny/assets/coin.mp3";
 
-  // ===== 絵柄 =====
+  /* ===== 絵柄 ===== */
   const SYMBOLS = [
     { name: "coin2", src: "/web-bunny/assets/coin2.png", w: 30, pay: 100 },
     { name: "coin3", src: "/web-bunny/assets/coin3.png", w: 20, pay: 200 },
     { name: "coin4", src: "/web-bunny/assets/coin4.png", w: 10, pay: 500 },
     { name: "babybunny", src: "/web-bunny/assets/babybunny.png", w: 15 },
-    { name: "reabunny",  src: "/web-bunny/assets/reabunny.png",  w: 5  },
+    { name: "reabunny", src: "/web-bunny/assets/reabunny.png", w: 5 },
     { name: "ougon", src: "/web-bunny/assets/ougonunchi.png", w: 1, pay: 1500 },
   ];
 
   const SPIN = { loops: 22, colDelay: 220, baseDuration: 980 };
-
   const $ = (q, p = document) => p.querySelector(q);
 
-  /* ========= Audio ========= */
+  /* ===== Audio ===== */
   function oneShot(src, vol = 0.9) {
     try {
       const a = new Audio(src);
@@ -48,62 +47,55 @@
     reelLoop = null;
   }
 
-  function coinBurst(times = 12, interval = 75) {
-    let n = 0;
+  function coinBurst(n = 12, i = 70) {
+    let c = 0;
     const id = setInterval(() => {
-      oneShot(COIN_SE, 0.75);
-      if (++n >= times) clearInterval(id);
-    }, interval);
+      oneShot(COIN_SE, 0.8);
+      if (++c >= n) clearInterval(id);
+    }, i);
   }
 
-  /* ========= Coin ========= */
+  /* ===== Coin ===== */
   function getCoin() {
     const el = $("#coinValue");
     return el ? Number(el.textContent) || 0 : 0;
   }
   function setCoin(v) {
     const el = $("#coinValue");
-    if (el) el.textContent = String(Math.max(0, Math.floor(v)));
+    if (el) el.textContent = Math.max(0, Math.floor(v));
   }
 
-  /* ========= Random ========= */
+  /* ===== Random ===== */
   function pickSymbol() {
     const total = SYMBOLS.reduce((a, b) => a + b.w, 0);
     let r = Math.random() * total;
     for (const s of SYMBOLS) {
-      r -= s.w;
-      if (r <= 0) return s;
+      if ((r -= s.w) <= 0) return s;
     }
     return SYMBOLS[0];
   }
 
-  /* ========= CSS ========= */
+  /* ===== CSS ===== */
   function injectStyles() {
-    const style = document.createElement("style");
-    style.textContent = `
+    const s = document.createElement("style");
+    s.textContent = `
 #${PANEL_ID}{
-  --winTop: 44.2%;
-  --winH: 34.0%;
-  --uiBottom: 11.0%;
-  --resBottom: 25.0%;
+  --winTop: 44%;
+  --winH: 34%;
+  --uiBottom: 8.5%;
+  --resBottom: 18.5%;
 
-  position: fixed;
-  left:50%;
-  top:50%;
+  position:fixed;
+  inset:50% auto auto 50%;
   transform:translate(-50%,-50%);
   z-index:2147483647;
-  isolation:isolate;
   user-select:none;
 }
 
 #${PANEL_ID} .machine{ position:relative; }
-#${PANEL_ID} .machineImg{
-  width:600px;
-  max-width:92vw;
-  display:block;
-}
+#${PANEL_ID} .machineImg{ width:600px; max-width:92vw; display:block; }
 
-/* ===== 下パネルUI（中央固定） ===== */
+/* ===== UI（下パネル中央固定） ===== */
 #${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
@@ -119,19 +111,21 @@
 }
 
 #${PANEL_ID} .controls{
+  top:auto;
   bottom:var(--uiBottom);
 }
 
 #${PANEL_ID} .results{
+  top:auto;
   bottom:var(--resBottom);
 }
 
 #${PANEL_ID} .chip{
-  background:rgba(255,255,255,.95);
+  background:rgba(255,255,255,.96);
   padding:10px 14px;
   border-radius:14px;
   font-weight:900;
-  box-shadow:0 18px 40px rgba(0,0,0,.18);
+  box-shadow:0 12px 32px rgba(0,0,0,.18);
 }
 
 #${PANEL_ID} .btn{
@@ -139,13 +133,12 @@
   border-radius:14px;
   font-weight:900;
   border:none;
-  cursor:pointer;
   background:#fff;
-  box-shadow:0 18px 40px rgba(0,0,0,.18);
+  cursor:pointer;
 }
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
 
-/* ===== 3×3スロット窓 ===== */
+/* ===== スロット窓 ===== */
 #${PANEL_ID} .grid{
   position:absolute;
   left:50%;
@@ -176,15 +169,15 @@
 }
 
 #${PANEL_ID}.spinning .strip{
-  filter:blur(2.2px);
+  filter:blur(2px);
   opacity:.65;
 }
 
 #${PANEL_ID}.spinning img.sym{
-  animation:jitterY .12s infinite;
+  animation:jitter .12s infinite;
 }
 
-@keyframes jitterY{
+@keyframes jitter{
   0%{transform:translateY(0)}
   50%{transform:translateY(1px)}
   100%{transform:translateY(0)}
@@ -196,9 +189,8 @@
   object-fit:contain;
 }
 
-/* 当たり */
 #${PANEL_ID} .win{
-  box-shadow:0 0 18px rgba(255,196,0,.7);
+  box-shadow:0 0 18px rgba(255,200,0,.75);
 }
 
 /* フラッシュ */
@@ -207,9 +199,10 @@
   inset:0;
   background:rgba(255,255,255,.65);
   opacity:0;
+  pointer-events:none;
 }
 #${PANEL_ID}.flashOn .flash{
-  animation:flash .38s ease-out;
+  animation:flash .35s ease-out;
 }
 @keyframes flash{
   0%{opacity:0}
@@ -217,62 +210,58 @@
   100%{opacity:0}
 }
 `;
-    document.head.appendChild(style);
+    document.head.appendChild(s);
   }
 
-  /* ========= DOM ========= */
+  /* ===== DOM ===== */
   function buildPanel() {
     if (document.getElementById(PANEL_ID)) return;
-    const panel = document.createElement("div");
-    panel.id = PANEL_ID;
-    panel.innerHTML = `
-      <div class="machine">
-        <img class="machineImg" src="${MACHINE_SRC}">
-        <div class="flash"></div>
+    const p = document.createElement("div");
+    p.id = PANEL_ID;
+    p.innerHTML = `
+<div class="machine">
+  <img class="machineImg" src="${MACHINE_SRC}">
+  <div class="flash"></div>
 
-        <div class="grid">
-          ${Array.from({length:9}).map((_,i)=>`
-            <div class="cell" data-i="${i}">
-              <div class="strip"></div>
-            </div>`).join("")}
-        </div>
+  <div class="grid">
+    ${Array.from({length:9}).map((_,i)=>`
+      <div class="cell" data-i="${i}"><div class="strip"></div></div>
+    `).join("")}
+  </div>
 
-        <div class="controlBar results">
-          <div class="chip result">回してみよう！</div>
-        </div>
+  <div class="controlBar results">
+    <div class="chip result">回してみよう！</div>
+  </div>
 
-        <div class="controlBar controls">
-          <div class="chip">所持：<b class="have">0</b> 🪙</div>
-          <button class="btn primary spin">回す（-${SLOT_COST}）</button>
-          <button class="btn spin10">10連</button>
-        </div>
-      </div>`;
-    document.body.appendChild(panel);
+  <div class="controlBar controls">
+    <div class="chip">所持：<b class="have">0</b> 🪙</div>
+    <button class="btn primary spin">回す（-${SLOT_COST}）</button>
+    <button class="btn spin10">10連</button>
+  </div>
+</div>`;
+    document.body.appendChild(p);
 
-    $(".spin", panel).onclick = () => spin(panel,1);
-    $(".spin10", panel).onclick = () => spin(panel,10);
+    $(".spin", p).onclick = () => spin(p, 1);
+    $(".spin10", p).onclick = () => spin(p, 10);
 
-    panel.querySelectorAll(".cell").forEach(c=>{
+    p.querySelectorAll(".cell").forEach(c=>{
       setStrip(c.querySelector(".strip"), [pickSymbol()], c);
     });
   }
 
-  function syncHave(panel){ $(".have",panel).textContent = getCoin(); }
+  function syncHave(p){ $(".have",p).textContent = getCoin(); }
 
-  /* ========= Strip ========= */
-  function cellH(cell){
-    return Math.max(40, cell.getBoundingClientRect().height|0);
-  }
+  /* ===== Strip ===== */
+  function cellH(c){ return Math.max(40, c.getBoundingClientRect().height|0); }
   function setStrip(strip, seq, cell){
     const h = cellH(cell);
-    strip.innerHTML = "";
+    strip.innerHTML="";
     seq.forEach(s=>{
       const d=document.createElement("div");
       d.style.height=h+"px";
       const i=document.createElement("img");
       i.src=s.src; i.className="sym";
-      d.appendChild(i);
-      strip.appendChild(d);
+      d.appendChild(i); strip.appendChild(d);
     });
   }
   function force(el){ void el.offsetHeight; }
@@ -282,7 +271,7 @@
     const h = cellH(cell);
     const seq=[...Array(SPIN.loops)].map(pickSymbol);
     seq.push(finalSym);
-    setStrip(strip,seq,cell);
+    setStrip(strip, seq, cell);
     strip.style.transition="none";
     strip.style.transform="translateY(0)";
     force(strip);
@@ -296,7 +285,7 @@
     });
   }
 
-  /* ========= 判定 ========= */
+  /* ===== 判定 ===== */
   const LINES=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
 
   function wins(names){
@@ -320,12 +309,14 @@
     spinning=true;
     panel.classList.add("spinning");
 
-    let totalLines=0, totalPay=0;
+    let totalLines=0,totalPay=0;
 
     for(let t=0;t<count;t++){
       const finals=[...Array(9)].map(pickSymbol);
       const cells=[...panel.querySelectorAll(".cell")];
-      const res=await Promise.all(finals.map((s,i)=>spinCell(cells[i],s,(i%3)*SPIN.colDelay)));
+      const res=await Promise.all(
+        finals.map((s,i)=>spinCell(cells[i],s,(i%3)*SPIN.colDelay))
+      );
       const names=res.map(r=>r.name);
       const w=wins(names);
       totalLines+=w.length;
@@ -352,7 +343,7 @@
     spinning=false;
   }
 
-  /* ========= 起動 ========= */
+  /* ===== 起動 ===== */
   window.addEventListener("load",()=>{
     injectStyles();
     buildPanel();
