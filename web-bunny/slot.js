@@ -2,16 +2,16 @@
   const PANEL_ID = "slotStarMachinePanel3x3";
   const SLOT_COST = 50;
 
-  /* =========================
-   * Assets
-   * ========================= */
+  // 404回避のため相対パス（index.html から見た assets）
   const MACHINE_SRC = "./assets/slot_machine.png";
 
+  /* ===== SE ===== */
   const START_SE = "./assets/slotse.mp3";
   const REEL_SE  = "./assets/reelse.mp3";
   const STOP_SE  = "./assets/stop.mp3";
   const COIN_SE  = "./assets/coin.mp3";
 
+  /* ===== 絵柄 ===== */
   const SYMBOLS = [
     { name: "coin2", src: "./assets/coin2.png", w: 30, pay: 100 },
     { name: "coin3", src: "./assets/coin3.png", w: 20, pay: 200 },
@@ -28,6 +28,7 @@
    * Audio
    * ========================= */
   function oneShot(src, vol = 0.9) {
+    if (!src) return;
     try {
       const a = new Audio(src);
       a.volume = vol;
@@ -38,13 +39,16 @@
 
   let reelLoop = null;
   function startReelLoop() {
+    if (!REEL_SE) return;
     try {
       reelLoop = new Audio(REEL_SE);
       reelLoop.loop = true;
       reelLoop.volume = 0.55;
       reelLoop.currentTime = 0;
       reelLoop.play().catch(() => {});
-    } catch {}
+    } catch {
+      reelLoop = null;
+    }
   }
   function stopReelLoop() {
     try {
@@ -53,6 +57,14 @@
       reelLoop.currentTime = 0;
     } catch {}
     reelLoop = null;
+  }
+
+  function coinBurst(n = 14, i = 65) {
+    let c = 0;
+    const id = setInterval(() => {
+      oneShot(COIN_SE, 0.85);
+      if (++c >= n) clearInterval(id);
+    }, i);
   }
 
   /* =========================
@@ -80,17 +92,182 @@
   }
 
   /* =========================
-   * CSS（ここが重要：cellをrelativeにする）
+   * Result (表示ロック + フェードアウト + 数字ポン)
+   * ========================= */
+  let resultLock = false;
+  let resultTimer = null;
+
+  function parseCoins(text) {
+    const m = text.match(/\+(\d+)/);
+    return m ? Number(m[1]) : null;
+  }
+
+  function showResult(panel, text, holdMs = 2600) {
+    const el = $(".result", panel);
+    if (!el) return;
+
+    if (resultTimer) {
+      clearTimeout(resultTimer);
+      resultTimer = null;
+    }
+
+    resultLock = true;
+    el.classList.remove("fadeOut", "popNum", "popBig");
+    el.textContent = text;
+
+    const coins = parseCoins(text);
+    if (coins !== null && coins > 0) {
+      requestAnimationFrame(() => el.classList.add(coins >= 500 ? "popBig" : "popNum"));
+    }
+
+    const fadeMs = 650;
+    const fadeStart = Math.max(0, holdMs - fadeMs);
+    resultTimer = setTimeout(() => {
+      el.classList.add("fadeOut");
+      setTimeout(() => (resultLock = false), fadeMs + 50);
+    }, fadeStart);
+  }
+
+  /* =========================
+   * 豪華演出
+   * ========================= */
+  let fxTimer = null;
+
+  function clearWinHighlights(panel) {
+    panel.querySelectorAll(".cell").forEach((c) => c.classList.remove("winCell"));
+    const lines = $(".paylines", panel);
+    if (lines) lines.innerHTML = "";
+  }
+
+  function vibrate(pattern) {
+    try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {}
+  }
+
+  function spawnConfetti(panel, amount = 28) {
+    const box = $(".confetti", panel);
+    if (!box) return;
+    box.innerHTML = "";
+    const w = box.getBoundingClientRect().width || 300;
+    for (let i = 0; i < amount; i++) {
+      const p = document.createElement("i");
+      p.className = "confettiPiece";
+      const x = Math.random() * w;
+      const d = 700 + Math.random() * 800;
+      const s = 0.8 + Math.random() * 0.9;
+      const r = (Math.random() * 360) | 0;
+      p.style.left = `${x}px`;
+      p.style.animationDuration = `${d}ms`;
+      p.style.transform = `scale(${s}) rotate(${r}deg)`;
+      p.style.opacity = `${0.7 + Math.random() * 0.3}`;
+      box.appendChild(p);
+    }
+    setTimeout(() => (box.innerHTML = ""), 1800);
+  }
+
+  function drawPaylines(panel, winLines, intensity = 1) {
+    const layer = $(".paylines", panel);
+    if (!layer) return;
+    layer.innerHTML = "";
+
+    const cells = Array.from(panel.querySelectorAll(".cell"));
+    const centers = cells.map((c) => {
+      const r = c.getBoundingClientRect();
+      const pr = layer.getBoundingClientRect();
+      return { x: r.left - pr.left + r.width / 2, y: r.top - pr.top + r.height / 2 };
+    });
+
+    winLines.forEach((line, idx) => {
+      const a = centers[line[0]];
+      const b = centers[line[1]];
+      const c = centers[line[2]];
+      if (!a || !b || !c) return;
+
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "lineSvg");
+      svg.setAttribute("viewBox", `0 0 ${layer.clientWidth} ${layer.clientHeight}`);
+
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", `M ${a.x} ${a.y} L ${b.x} ${b.y} L ${c.x} ${c.y}`);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      path.setAttribute("class", "paylinePath");
+      path.style.strokeWidth = `${Math.max(4, 5 + intensity * 1.5)}px`;
+      path.style.animationDelay = `${idx * 90}ms`;
+
+      svg.appendChild(path);
+      layer.appendChild(svg);
+    });
+  }
+
+  function triggerWinFx(panel, winLines, totalPay, totalLines) {
+    if (fxTimer) {
+      clearTimeout(fxTimer);
+      fxTimer = null;
+    }
+
+    const big = totalPay >= 1000 || totalLines >= 3;
+    const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
+
+    panel.classList.add("winFx");
+    if (big) panel.classList.add("winBig");
+    else panel.classList.remove("winBig");
+
+    panel.classList.add("flashOn");
+    setTimeout(() => panel.classList.remove("flashOn"), 420);
+
+    vibrate(big ? [80, 60, 120] : [50, 40, 60]);
+
+    coinBurst(big ? 22 : 14, big ? 55 : 65);
+    spawnConfetti(panel, big ? 48 : 30);
+
+    const cells = Array.from(panel.querySelectorAll(".cell"));
+    winLines.flat().forEach((i) => cells[i]?.classList.add("winCell"));
+
+    drawPaylines(panel, winLines, intensity);
+
+    fxTimer = setTimeout(() => {
+      panel.classList.remove("winFx", "winBig");
+      clearWinHighlights(panel);
+    }, big ? 2400 : 1700);
+  }
+
+  /* =========================
+   * 判定
+   * ========================= */
+  const LINES = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6],
+  ];
+
+  function wins(names) {
+    const out = [];
+    for (const line of LINES) {
+      const a = names[line[0]];
+      if (a && line.every((i) => names[i] === a)) out.push(line);
+    }
+    return out;
+  }
+
+  /* =========================
+   * CSS（スクロール無し・ズレ/巨大化防止・ボタンは下パネル基準）
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("slotStyleFixV2")) return;
+    if (document.getElementById("slotStyleFullFxV3")) return;
     const s = document.createElement("style");
-    s.id = "slotStyleFixV2";
+    s.id = "slotStyleFullFxV3";
     s.textContent = `
 #${PANEL_ID}{
   --winTop: 38%;
   --winH: 34%;
   --winX: 52%;
+
+  /* ▼ 下パネル比（必要なら微調整） */
+  --panelTop: 68%;
+  --panelH:   18%;
+  --resY: 0.35;
+  --uiY:  0.78;
 
   position: fixed;
   inset: 0;
@@ -100,6 +277,7 @@
   display: none;
   overflow: hidden;
   user-select: none;
+  isolation: isolate;
 }
 
 #${PANEL_ID} .backdrop{
@@ -119,16 +297,32 @@
   display:block;
   max-width:92vw;
   max-height:92vh;
-  height:auto;
   width:auto;
+  height:auto;
 }
 
+/* 閉じる */
+#${PANEL_ID} .closeBtn{
+  position:absolute;
+  top:10px;
+  right:10px;
+  border-radius:14px;
+  width:44px;
+  height:44px;
+  border:none;
+  background:rgba(255,255,255,.95);
+  box-shadow:0 12px 32px rgba(0,0,0,.18);
+  cursor:pointer;
+  z-index:2147483647;
+}
+
+/* ===== スロット窓 ===== */
 #${PANEL_ID} .grid{
   position:absolute;
   left:var(--winX);
   top:var(--winTop);
   transform:translate(-50%,-50%);
-  width:67%;
+  width:72%;
   height:var(--winH);
   display:grid;
   grid-template-columns:repeat(3,1fr);
@@ -137,7 +331,7 @@
 }
 
 #${PANEL_ID} .cell{
-  position:relative;          /* ★★★ これが無いと全部重なる ★★★ */
+  position:relative;
   overflow:hidden;
   border-radius:12px;
   display:flex;
@@ -149,7 +343,20 @@
   position:absolute;
   inset:0;
   transform:translateY(0);
-  will-change:transform;
+  will-change:transform,filter,opacity;
+}
+
+#${PANEL_ID}.spinning .strip{
+  filter:blur(2px);
+  opacity:.65;
+}
+#${PANEL_ID}.spinning img.sym{
+  animation:jitter .12s infinite;
+}
+@keyframes jitter{
+  0%{transform:translateY(0)}
+  50%{transform:translateY(1px)}
+  100%{transform:translateY(0)}
 }
 
 #${PANEL_ID} img.sym{
@@ -157,56 +364,216 @@
   height:78%;
   object-fit:contain;
   display:block;
+  filter: drop-shadow(0 8px 10px rgba(0,0,0,0.18));
 }
 
-#${PANEL_ID} .controls{
+/* ===== 当たり豪華：セル発光 ===== */
+#${PANEL_ID} .cell.winCell{
+  box-shadow:
+    0 0 0 2px rgba(255,220,120,.55) inset,
+    0 0 18px rgba(255,200,0,.55);
+  animation: winPulse 680ms ease-in-out infinite;
+}
+@keyframes winPulse{
+  0%{ transform: translateZ(0) scale(1); }
+  50%{ transform: translateZ(0) scale(1.02); }
+  100%{ transform: translateZ(0) scale(1); }
+}
+
+/* ===== 当たりライン描画レイヤ ===== */
+#${PANEL_ID} .paylines{
+  position:absolute;
+  left:var(--winX);
+  top:var(--winTop);
+  transform:translate(-50%,-50%);
+  width:72%;
+  height:var(--winH);
+  pointer-events:none;
+  z-index:2147483645;
+}
+#${PANEL_ID} .lineSvg{
+  position:absolute;
+  inset:0;
+}
+#${PANEL_ID} .paylinePath{
+  stroke: rgba(255,210,90,.92);
+  filter: drop-shadow(0 4px 8px rgba(255,200,0,.35));
+  stroke-dasharray: 999;
+  stroke-dashoffset: 999;
+  animation: lineDraw 520ms ease forwards;
+}
+@keyframes lineDraw{
+  to { stroke-dashoffset: 0; }
+}
+
+/* ===== さらに豪華：筐体を軽く揺らす ===== */
+#${PANEL_ID}.winFx{
+  animation: machineShake 520ms ease-in-out 1;
+}
+#${PANEL_ID}.winBig{
+  animation: machineShakeBig 720ms ease-in-out 1;
+}
+@keyframes machineShake{
+  0%{ transform: translate(-50%,-50%); }
+  20%{ transform: translate(calc(-50% - 2px), calc(-50% + 1px)); }
+  40%{ transform: translate(calc(-50% + 2px), calc(-50% - 1px)); }
+  60%{ transform: translate(calc(-50% - 1px), calc(-50% - 2px)); }
+  80%{ transform: translate(calc(-50% + 1px), calc(-50% + 2px)); }
+  100%{ transform: translate(-50%,-50%); }
+}
+@keyframes machineShakeBig{
+  0%{ transform: translate(-50%,-50%); }
+  15%{ transform: translate(calc(-50% - 4px), calc(-50% + 2px)); }
+  30%{ transform: translate(calc(-50% + 4px), calc(-50% - 2px)); }
+  45%{ transform: translate(calc(-50% - 3px), calc(-50% - 4px)); }
+  60%{ transform: translate(calc(-50% + 3px), calc(-50% + 4px)); }
+  75%{ transform: translate(calc(-50% - 2px), calc(-50% + 2px)); }
+  100%{ transform: translate(-50%,-50%); }
+}
+
+/* フラッシュ */
+#${PANEL_ID} .flash{
+  position:absolute;
+  inset:0;
+  background:rgba(255,255,255,.68);
+  opacity:0;
+  pointer-events:none;
+  z-index:2147483646;
+}
+#${PANEL_ID}.flashOn .flash{
+  animation:flash .38s ease-out;
+}
+@keyframes flash{
+  0%{opacity:0}
+  25%{opacity:1}
+  100%{opacity:0}
+}
+
+/* ===== 紙吹雪 ===== */
+#${PANEL_ID} .confetti{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:2147483646;
+  overflow:hidden;
+}
+#${PANEL_ID} .confettiPiece{
+  position:absolute;
+  top:-18px;
+  width:10px;
+  height:16px;
+  border-radius:2px;
+  background: rgba(255, 210, 90, .92);
+  box-shadow: 0 10px 18px rgba(0,0,0,.12);
+  animation: confettiFall 1200ms ease-in forwards;
+}
+#${PANEL_ID} .confettiPiece:nth-child(3n){ background: rgba(255, 140, 200, .92); }
+#${PANEL_ID} .confettiPiece:nth-child(3n+1){ background: rgba(120, 210, 255, .92); }
+@keyframes confettiFall{
+  0%{ transform: translateY(0) rotate(0deg); opacity:1; }
+  100%{ transform: translateY(700px) rotate(520deg); opacity:0; }
+}
+
+/* ===== UIバー（下パネル基準で固定） ===== */
+#${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
-  top: calc(var(--panelTop) + var(--panelH) * var(--uiY));
   transform:translate(-50%,-50%);
-
-  width: 86%;
-  max-width: 560px;
-
+  width:86%;
+  max-width:560px;
   display:flex;
   justify-content:center;
   align-items:center;
   gap:10px;
-  z-index: 2147483647;
+  flex-wrap:wrap;
+  z-index:2147483647;
   pointer-events:auto;
 }
+#${PANEL_ID} .results{
+  top: calc(var(--panelTop) + var(--panelH) * var(--resY));
+}
+#${PANEL_ID} .controls{
+  top: calc(var(--panelTop) + var(--panelH) * var(--uiY));
+}
 
-
-#${PANEL_ID} button{
+#${PANEL_ID} .chip{
+  background:rgba(255,255,255,.96);
   padding:10px 14px;
   border-radius:14px;
-  border:none;
   font-weight:900;
-  cursor:pointer;
-}
-
-#${PANEL_ID} .spin{
-  background:#ffd6e7;
-}
-#${PANEL_ID} .closeBtn{
-  position:absolute;
-  top:10px;
-  right:10px;
-  border-radius:14px;
-  width:44px;
-  height:44px;
-  background:rgba(255,255,255,.95);
   box-shadow:0 12px 32px rgba(0,0,0,.18);
+}
+#${PANEL_ID} .btn{
+  padding:10px 14px;
+  border-radius:14px;
+  font-weight:900;
+  border:none;
+  background:#fff;
+  cursor:pointer;
+  box-shadow:0 12px 32px rgba(0,0,0,.14);
+}
+#${PANEL_ID} .btn.primary{ background:#ffd6e7; }
+
+/* 結果演出 */
+#${PANEL_ID} .result{
+  display:inline-block;
+  will-change: transform, opacity, filter;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+#${PANEL_ID} .result.fadeOut{
+  transition: opacity 650ms ease;
+  opacity: 0.25;
+}
+#${PANEL_ID} .result.popNum{
+  animation: popNum 420ms cubic-bezier(.2,1.3,.2,1) 1;
+}
+#${PANEL_ID} .result.popBig{
+  animation: popBig 520ms cubic-bezier(.15,1.6,.15,1) 1;
+  filter: drop-shadow(0 10px 14px rgba(255,200,0,.45));
+}
+@keyframes popNum{
+  0%{ transform: translateY(0) scale(1); }
+  35%{ transform: translateY(-6px) scale(1.12); }
+  100%{ transform: translateY(0) scale(1); }
+}
+@keyframes popBig{
+  0%{ transform: translateY(0) scale(1); }
+  30%{ transform: translateY(-10px) scale(1.20); }
+  60%{ transform: translateY(2px) scale(1.08); }
+  100%{ transform: translateY(0) scale(1); }
 }
 `;
     document.head.appendChild(s);
   }
 
   /* =========================
-   * DOM build
+   * DOM
    * ========================= */
+  let panelRef = null;
+  let prevOverflowHtml = "";
+  let prevOverflowBody = "";
+
+  function lockScroll() {
+    const html = document.documentElement;
+    const body = document.body;
+    prevOverflowHtml = html.style.overflow;
+    prevOverflowBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+  }
+  function unlockScroll() {
+    const html = document.documentElement;
+    const body = document.body;
+    html.style.overflow = prevOverflowHtml || "";
+    body.style.overflow = prevOverflowBody || "";
+  }
+
   function buildPanel() {
-    if (document.getElementById(PANEL_ID)) return;
+    if (document.getElementById(PANEL_ID)) {
+      panelRef = document.getElementById(PANEL_ID);
+      return panelRef;
+    }
 
     const p = document.createElement("div");
     p.id = PANEL_ID;
@@ -214,67 +581,74 @@
 <div class="backdrop"></div>
 <div class="machine">
   <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
+  <div class="flash"></div>
+
+  <div class="paylines"></div>
+  <div class="confetti"></div>
+
   <div class="grid">
-    ${Array.from({ length: 9 }).map((_, i) =>
-      `<div class="cell" data-i="${i}"><div class="strip"></div></div>`
-    ).join("")}
+    ${Array.from({ length: 9 }).map((_, i) => `
+      <div class="cell" data-i="${i}" data-sym=""><div class="strip"></div></div>
+    `).join("")}
   </div>
-  <div class="controls">
-    <button class="spin">回す (-${SLOT_COST})</button>
-    <button class="spin10">10連</button>
+
+  <div class="controlBar results">
+    <div class="chip result">回してみよう！</div>
+  </div>
+
+  <div class="controlBar controls">
+    <div class="chip">所持：<b class="have">0</b> 🪙</div>
+    <button class="btn primary spin">回す（-${SLOT_COST}）</button>
+    <button class="btn spin10">10連</button>
   </div>
 </div>
 <button class="closeBtn" aria-label="close">×</button>
 `;
     document.body.appendChild(p);
+    panelRef = p;
 
-    // 初期絵柄
+    // 初期絵柄（サイズ確定後に作り直す）
     p.querySelectorAll(".cell").forEach((c) => {
-      const sym = pickSymbol();
-      c.dataset.sym = sym.name;
-      setStrip(c.querySelector(".strip"), [sym], c);
+      const s = pickSymbol();
+      c.dataset.sym = s.name;
+      setStrip(c.querySelector(".strip"), [s], c);
     });
 
-    // 閉じる
-    p.querySelector(".closeBtn").onclick = closePanel;
-    p.querySelector(".backdrop").onclick = closePanel;
+    $(".spin", p).onclick = () => spin(p, 1);
+    $(".spin10", p).onclick = () => spin(p, 10);
 
-    // 回す
-    p.querySelector(".spin").onclick = () => spin(p, 1);
-    p.querySelector(".spin10").onclick = () => spin(p, 10);
+    $(".closeBtn", p).onclick = closePanel;
+    $(".backdrop", p).onclick = closePanel;
 
-    // 画像読み込み後に「高さ再計算」して巨大化/ズレ予防
-    const img = p.querySelector(".machineImg");
+    // 画像読み込み後に再計算（巨大化/ズレ予防）
+    const img = $(".machineImg", p);
     if (img) {
-      img.addEventListener("load", () => {
-        // 2フレーム待ってから再生成（レイアウト確定後）
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            refreshAllCells(p);
-          });
-        });
-      }, { once: true });
-
-      // すでにキャッシュで読み込み済みでも動く
-      if (img.complete) {
+      const onReady = () => {
         requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(p)));
-      }
+      };
+      img.addEventListener("load", onReady, { once: true });
+      if (img.complete) onReady();
     }
+
+    return p;
+  }
+
+  function syncHave(p) {
+    const haveEl = $(".have", p);
+    if (haveEl) haveEl.textContent = String(getCoin());
   }
 
   /* =========================
-   * Strip helpers
+   * Strip
    * ========================= */
   function cellH(cell) {
     const r = cell.getBoundingClientRect();
     if (r.height && r.height > 10) return (r.height | 0);
 
-    // もし0っぽいなら gridの高さから推定
     const grid = cell.closest(".grid");
     if (grid) {
       const gr = grid.getBoundingClientRect();
-      const approx = gr.height / 3;
-      return Math.max(40, approx | 0);
+      return Math.max(40, (gr.height / 3) | 0);
     }
     return 80;
   }
@@ -302,7 +676,7 @@
   function refreshAllCells(panel) {
     panel.querySelectorAll(".cell").forEach((cell) => {
       const name = cell.dataset.sym || "";
-      const sym = SYMBOLS.find(s => s.name === name) || SYMBOLS[0];
+      const sym = SYMBOLS.find((s) => s.name === name) || SYMBOLS[0];
       const strip = cell.querySelector(".strip");
       if (!strip) return;
       strip.style.transition = "none";
@@ -310,6 +684,8 @@
       setStrip(strip, [sym], cell);
     });
   }
+
+  function force(el) { void el.offsetHeight; }
 
   function spinCell(cell, finalSym, delay) {
     const strip = cell.querySelector(".strip");
@@ -322,10 +698,9 @@
 
     strip.style.transition = "none";
     strip.style.transform = "translateY(0)";
-    void strip.offsetHeight;
+    force(strip);
 
-    strip.style.transition =
-      `transform ${SPIN.baseDuration + delay}ms cubic-bezier(.12,.86,.12,1)`;
+    strip.style.transition = `transform ${SPIN.baseDuration + delay}ms cubic-bezier(.12,.86,.12,1)`;
     strip.style.transform = `translateY(${-h * (seq.length - 1)}px)`;
 
     return new Promise((resolve) => {
@@ -334,9 +709,10 @@
         strip.removeEventListener("transitionend", onEnd);
 
         strip.style.transition = "none";
-        strip.style.transform = "translateY(0)";
-        cell.dataset.sym = finalSym.name;
         setStrip(strip, [finalSym], cell);
+        strip.style.transform = "translateY(0)";
+
+        cell.dataset.sym = finalSym.name;
 
         resolve(finalSym);
       };
@@ -352,99 +728,127 @@
   async function spin(panel, count) {
     if (spinning) return;
 
+    const have = getCoin();
     const cost = SLOT_COST * count;
-    if (getCoin() < cost) {
-      oneShot(STOP_SE, 0.7);
+    if (have < cost) {
+      showResult(panel, "コインが足りない…！", 2200);
       return;
     }
 
-    setCoin(getCoin() - cost);
+    clearWinHighlights(panel);
+
+    setCoin(have - cost);
+    syncHave(panel);
 
     oneShot(START_SE, 0.9);
     startReelLoop();
 
     spinning = true;
+    panel.classList.add("spinning");
+
+    if (!resultLock) showResult(panel, "回転中…", 1200);
+
+    let totalLines = 0;
+    let totalPay = 0;
+
+    let lastWinLines = [];
+    let lastPay = 0;
 
     for (let t = 0; t < count; t++) {
       const finals = Array.from({ length: 9 }, () => pickSymbol());
       const cells = Array.from(panel.querySelectorAll(".cell"));
 
-      // 列ごとに停止SE
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
 
-      await Promise.all(
+      const res = await Promise.all(
         finals.map((s, i) => spinCell(cells[i], s, (i % 3) * SPIN.colDelay))
       );
+
+      const names = res.map((r) => r.name);
+      const w = wins(names);
+
+      let payThis = 0;
+      for (const line of w) {
+        const sym = res[line[0]];
+        if (sym.pay) payThis += sym.pay;
+      }
+
+      totalLines += w.length;
+      totalPay += payThis;
+
+      lastWinLines = w;
+      lastPay = payThis;
+
+      if (w.length > 0 && count > 1) {
+        triggerWinFx(panel, w, payThis, w.length);
+      }
     }
 
+    panel.classList.remove("spinning");
     stopReelLoop();
-    oneShot(COIN_SE, 0.65); // 〆SE（軽く）
 
+    if (totalPay > 0) {
+      setCoin(getCoin() + totalPay);
+      if (lastWinLines.length > 0) {
+        triggerWinFx(panel, lastWinLines, totalPay, totalLines);
+      } else {
+        triggerWinFx(panel, [], totalPay, totalLines);
+      }
+    }
+
+    if (totalLines > 0) {
+      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, totalPay >= 1000 ? 4600 : 3600);
+    } else {
+      showResult(panel, "はずれ！", 2400);
+    }
+
+    syncHave(panel);
     spinning = false;
   }
 
   /* =========================
-   * Open / Close + scroll lock
+   * Open / Close
    * ========================= */
-  let prevOverflowHtml = "";
-  let prevOverflowBody = "";
-
-  function lockScroll() {
-    const html = document.documentElement;
-    const body = document.body;
-    prevOverflowHtml = html.style.overflow;
-    prevOverflowBody = body.style.overflow;
-    html.style.overflow = "hidden";
-    body.style.overflow = "hidden";
-  }
-  function unlockScroll() {
-    const html = document.documentElement;
-    const body = document.body;
-    html.style.overflow = prevOverflowHtml || "";
-    body.style.overflow = prevOverflowBody || "";
-  }
-
   function openPanel() {
-    const p = document.getElementById(PANEL_ID);
+    const p = buildPanel();
     if (!p) return;
 
     lockScroll();
     p.style.display = "block";
+    syncHave(p);
 
-    // 開いた直後にレイアウト確定→再生成（巨大化/ずれ防止）
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        refreshAllCells(p);
-      });
-    });
+    requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(p)));
   }
 
   function closePanel() {
-    const p = document.getElementById(PANEL_ID);
+    const p = panelRef || document.getElementById(PANEL_ID);
     if (!p) return;
-    if (spinning) return; // 回転中は閉じさせない
+    if (spinning) return;
 
     p.style.display = "none";
     unlockScroll();
   }
 
   /* =========================
-   * Init（slotBtnクリックで表示）
+   * 起動（slotBtnクリックで表示）
    * ========================= */
   window.addEventListener("load", () => {
     injectStyles();
     buildPanel();
 
-    const slotBtn = document.getElementById("slotBtn");
-    if (slotBtn) {
-      slotBtn.addEventListener("click", openPanel);
-    } else {
-      // 保険：文言から探す
-      const any = [...document.querySelectorAll("button")].find(b => b.textContent.includes("スロット"));
-      any?.addEventListener("click", openPanel);
+    const slotBtn = document.getElementById("slotBtn")
+      || [...document.querySelectorAll("button")].find(b => (b.textContent || "").includes("スロット"));
+
+    if (slotBtn) slotBtn.addEventListener("click", openPanel);
+
+    const cv = $("#coinValue");
+    if (cv) {
+      const mo = new MutationObserver(() => {
+        if (panelRef && panelRef.style.display !== "none") syncHave(panelRef);
+      });
+      mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
   });
-
 })();
