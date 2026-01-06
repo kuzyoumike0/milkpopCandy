@@ -172,6 +172,27 @@
   filter:blur(2px);
   opacity:.65;
 }
+let resultLock = false;
+let resultTimer = null;
+
+function showResult(panel, text, duration = 2500) {
+  const el = panel.querySelector(".result");
+  if (!el) return;
+
+  // 既存タイマー解除
+  if (resultTimer) {
+    clearTimeout(resultTimer);
+    resultTimer = null;
+  }
+
+  resultLock = true;
+  el.textContent = text;
+
+  // 指定時間は結果を保持
+  resultTimer = setTimeout(() => {
+    resultLock = false;
+  }, duration);
+}
 
 #${PANEL_ID}.spinning img.sym{
   animation:jitter .12s infinite;
