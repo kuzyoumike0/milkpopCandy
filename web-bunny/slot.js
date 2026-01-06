@@ -114,19 +114,33 @@
   display:block;
 }
 
-/* 操作UI */
+/* 操作UI（下パネル中央にピタッと揃える） */
 #${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
   transform:translateX(-50%);
-  display:flex;
-  gap:10px;
   z-index:2147483647;
+  width: 82%;                 /* ★下パネル内に収める */
+  max-width: 520px;
+  display:flex;
+  justify-content:center;     /* ★中央揃え */
+  align-items:center;
+  gap:10px;
   flex-wrap:wrap;
   pointer-events:auto;
 }
-#${PANEL_ID} .controls{ top: 3%; }
-#${PANEL_ID} .results{ top: 15%; }
+
+/* ★ボタン群：下パネルの中央（下からの位置で固定） */
+#${PANEL_ID} .controls{
+  top:auto;
+  bottom: 9.5%;               /* ★下パネル中央の“下寄り” */
+}
+
+/* ★結果：ボタンの少し上（同じく中央） */
+#${PANEL_ID} .results{
+  top:auto;
+  bottom: 19.5%;              /* ★下パネル中央の“上寄り” */
+}
 
 #${PANEL_ID} .chip{
   background: rgba(255,255,255,0.95);
@@ -147,7 +161,7 @@
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
 #${PANEL_ID} .btn:disabled{ opacity:0.6; cursor:not-allowed; }
 
-/* ===== 3×3表示窓（★ズレ修正版） ===== */
+/* ===== 3×3表示窓（ズレ修正版） ===== */
 #${PANEL_ID} .grid{
   position:absolute;
   left:50%;
@@ -155,7 +169,6 @@
   transform:translate(-50%,-50%);
   width:72%;
   height:40%;
-
   display:grid;
   grid-template-columns:repeat(3, 1fr);
   grid-template-rows:repeat(3, 1fr);
@@ -187,7 +200,7 @@
   opacity: 0.65;
 }
 
-/* ★回転中の微振動（上下ブレ） */
+/* 回転中の微振動（上下ブレ） */
 #${PANEL_ID}.spinning .strip img.sym{
   animation: jitterY 120ms ease-in-out infinite;
 }
@@ -258,7 +271,7 @@
   100%{ filter:none; }
 }
 
-/* ★停止時：列だけバウンド（オーバーシュート） */
+/* 停止時：列だけバウンド（オーバーシュート） */
 #${PANEL_ID} .colBounce{
   animation: colBounce 220ms ease-out 1;
 }
@@ -465,7 +478,6 @@
     setCoin(have - cost);
     syncHave(panel);
 
-    // 開始音＆回転ループ
     oneShot(START_SE, 0.9);
     startReelLoop();
 
@@ -473,7 +485,7 @@
     spinBtn.disabled = true;
     spin10Btn.disabled = true;
 
-    panel.classList.add("spinning"); // ブラー＋微振動ON
+    panel.classList.add("spinning");
 
     let totalLines = 0;
     let totalPay = 0;
@@ -485,7 +497,7 @@
       const cells = [...panel.querySelectorAll(".cell")];
       const finals = Array.from({ length: 9 }, () => pickSymbol());
 
-      // 停止「カチッ×3」（列ごと）
+      // 停止「カチッ×3」
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
@@ -541,14 +553,12 @@
     const panel = document.getElementById(PANEL_ID);
     syncHave(panel);
 
-    // coinValue変化に追従
     const cv = $("#coinValue");
     if (cv) {
       const mo = new MutationObserver(() => syncHave(panel));
       mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
 
-    // 最前面保険
     setInterval(() => {
       const p = document.getElementById(PANEL_ID);
       if (p) p.style.zIndex = "2147483647";
