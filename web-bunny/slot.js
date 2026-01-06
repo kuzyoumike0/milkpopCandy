@@ -611,10 +611,11 @@
    * ========================= */
   window.addEventListener("load", () => {
     // ✅ あなたのinjectStyles全文をここで使う（省略してるなら、元コードのCSSをコピペしてください）
-    // injectStyles();
-    // ↑ CSSを既にstyle.css側に持ってるなら不要
-
-    buildPanel();
+   window.addEventListener("load", () => {
+  injectStyles();   // ← これを必ず有効化
+  buildPanel();
+  ...
+});
 
     const slotBtn =
       document.getElementById("slotBtn") ||
