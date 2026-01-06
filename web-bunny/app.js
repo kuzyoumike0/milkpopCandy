@@ -1270,6 +1270,32 @@
       refreshShopUI();
     });
   }
+  /* =========================
+   * External API (tabidati.js 用)
+   * ========================= */
+  window.WB = {
+    // state / const
+    get coins() { return coins; },
+    set coins(v) { coins = v; },
+    bunnies,
+    DEPART_COST,
+
+    // dom
+    departBtn,
+
+    // functions
+    unlockAudioOnce,
+    saveCoins,
+    updateHud,
+    refreshShopUI,
+    playSE,
+    seTabidati,
+
+    recordFarewell,
+    showFarewellMessage,
+    saveBunnyMeta,
+    checkUnlocks,
+  };
 
   init();
 })();
