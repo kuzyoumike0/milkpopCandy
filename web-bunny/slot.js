@@ -5,9 +5,10 @@
   const MACHINE_SRC = "/web-bunny/assets/slot_machine.png";
 
   // 音
-  const START_SE = "/web-bunny/assets/slotse.mp3";   // 回し始め（1回）
-  const REEL_SE  = "/web-bunny/assets/reelse.mp3";   // 回転中（ループ）※任意
-  const STOP_SE  = "/web-bunny/assets/stop.mp3";     // 停止「カチッ」※必須推奨
+  const START_SE = "/web-bunny/assets/slotse.mp3";     // 回し始め
+  const REEL_SE  = "/web-bunny/assets/reelse.mp3";     // 回転中ループ（任意）
+  const STOP_SE  = "/web-bunny/assets/stop.mp3";       // 停止「カチッ」
+  const COIN_SE  = "/web-bunny/assets/coin.mp3";       // 当たり時コイン連打
 
   const SYMBOLS = [
     { name: "coin2", src: "/web-bunny/assets/coin2.png", w: 30, pay: 100 },
@@ -20,11 +21,10 @@
     { name: "ougon", src: "/web-bunny/assets/ougonunchi.png", w: 1, pay: 1500 },
   ];
 
-  // 演出パラメータ
   const SPIN = {
     loops: 22,
-    colDelay: 220,     // 列ごと停止遅延
-    baseDuration: 980, // 回転時間ベース
+    colDelay: 220,
+    baseDuration: 980,
   };
 
   const $ = (q, p = document) => p.querySelector(q);
@@ -39,7 +39,6 @@
     } catch (_) {}
   }
 
-  // ループ再生（無ければ黙る）
   let reelLoop = null;
   function startReelLoop() {
     try {
@@ -59,6 +58,16 @@
       reelLoop.currentTime = 0;
     } catch (_) {}
     reelLoop = null;
+  }
+
+  // ★ 当たり時コインSE連打（短い間隔で数回）
+  function coinBurst(times = 10, interval = 80) {
+    let n = 0;
+    const id = setInterval(() => {
+      oneShot(COIN_SE, 0.75);
+      n++;
+      if (n >= times) clearInterval(id);
+    }, interval);
   }
 
   /* ========= Coin ========= */
@@ -96,17 +105,14 @@
   isolation:isolate;
 }
 
-#${PANEL_ID} .machine{
-  position: relative;
-}
-
+#${PANEL_ID} .machine{ position: relative; }
 #${PANEL_ID} .machineImg{
   width: 600px;
   max-width: 92vw;
   display:block;
 }
 
-/* 操作UI（筐体の上） */
+/* 操作UI */
 #${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
@@ -139,7 +145,7 @@
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
 #${PANEL_ID} .btn:disabled{ opacity:0.6; cursor:not-allowed; }
 
-/* 3×3表示窓（位置合わせ済み） */
+/* 3×3表示窓 */
 #${PANEL_ID} .grid{
   position:absolute;
   left:50%;
@@ -147,7 +153,6 @@
   transform:translate(-50%,-50%);
   width:72%;
   height:46%;
-
   display:grid;
   grid-template-columns:repeat(3, 1fr);
   grid-template-rows:repeat(3, 1fr);
@@ -173,10 +178,22 @@
   will-change: transform, filter, opacity;
 }
 
-/* モーションブラー風（回転中） */
+/* モーションブラー風 */
 #${PANEL_ID}.spinning .strip{
   filter: blur(2.2px);
   opacity: 0.65;
+}
+
+/* ★回転中の微振動（上下ブレ） */
+#${PANEL_ID}.spinning .strip img.sym{
+  animation: jitterY 120ms ease-in-out infinite;
+}
+@keyframes jitterY{
+  0%{ transform: translateY(0px); }
+  25%{ transform: translateY(-1px); }
+  50%{ transform: translateY(1px); }
+  75%{ transform: translateY(-1px); }
+  100%{ transform: translateY(0px); }
 }
 
 /* ストリップ内コマ */
@@ -186,7 +203,6 @@
   justify-content:center;
 }
 
-/* 絵柄 */
 #${PANEL_ID} img.sym{
   width:78%;
   height:78%;
@@ -200,28 +216,23 @@
   box-shadow: 0 0 18px rgba(255, 196, 0, 0.65), inset 0 0 0 2px rgba(255,255,255,0.2);
 }
 
-/* フラッシュ（当たり時） */
+/* フラッシュ */
 #${PANEL_ID} .flash{
-  position:absolute;
-  inset:0;
+  position:absolute; inset:0;
   background: rgba(255,255,255,0.65);
   opacity:0;
   pointer-events:none;
   z-index: 2147483646;
 }
-#${PANEL_ID}.flashOn .flash{
-  animation: flashAnim 380ms ease-out 1;
-}
+#${PANEL_ID}.flashOn .flash{ animation: flashAnim 380ms ease-out 1; }
 @keyframes flashAnim{
   0%{ opacity:0; }
   25%{ opacity:1; }
   100%{ opacity:0; }
 }
 
-/* 振動（当たり時） */
-#${PANEL_ID}.shake{
-  animation: shakeAnim 360ms ease-in-out 1;
-}
+/* 振動 */
+#${PANEL_ID}.shake{ animation: shakeAnim 360ms ease-in-out 1; }
 @keyframes shakeAnim{
   0%{ transform:translate(-50%,-50%); }
   12%{ transform:translate(calc(-50% - 6px), calc(-50% - 2px)); }
@@ -233,16 +244,24 @@
   100%{ transform:translate(-50%,-50%); }
 }
 
-/* 星ランプ点滅（当たり時に筐体全体を暖色でチカチカ） */
-#${PANEL_ID}.lamp .machineImg{
-  animation: lampAnim 520ms linear 3;
-}
+/* 星ランプ点滅 */
+#${PANEL_ID}.lamp .machineImg{ animation: lampAnim 520ms linear 3; }
 @keyframes lampAnim{
   0%{ filter:none; }
   25%{ filter: brightness(1.18) saturate(1.25); }
   50%{ filter:none; }
   75%{ filter: brightness(1.18) saturate(1.25); }
   100%{ filter:none; }
+}
+
+/* ★停止時：列だけバウンド（オーバーシュート） */
+#${PANEL_ID} .colBounce{
+  animation: colBounce 220ms ease-out 1;
+}
+@keyframes colBounce{
+  0%{ transform: translateY(0); }
+  45%{ transform: translateY(7px); }
+  100%{ transform: translateY(0); }
 }
     `;
     document.head.appendChild(style);
@@ -324,8 +343,20 @@
 
   function forceReflow(el) { void el.offsetHeight; }
 
-  // 1セル回転
-  function spinCell(cell, finalSym, delayMs) {
+  // ★列バウンド：列(0/1/2)の全セルにクラス付与
+  function bounceColumn(panel, col) {
+    const idxs = [col, col + 3, col + 6];
+    for (const i of idxs) {
+      const strip = panel.querySelector(`.cell[data-i="${i}"] .strip`);
+      if (!strip) continue;
+      strip.classList.remove("colBounce");
+      void strip.offsetHeight;
+      strip.classList.add("colBounce");
+    }
+  }
+
+  // 1セル回転（停止時に列バウンドを入れる）
+  function spinCell(panel, cell, finalSym, delayMs, col) {
     const strip = cell.querySelector(".strip");
     const h = cellH(cell);
 
@@ -354,6 +385,9 @@
         strip.style.transition = "none";
         setStrip(strip, [finalSym], cell);
         strip.style.transform = "translateY(0px)";
+
+        // ★停止バウンド（列ごと）
+        bounceColumn(panel, col);
 
         resolve(finalSym);
       };
@@ -390,22 +424,18 @@
 
   /* ========= 当たり演出 ========= */
   function winEffects(panel) {
-    // フラッシュ
     panel.classList.remove("flashOn");
     void panel.offsetHeight;
     panel.classList.add("flashOn");
 
-    // シェイク
     panel.classList.remove("shake");
     void panel.offsetHeight;
     panel.classList.add("shake");
 
-    // 星ランプ点滅
     panel.classList.remove("lamp");
     void panel.offsetHeight;
     panel.classList.add("lamp");
 
-    // 終了後にクラス掃除
     setTimeout(() => panel.classList.remove("flashOn"), 450);
     setTimeout(() => panel.classList.remove("shake"), 450);
     setTimeout(() => panel.classList.remove("lamp"), 1700);
@@ -428,11 +458,10 @@
       return;
     }
 
-    // 支払い
     setCoin(have - cost);
     syncHave(panel);
 
-    // 開始音＆回転ループ音
+    // 開始音＆回転ループ
     oneShot(START_SE, 0.9);
     startReelLoop();
 
@@ -440,7 +469,7 @@
     spinBtn.disabled = true;
     spin10Btn.disabled = true;
 
-    panel.classList.add("spinning"); // モーションブラー開始
+    panel.classList.add("spinning"); // ブラー＋微振動ON
 
     let totalLines = 0;
     let totalPay = 0;
@@ -452,8 +481,7 @@
       const cells = [...panel.querySelectorAll(".cell")];
       const finals = Array.from({ length: 9 }, () => pickSymbol());
 
-      // 列停止の「カチッ×3」：列ごとに鳴らす
-      // 左→中→右 の停止タイミング
+      // 停止「カチッ×3」
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
@@ -461,7 +489,7 @@
       const promises = finals.map((sym, i) => {
         const col = i % 3;
         const delay = col * SPIN.colDelay;
-        return spinCell(cells[i], sym, delay);
+        return spinCell(panel, cells[i], sym, delay, col);
       });
 
       const results = await Promise.all(promises);
@@ -479,11 +507,9 @@
         }
       }
 
-      // 1回ごとの軽い間
       if (count > 1) await new Promise(r => setTimeout(r, 120));
     }
 
-    // 回転終了
     panel.classList.remove("spinning");
     stopReelLoop();
 
@@ -493,6 +519,9 @@
     if (totalLines > 0) {
       resultEl.textContent = `🎉 当たり ${totalLines}ライン / +${totalPay} 🪙`;
       winEffects(panel);
+
+      // ★当たり時コインSE連打
+      coinBurst(12, 75);
     } else {
       resultEl.textContent = "はずれ！";
     }
@@ -510,14 +539,12 @@
     const panel = document.getElementById(PANEL_ID);
     syncHave(panel);
 
-    // coinValue変化に追従
     const cv = $("#coinValue");
     if (cv) {
       const mo = new MutationObserver(() => syncHave(panel));
       mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
 
-    // 最前面保険
     setInterval(() => {
       const p = document.getElementById(PANEL_ID);
       if (p) p.style.zIndex = "2147483647";
