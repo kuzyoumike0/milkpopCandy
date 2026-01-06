@@ -136,7 +136,7 @@
     const s = document.createElement("style");
     s.textContent = `
 #${PANEL_ID}{
-  --winTop: 44%;
+  --winTop: 34%;
   --winH: 34%;
   --uiBottom: 8.5%;
   --resBottom: 18.5%;
