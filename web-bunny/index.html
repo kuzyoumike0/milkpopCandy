@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>Milkpop牧場</title>
+  <title>Bunny牧場</title>
 
   <!-- viewport -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -30,17 +30,19 @@
   <!-- ================= HUD ================= -->
   <header id="hud">
     <div id="coin">
-      🪙 <span id="coinValue">0</span>
+      🪙 <span id="coinValue">2187540</span>
     </div>
 
     <div id="hudButtons">
       <button id="petBtn">なでる</button>
       <button id="shopBtn">ショップ</button>
       <button id="slotBtn">スロット</button>
+
+      <!-- 将来復活用に残すならOK / 今回はUIのみ -->
       <button id="bookBtn">図鑑</button>
       <button id="titleBtn">称号</button>
       <button id="adoptBtn">お迎え</button>
-      <button id="departBtn" class="danger">旅立ち</button>
+      <button id="departBtn">旅立ち</button>
     </div>
   </header>
 
@@ -51,42 +53,10 @@
     <div id="toastLayer"></div>
   </main>
 
-  <!-- ================= 図鑑 ================= -->
-  <section id="bookPanel" class="panel hidden">
-    <h2>📖 うさぎ図鑑</h2>
-    <div id="bookContent"></div>
-    <button class="closeBtn">閉じる</button>
-  </section>
+  <!-- ================= スロット ================= -->
+  <!-- slot.js が body 直下に自動生成するため、ここには書かない -->
 
-  <!-- ================= 称号 ================= -->
-  <section id="titlePanel" class="panel hidden">
-    <h2>🏆 称号</h2>
-    <div id="titleList"></div>
-    <button class="closeBtn">閉じる</button>
-  </section>
-
-  <!-- ================= お迎え ================= -->
-  <section id="adoptPanel" class="panel hidden">
-    <h2>🐰 お迎え</h2>
-    <p>新しいうさぎをお迎えしますか？</p>
-    <button id="adoptConfirmBtn">お迎えする</button>
-    <button class="closeBtn">やめる</button>
-  </section>
-
-  <!-- ================= 旅立ち ================= -->
-  <section id="departPanel" class="panel hidden">
-    <h2>🌸 旅立ち</h2>
-    <p id="departMessage">
-      このうさぎは、あなたとの日々を胸に、旅立とうとしています。
-    </p>
-    <button id="departConfirmBtn" class="danger">見送る</button>
-    <button class="closeBtn">やめる</button>
-  </section>
-
-  <!-- ================= スロット（slot.jsが制御） ================= -->
-  <!-- slot.js が body 直下に自動生成 -->
-
-  <!-- ================= BGM（ES Module） ================= -->
+  <!-- ================= BGM（朝昼夜＋旅立ち対応） ================= -->
   <script type="module">
     import {
       bgmMountSettingsUI,
@@ -94,15 +64,20 @@
       bgmClearSpecial
     } from "./BGM.js";
 
-    bgmMountSettingsUI({ position: "top-right", title: "BGM" });
+    // BGM設定UI（右上）
+    bgmMountSettingsUI({
+      position: "top-right",
+      title: "BGM"
+    });
 
+    // app.js から使えるように公開
     window.BGM = {
       playSpecial: bgmPlaySpecial,
       clearSpecial: bgmClearSpecial
     };
   </script>
 
-  <!-- ================= 既存JS ================= -->
+  <!-- ================= 既存JS（順序厳守） ================= -->
   <script src="./app.js"></script>
   <script src="./slot.js"></script>
 
