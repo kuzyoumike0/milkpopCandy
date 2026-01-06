@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>Bunny牧場</title>
+  <title>Milkpop牧場</title>
 
   <!-- viewport -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -42,7 +42,32 @@
   <!-- ===== スロットは slot.js が body 直下に自動生成 ===== -->
   <!-- ここには何も書かない -->
 
-  <!-- ===== 既存ロジック ===== -->
+  <!-- ======================================================
+       BGM（朝昼夜＋フェード＋設定保存＋旅立ち専用）
+       ※ ES Modules を使うため type="module"
+       ※ 既存 app.js / slot.js とは干渉しない
+  ====================================================== -->
+  <script type="module">
+    import {
+      bgmMountSettingsUI,
+      bgmPlaySpecial,
+      bgmClearSpecial
+    } from "./BGM.js";
+
+    // BGM設定UI（右上に表示）
+    bgmMountSettingsUI({
+      position: "top-right",
+      title: "BGM"
+    });
+
+    // 既存 app.js から使えるようにグローバル公開
+    window.BGM = {
+      playSpecial: bgmPlaySpecial,
+      clearSpecial: bgmClearSpecial
+    };
+  </script>
+
+  <!-- ===== 既存ロジック（順番を変えない） ===== -->
   <script src="./app.js"></script>
 
   <!-- ===== スロット拡張（常に最前面） ===== -->
