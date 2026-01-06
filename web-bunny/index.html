@@ -4,17 +4,13 @@
   <meta charset="utf-8" />
   <title>Milkpop牧場</title>
 
-  <!-- viewport -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
-  <!-- PWA -->
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#ffd6e7" />
 
-  <!-- style -->
   <link rel="stylesheet" href="./style.css" />
 
-  <!-- セキュリティ系（RailwayでのCSP事故防止：最低限） -->
   <meta http-equiv="Content-Security-Policy"
         content="
           default-src 'self';
@@ -26,44 +22,30 @@
 </head>
 
 <body>
-  <!-- ===== HUD（app.js が使用） ===== -->
+
+  <!-- ===== HUD ===== -->
   <header id="hud">
-    <div id="coin">
-      🪙 <span id="coinValue">0</span>
-    </div>
+    <div id="coin">🪙 <span id="coinValue">0</span></div>
 
-    <!-- ※ app.js が探すIDに合わせる（表示名は自由） -->
     <div id="hudButtons">
-
-      <!-- ★ショップ→お迎え（IDは shopBtn のまま） -->
       <button id="shopBtn" type="button">お迎え</button>
-
-      <!-- スロット：クリックして表示（slot.js 側で制御） -->
       <button id="slotBtn" type="button">スロット</button>
-
-      <!-- 図鑑＋称号：app.js の rankBtn が openDex() を開く -->
       <button id="rankBtn" type="button">図鑑/称号</button>
-
-      <!-- 旅立ち -->
       <button id="departBtn" type="button">旅立ち</button>
-
-      <!-- リセット -->
       <button id="resetBtn" type="button">リセット</button>
     </div>
 
-    <!-- 称号表示（app.js は #title があればそこに表示する） -->
     <div id="title"></div>
   </header>
 
-  <!-- ===== メインフィールド（うさぎ表示） ===== -->
+  <!-- ===== メインフィールド ===== -->
   <main id="field">
+    <div id="tenkiLayer"></div>
     <div id="bunnyLayer"></div>
     <div id="coinLayer"></div>
   </main>
 
-  <!-- ===== スロットは slot.js が body 直下に自動生成 ===== -->
-
-  <!-- ===== BGM（朝昼夜＋旅立ち対応） ===== -->
+  <!-- ===== BGM ===== -->
   <script type="module">
     import {
       bgmMountSettingsUI,
@@ -71,22 +53,22 @@
       bgmClearSpecial
     } from "./BGM.js";
 
-    // 設定UI（右上）
     bgmMountSettingsUI({ position: "top-right", title: "BGM" });
 
-    // app.js から使えるように公開（旅立ちBGMなど）
     window.BGM = {
       playSpecial: bgmPlaySpecial,
       clearSpecial: bgmClearSpecial
     };
-    
   </script>
+
+  <!-- ===== 天気 ===== -->
+  <script src="./tenki.js"></script>
+
+  <!-- ===== 花火 ===== -->
   <script src="./hanabi.js"></script>
 
   <!-- ===== 既存ロジック ===== -->
   <script src="./app.js"></script>
-
-  <!-- ===== スロット拡張（クリックで表示にする想定） ===== -->
   <script src="./slot.js"></script>
 
   <!-- ===== Service Worker ===== -->
@@ -95,5 +77,6 @@
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
   </script>
+
 </body>
 </html>
