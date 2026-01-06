@@ -304,10 +304,18 @@
 
     if (p.querySelector(".machine")) return p;
 
-    p.innerHTML = `
+   p.innerHTML = `
 <div class="backdrop"></div>
 <div class="machine">
   <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
+
+  <!-- ★豪華演出レイヤ -->
+  <div class="flash"></div>
+  <div class="spotlights"></div>
+  <div class="aura"></div>
+  <div class="paylines"></div>
+  <div class="confetti"></div>
+
   <div class="grid">
     ${Array.from({ length: 9 }).map((_, i) => `
       <div class="cell" data-i="${i}" data-sym=""><div class="strip"></div></div>
@@ -326,6 +334,7 @@
 </div>
 <button class="closeBtn" aria-label="close">×</button>
 `;
+
 
     // 初期絵柄
     p.querySelectorAll(".cell").forEach((c) => {
