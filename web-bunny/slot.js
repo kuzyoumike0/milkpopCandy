@@ -163,7 +163,7 @@
 
 /* ===== 3×3表示窓（ズレ修正版） ===== */
 /* ★3×3表示窓：下に食い込むのを防ぐ（上に移動＋高さを少し縮める） */
-#slotStarMachinePanel3x3 .grid{
+#${PANEL_ID} .grid{
   position:absolute;
   left:50%;
   top:47.2%;                 /* ★49.2% → 47.2%（上へ） */
