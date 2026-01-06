@@ -822,6 +822,26 @@
     spawnBunny,
     removeBunnyInstance,
   };
+　// ===== saku.png を常に表示（下に固定） =====
+(function mountSaku() {
+  const SRC = "./assets/saku.png"; // ここが最重要：実際の配置と一致させる
+  if (document.getElementById("sakuImg")) return;
+
+  const img = document.createElement("img");
+  img.id = "sakuImg";
+  img.src = SRC;
+  img.alt = "saku";
+  img.decoding = "async";
+  img.loading = "eager";
+  img.draggable = false;
+
+  // 読み込み失敗の時に console に出す
+  img.addEventListener("error", () => {
+    console.error("[saku] load failed:", img.src);
+  });
+
+  document.body.appendChild(img);
+})();
 
   init();
 })();
