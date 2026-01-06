@@ -852,39 +852,24 @@ function calcDynamicPrice(kind) {
     const renderBunnyDex = () => {
       const kinds = Object.keys(BUNNY_DEFS);
 
-      const cards = kinds.map(kind => {
-        const def = BUNNY_DEFS[kind];
-        const entry = dex[kind];
-        const known = !!entry?.seen;
-        const farewellCount = entry?.farewell ?? 0;
+      const cards = kinds
+  .map((kind) => {
+    const def = BUNNY_DEFS[kind];
+    const priceNow = calcDynamicPrice(kind);      // ★動的価格
+    const canBuy = coins >= priceNow;
 
-        const img = known ? def.img : UNKNOWN_SVG;
-        const name = known ? def.label : "？？？";
-        const desc = known ? def.desc : "まだ出会っていません";
+    return `
+      <div class="shopCard ${canBuy ? "" : "disabled"}">
+        <img src="${def.img}" class="shopThumb" alt="${def.label}">
+        <div class="shopName">${def.label}</div>
+        <div class="shopDesc">${def.desc}</div>
+        <div class="shopPrice ${canBuy ? "" : "bad"}">${priceNow} 🪙</div>
+        <button data-buy="${kind}" ${canBuy ? "" : "disabled"}>お迎え</button>
+      </div>
+    `;
+  })
+  .join("");
 
-        const flavor = known ? getFarewellFlavor(kind, farewellCount) : "";
-
-        return `
-          <div class="dexCard ${known ? "" : "unknown"}">
-            <img src="${img}" alt="${name}">
-            <div class="dexName">${name}</div>
-            <div class="dexDesc">${desc}</div>
-            <div style="font-size:12px;opacity:.8;margin-top:4px;">旅立ち：${farewellCount} 回</div>
-            ${flavor ? `
-              <div style="
-                margin-top:6px;
-                font-size:12px;
-                line-height:1.5;
-                font-style:italic;
-                opacity:.9;
-                color:${kind === "reabunny" ? "#5a2a2a" : "#7a5a6e"};
-              ">
-                ${flavor}
-              </div>
-            ` : ""}
-          </div>
-        `;
-      }).join("");
 
       return `<div class="dexGrid">${cards}</div>`;
     };
