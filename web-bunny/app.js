@@ -1205,35 +1205,7 @@
   /* =========================
    * Depart / Reset
    * ========================= */
-  if (departBtn) {
-    departBtn.addEventListener("click", () => {
-      unlockAudioOnce();
-
-      if (bunnies.length <= 1) return;
-      if (coins < DEPART_COST) return;
-
-      coins -= DEPART_COST;
-      saveCoins();
-      updateHud();
-      refreshShopUI();
-
-      playSE(seTabidati);
-
-      const victim = bunnies.pop();
-
-      // ★旅立ち回数記録 & 節目通知（10/20/50）
-      recordFarewell(victim.kind);
-
-      // ★お別れメッセージ（ふわっと）
-      showFarewellMessage(victim.kind);
-
-      try { victim.wrap.remove(); } catch {}
-
-      saveBunnyMeta();
-      checkUnlocks();
-    });
-  }
-
+  
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       unlockAudioOnce();
