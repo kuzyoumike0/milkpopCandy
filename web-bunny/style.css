@@ -660,6 +660,19 @@ html,body{
 
   object-fit: contain;      /* ★みきれ防止の核心 */
 }
+/* ===== saku.png（画面下に固定表示） ===== */
+#sakuImg{
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+
+  width: min(720px, 100vw);
+  height: auto;
+
+  z-index: 9999;      /* 何より前に出す */
+  pointer-events: none;
+}
 
 /* ===== ゲームレイヤー ===== */
 #bunnyLayer { position: relative; z-index: 3; }
