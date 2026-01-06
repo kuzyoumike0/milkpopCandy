@@ -35,13 +35,13 @@
 
     <div id="hudButtons">
       <button id="petBtn">なでる</button>
-      <button id="shopBtn">ショップ</button>
-      <button id="slotBtn">スロット</button>
 
-      <!-- 将来復活用に残すならOK / 今回はUIのみ -->
+      <!-- ★ ショップ → お迎え -->
+      <button id="adoptBtn">お迎え</button>
+
+      <button id="slotBtn">スロット</button>
       <button id="bookBtn">図鑑</button>
       <button id="titleBtn">称号</button>
-      <button id="adoptBtn">お迎え</button>
       <button id="departBtn">旅立ち</button>
     </div>
   </header>
@@ -53,8 +53,29 @@
     <div id="toastLayer"></div>
   </main>
 
-  <!-- ================= スロット ================= -->
-  <!-- slot.js が body 直下に自動生成するため、ここには書かない -->
+  <!-- =================================================
+       お迎え（全面表示オーバーレイ）
+       ・display:none → 表示時は flex
+       ・app.js 側で制御しやすいID設計
+  ================================================= -->
+  <section id="adoptOverlay" aria-hidden="true">
+    <div class="adoptContent">
+      <h1>🐰 お迎え</h1>
+
+      <p class="adoptText">
+        新しいうさぎをお迎えしますか？
+      </p>
+
+      <div class="adoptActions">
+        <button id="adoptConfirmBtn" class="primary">
+          お迎えする
+        </button>
+        <button id="adoptCancelBtn">
+          やめる
+        </button>
+      </div>
+    </div>
+  </section>
 
   <!-- ================= BGM（朝昼夜＋旅立ち対応） ================= -->
   <script type="module">
@@ -64,13 +85,11 @@
       bgmClearSpecial
     } from "./BGM.js";
 
-    // BGM設定UI（右上）
     bgmMountSettingsUI({
       position: "top-right",
       title: "BGM"
     });
 
-    // app.js から使えるように公開
     window.BGM = {
       playSpecial: bgmPlaySpecial,
       clearSpecial: bgmClearSpecial
