@@ -1,10 +1,10 @@
 // hanabi.js
-// 1クリック = 花火GIF 1発 + SE
-// コイン消費：-2000
-// assets/hanabi 配下を使用
+// HUD内（#hudButtons）に「🎆 花火」ボタンを追加
+// 1クリック = 花火GIF 1発 + SE1回 / コイン -2000
+// うさぎ・コインは邪魔しない（pointer-events:none / 低z-index）
 
 (() => {
-  const COST = 2000; // ★花火1発のコスト（-2000）
+  const COST = 2000;
   const BTN_ID = "hanabiBtn";
 
   const FIREWORKS = [
@@ -52,23 +52,6 @@
     const s = document.createElement("style");
     s.id = "hanabiGifStyle";
     s.textContent = `
-#${BTN_ID}{
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
-  z-index: 2147482000;
-  border: none;
-  border-radius: 16px;
-  padding: 12px 14px;
-  font-weight: 900;
-  cursor: pointer;
-  background: rgba(255,255,255,.95);
-  box-shadow: 0 12px 32px rgba(0,0,0,.18);
-}
-#${BTN_ID}:active{
-  transform: translateY(1px);
-}
-
 /* 花火GIF（背景） */
 .hanabi-gif{
   position: absolute;
@@ -87,7 +70,7 @@
   }
 
   /* =========================
-   * Field取得（邪魔しないため z-index 調整）
+   * Field & z-index整備（邪魔しない）
    * ========================= */
   function getField() {
     const field = document.getElementById("field") || document.body;
@@ -133,43 +116,57 @@
   }
 
   /* =========================
-   * Button
+   * Button mount（HUDに入れる）
    * ========================= */
+  function findMount() {
+    // まず HUD のボタン列へ
+    const hudButtons = document.getElementById("hudButtons");
+    if (hudButtons) return hudButtons;
+
+    // 次点：HUDそのもの
+    const hud = document.getElementById("hud");
+    if (hud) return hud;
+
+    // 最後：body
+    return document.body;
+  }
+
   function ensureButton() {
-    let btn =
-      document.getElementById(BTN_ID) ||
-      [...document.querySelectorAll("button")].find(b =>
+    // 既存ボタンがあればそれを使う（IDに揃える）
+    let btn = document.getElementById(BTN_ID);
+
+    // もし「花火」という既存ボタンがあるなら拾う
+    if (!btn) {
+      btn = [...document.querySelectorAll("button")].find(b =>
         (b.textContent || "").includes("花火")
-      );
+      ) || null;
+    }
 
     if (!btn) {
       btn = document.createElement("button");
-      btn.id = BTN_ID;
-      document.body.appendChild(btn);
-    } else {
-      btn.id = BTN_ID;
+      btn.type = "button";
     }
 
+    btn.id = BTN_ID;
     btn.textContent = `🎆 花火（-${COST}）`;
 
+    // HUDの並びに入れる（左側ボタン群と同じ列）
+    const mount = findMount();
+    if (btn.parentElement !== mount) mount.appendChild(btn);
+
+    // 二重登録防止
+    btn.onclick = null;
     btn.addEventListener("click", () => {
       const have = getCoin();
       if (have < COST) {
         alert("コインが足りない…！");
         return;
       }
-
-      // 🪙 -2000
       setCoin(have - COST);
-
-      // 🌌 1発だけ
       spawnFirework(getField());
     });
   }
 
-  /* =========================
-   * Boot
-   * ========================= */
   window.addEventListener("load", () => {
     injectStyles();
     ensureButton();
