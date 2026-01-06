@@ -495,3 +495,39 @@ html,body{
   text-align: right;
 }
 
+/* =========================
+   お迎え：全面オーバーレイ
+========================= */
+#adoptOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 245, 248, 0.96);
+}
+
+#adoptOverlay.show {
+  display: flex;
+}
+
+.adoptContent {
+  text-align: center;
+  padding: 24px 28px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+}
+
+.adoptActions {
+  margin-top: 20px;
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+
+.adoptActions .primary {
+  background: #ff9ac6;
+  color: #fff;
+}
