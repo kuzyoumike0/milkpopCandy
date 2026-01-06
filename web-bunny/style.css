@@ -531,3 +531,58 @@ html,body{
   background: #ff9ac6;
   color: #fff;
 }
+/* ===== 全面オーバーレイ共通 ===== */
+.overlay{
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,245,248,0.96);
+}
+.overlay.show{ display:flex; }
+
+.overlayCard{
+  width: min(520px, 92vw);
+  border-radius: 22px;
+  background: #fff;
+  padding: 18px 20px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.15);
+}
+.overlayCard.wide{
+  width: min(860px, 94vw);
+  max-height: 82vh;
+  overflow: hidden;
+}
+
+.overlayHeader{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 12px;
+}
+.overlayBody{
+  margin-top: 12px;
+  max-height: 68vh;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.overlayActions{
+  margin-top: 16px;
+  display:flex;
+  justify-content:center;
+  gap: 12px;
+}
+.primary{
+  background: #ff9ac6;
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 12px;
+}
+.overlayClose{
+  border-radius: 12px;
+  padding: 6px 10px;
+}
