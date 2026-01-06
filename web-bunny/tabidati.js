@@ -3,7 +3,14 @@
   const WB = window.WB;
 
   let running = false;
-  let timer = null;
+
+  function toast(msg) {
+    const el = document.createElement("div");
+    el.className = "farewellMilestone";
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => { try { el.remove(); } catch {} }, 1800);
+  }
 
   function showFarewellMessage(kind) {
     const texts = [
@@ -20,8 +27,8 @@
     const el = document.createElement("div");
     el.className = "farewellMsg";
     el.textContent = msg + " " + texts[Math.floor(Math.random() * texts.length)];
-
     document.body.appendChild(el);
+
     setTimeout(() => { try { el.remove(); } catch {} }, 2600);
   }
 
@@ -36,8 +43,8 @@
     const el = document.createElement("div");
     el.className = "farewellMilestone" + (isRea ? " rea" : "");
     el.textContent = isRea ? `reabunny ─ ${text}` : `${kind} ─ ${text}`;
-
     document.body.appendChild(el);
+
     setTimeout(() => { try { el.remove(); } catch {} }, 3200);
   }
 
@@ -54,63 +61,94 @@
     WB.saveDex();
   }
 
-  function stop() {
-    running = false;
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
-    try { WB.departBtn?.classList.remove("on"); } catch {}
-  }
-
-  function departOne() {
-    if (WB.bunnies.length <= 1) return false;
-    if (WB.coins < WB.DEPART_COST) return false;
-
-    const b = WB.bunnies[WB.bunnies.length - 1];
-
-    WB.coins -= WB.DEPART_COST;
-    WB.saveCoins();
-    WB.updateHud();
-
-    WB.playSE(WB.seTabidati);
-
-    recordFarewell(b.kind);
-    showFarewellMessage(b.kind);
-
-    WB.removeBunnyInstance(b);
-
-    return true;
-  }
-
-  function start() {
-    if (running) return;
-    running = true;
-    try { WB.departBtn?.classList.add("on"); } catch {}
-
-    timer = setInterval(() => {
-      const ok = departOne();
-      if (!ok) stop();
-    }, 650);
+  function setMode(on) {
+    running = !!on;
+    try {
+      WB.departBtn?.classList.toggle("on", running);
+    } catch {}
+    toast(running ? "✈️ 旅立ちモード：ON（うさぎをクリック）" : "🛑 旅立ちモード：OFF");
   }
 
   function toggle() {
     WB.unlockAudioOnce();
-    if (running) stop();
-    else start();
+    setMode(!running);
   }
 
+  // 旅立たせる本体（クリックした個体）
+  function departBunny(bunny) {
+    if (!bunny) return false;
+
+    // 最後の1匹は不可
+    if (WB.bunnies.length <= 1) {
+      toast("最後の1匹は旅立たせられないよ");
+      return false;
+    }
+
+    // コスト不足
+    if (WB.coins < WB.DEPART_COST) {
+      toast(`コイン不足（必要：${WB.DEPART_COST}🪙）`);
+      return false;
+    }
+
+    // 支払い
+    WB.coins -= WB.DEPART_COST;
+    WB.saveCoins();
+    WB.updateHud();
+
+    // SE
+    WB.playSE(WB.seTabidati);
+
+    // 記録＆メッセージ
+    recordFarewell(bunny.kind);
+    showFarewellMessage(bunny.kind);
+
+    // 削除
+    WB.removeBunnyInstance(bunny);
+
+    return true;
+  }
+
+  // 旅立ちモード中の「うさぎクリック」を横取り（キャプチャで先に取る）
+  function onFieldPointerDownCapture(e) {
+    if (!running) return;
+
+    // 左クリック/タップのみ
+    if (e.button != null && e.button !== 0) return;
+
+    const t = e.target;
+    if (!t) return;
+
+    // bunnyWrap / bunny を特定
+    const wrap = t.closest?.(".bunnyWrap");
+    if (!wrap) return;
+
+    // ★通常の「コイン生成クリック」を止める
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    // wrap→インスタンス特定（WB.bunnies から探す）
+    const bunny = WB.bunnies.find(b => b.wrap === wrap);
+    if (!bunny) return;
+
+    departBunny(bunny);
+  }
+
+  // ボタン
   if (WB.departBtn) {
     WB.departBtn.addEventListener("click", toggle);
   }
 
+  // クリック横取り（キャプチャが重要）
+  WB.field.addEventListener("pointerdown", onFieldPointerDownCapture, true);
+
+  // 外部API
   WB.tabidati = {
-    start,
-    stop,
+    setMode,
     toggle,
-    departOne,
-    showFarewellMessage,
+    departBunny,
     recordFarewell,
+    showFarewellMessage,
     get running() { return running; },
   };
 })();
