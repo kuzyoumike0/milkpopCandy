@@ -1,20 +1,28 @@
 (() => {
   const SLOT_COST = 50;
 
-  // coin1 を reabunny.png に変更したい件
-  // → coin1枠の画像だけ reabunny に差し替え（名前は coin1 のまま）
+  // ★ あなたの画像だけを使用
   const SYMBOLS = [
-    { name: "reabunny", src: "./web-bunny/assets/reabunny.png", w: 30, pay: 80 }, // ★ここ
-    { name: "coin2", src: "./web-bunny/assets/coin2.png",    w: 22, pay: 120 },
-    { name: "coin3", src: "./web-bunny/assets/coin3.png",    w: 14, pay: 200 },
-    { name: "coin4", src: "./web-bunny/assets/coin4.png",    w: 6,  pay: 500 },
+    // --- coin系 ---
+    { name: "coin2", src: "./web-bunny/assets/coin2.png", w: 28, pay: 120 },
+    { name: "coin3", src: "./web-bunny/assets/coin3.png", w: 18, pay: 200 },
+    { name: "coin4", src: "./web-bunny/assets/coin4.png", w: 8,  pay: 500 },
 
-    { name: "babybunny", src: "./web-bunny/assets/babybunny.png", w: 18, pay: 0, special: "BUNNY" },
+    // --- bunny系（揃ったら“うさぎ当たり”扱い）---
+    { name: "babybunny", src: "./web-bunny/assets/babybunny.png", w: 20, pay: 0, special: "BUNNY" },
+    { name: "bunny1",    src: "./web-bunny/assets/bunny1.png",    w: 14, pay: 0, special: "BUNNY" },
+    { name: "bunny3",    src: "./web-bunny/assets/bunny3.png",    w: 12, pay: 0, special: "BUNNY" },
+    { name: "bunny4",    src: "./web-bunny/assets/bunny4.png",    w: 10, pay: 0, special: "BUNNY" },
+    { name: "bunny5",    src: "./web-bunny/assets/bunny5.png",    w: 8,  pay: 0, special: "BUNNY" },
 
-    { name: "ougon", src: "./web-bunny/assets/ougonunchi.png", w: 2, pay: 1500 },
+    // --- レアうさぎ（揃ったら“うさぎ当たり”+ボーナス）---
+    { name: "reabunny",  src: "./web-bunny/assets/reabunny.png",  w: 4,  pay: 300, special: "BUNNY_PLUS" },
+
+    // --- 超レア（黄金）---
+    { name: "ougon",     src: "./web-bunny/assets/ougonunchi.png", w: 1,  pay: 1500 },
   ];
 
-  // ---- coin read/write (DOMベース) ----
+  // ===== coin read/write（表示値ベース・app.jsは触らない）=====
   const coinValueEl = () => document.getElementById("coinValue");
   const getCoins = () => {
     const el = coinValueEl();
@@ -29,7 +37,7 @@
   };
   const addCoins = (d) => setCoins(getCoins() + d);
 
-  // うさぎ当たりは app.js の内部に触れないため shopBtn 流用
+  // うさぎ当たり時：既存のショップ処理を流用（app.js内部に触れない）
   const tryAddBunnyByShopClick = () => {
     const shopBtn = document.getElementById("shopBtn");
     if (!shopBtn) return false;
@@ -37,19 +45,19 @@
     return true;
   };
 
-  const OVERLAY_ID = "slotOverlayAlways";
+  // ===== UI =====
+  const PANEL_ID = "slotAlwaysPanel";
   const CELL_H = 96;
 
   function injectStyles() {
     const css = `
-      /* ===== Always-on slot panel ===== */
-      #${OVERLAY_ID}{
+      #${PANEL_ID}{
         position: fixed;
         left: 50%;
         top: 50%;
         transform: translate(-50%, -50%);
 
-        width: min(620px, calc(100% - 24px));
+        width: min(640px, calc(100% - 24px));
         border-radius: 18px;
         border: 1px solid rgba(255,255,255,0.30);
         background: rgba(255,255,255,0.94);
@@ -63,31 +71,31 @@
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
       }
 
-      #${OVERLAY_ID} .header{
+      #${PANEL_ID} .header{
         display:flex; align-items:center; justify-content:space-between; gap:8px;
         padding-bottom: 8px;
       }
-      #${OVERLAY_ID} .title{ font-size: 18px; font-weight: 900; }
-      #${OVERLAY_ID} .mini{
+      #${PANEL_ID} .title{ font-size: 18px; font-weight: 900; }
+      #${PANEL_ID} .mini{
         font-size: 12px;
-        opacity: 0.8;
+        opacity: 0.82;
         font-weight: 700;
       }
 
-      #${OVERLAY_ID} .info{
+      #${PANEL_ID} .info{
         display:flex; flex-direction:column; gap:6px;
         padding: 6px 0 12px;
         color: rgba(0,0,0,0.78);
       }
-      #${OVERLAY_ID} .hint{ font-size:12px; opacity:0.85; }
+      #${PANEL_ID} .hint{ font-size:12px; opacity:0.85; }
 
-      #${OVERLAY_ID} .reels{
+      #${PANEL_ID} .reels{
         display:grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 12px;
         margin: 8px 0 10px;
       }
-      #${OVERLAY_ID} .reelWindow{
+      #${PANEL_ID} .reelWindow{
         height: ${CELL_H}px;
         border-radius: 16px;
         background: rgba(255, 214, 231, 0.28);
@@ -95,23 +103,23 @@
         overflow:hidden;
         position:relative;
       }
-      #${OVERLAY_ID} .reelStrip{
+      #${PANEL_ID} .reelStrip{
         position:absolute; left:0; top:0; right:0;
         transform: translateY(0px);
         will-change: transform;
       }
-      #${OVERLAY_ID} .cell{
+      #${PANEL_ID} .cell{
         height: ${CELL_H}px;
         display:flex; align-items:center; justify-content:center;
       }
-      #${OVERLAY_ID} img.sym{
+      #${PANEL_ID} img.sym{
         width: 84px;
         height: 84px;
         object-fit: contain;
         filter: drop-shadow(0 10px 12px rgba(0,0,0,0.18));
         user-select:none; -webkit-user-drag:none;
       }
-      #${OVERLAY_ID} .reelWindow::after{
+      #${PANEL_ID} .reelWindow::after{
         content:"";
         position:absolute; left:10px; right:10px;
         top:50%;
@@ -120,7 +128,7 @@
         pointer-events:none;
       }
 
-      #${OVERLAY_ID} .result{
+      #${PANEL_ID} .result{
         min-height: 34px;
         padding: 8px 10px;
         border-radius: 12px;
@@ -129,31 +137,28 @@
         font-weight: 800;
       }
 
-      #${OVERLAY_ID} .actions{
+      #${PANEL_ID} .actions{
         display:flex; gap: 10px; margin-top: 10px;
       }
-      #${OVERLAY_ID} .actions button{
+      #${PANEL_ID} .actions button{
         border: 1px solid rgba(0,0,0,0.10);
         background:#fff;
         border-radius: 12px;
         padding: 10px 12px;
         cursor:pointer;
       }
-      #${OVERLAY_ID} .actions .primary{
+      #${PANEL_ID} .actions .primary{
         flex:1;
         background: rgba(255, 214, 231, 0.68);
         font-weight: 900;
       }
-      #${OVERLAY_ID} .actions button:disabled{
+      #${PANEL_ID} .actions button:disabled{
         opacity: 0.55;
         cursor: not-allowed;
       }
 
-      /* 画面が狭い時、少し上に寄せる */
       @media (max-height: 640px){
-        #${OVERLAY_ID}{
-          top: 56%;
-        }
+        #${PANEL_ID}{ top: 56%; }
       }
     `;
     const style = document.createElement("style");
@@ -216,7 +221,6 @@
         if (e.propertyName !== "transform") return;
         strip.removeEventListener("transitionend", onEnd);
 
-        // 最終1枚にして軽量化
         strip.style.transition = "none";
         setStripContent(strip, [finalSym]);
         strip.style.transform = `translateY(0px)`;
@@ -230,16 +234,69 @@
     return a.name === b.name && b.name === c.name;
   }
 
-  function payoutFrom(symbol) {
-    if (symbol.pay && symbol.pay > 0) {
-      addCoins(symbol.pay);
-      return `当たり！ 🪙 +${symbol.pay}`;
-    }
-    if (symbol.special === "BUNNY") {
+  function payoutFrom(sym) {
+    // coin / ougon / reabunny は pay でコイン加算
+    if (sym.pay && sym.pay > 0) addCoins(sym.pay);
+
+    if (sym.special === "BUNNY" || sym.special === "BUNNY_PLUS") {
+      // うさぎ増（既存導線流用）
       const ok = tryAddBunnyByShopClick();
-      return ok ? `🐰 当たり！（ショップ処理を呼び出したよ）` : `🐰 当たり！でも shopBtn が無い…`;
+      if (sym.special === "BUNNY_PLUS") {
+        return `レア当たり！ 🪙 +${sym.pay} ＋ うさぎ増（${ok ? "OK" : "shopBtn無し"}）`;
+      }
+      return `うさぎ当たり！ うさぎ増（${ok ? "OK" : "shopBtn無し"}）`;
     }
-    return "当たり！";
+
+    if (sym.name === "ougon") return `黄金！ 🪙 +${sym.pay}`;
+    return `当たり！ 🪙 +${sym.pay}`;
+  }
+
+  function syncHave(panel) {
+    const haveEl = panel.querySelector(".have");
+    if (haveEl) haveEl.textContent = String(getCoins());
+  }
+
+  function buildPanel() {
+    let panel = document.getElementById(PANEL_ID);
+    if (panel) return panel;
+
+    panel = document.createElement("div");
+    panel.id = PANEL_ID;
+    panel.style.zIndex = "2147483647";
+
+    panel.innerHTML = `
+      <div class="header">
+        <div>
+          <div class="title">🎰 うさぎスロット</div>
+          <div class="mini">（常時表示・最前面）</div>
+        </div>
+        <div class="mini">コスト：<b>${SLOT_COST}</b> 🪙</div>
+      </div>
+
+      <div class="info">
+        <div>所持：<b class="have">0</b> 🪙</div>
+        <div class="hint">縦に流れるリール。本格停止。3つ揃うと当たり！</div>
+      </div>
+
+      <div class="reels">
+        <div class="reelWindow"><div class="reelStrip" data-reel="0"></div></div>
+        <div class="reelWindow"><div class="reelStrip" data-reel="1"></div></div>
+        <div class="reelWindow"><div class="reelStrip" data-reel="2"></div></div>
+      </div>
+
+      <div class="result">回してみよう！</div>
+
+      <div class="actions">
+        <button class="primary spin">回す</button>
+        <button class="spin10">10連</button>
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    const strips = [...panel.querySelectorAll(".reelStrip")];
+    for (const s of strips) setStripContent(s, [pickSymbol()]);
+    return panel;
   }
 
   async function spinOnce(panel) {
@@ -321,7 +378,9 @@
       if (isTriple(f0, f1, f2)) {
         winCount++;
         if (f0.pay && f0.pay > 0) { addCoins(f0.pay); winCoins += f0.pay; }
-        else if (f0.special === "BUNNY") { if (tryAddBunnyByShopClick()) winBunny++; }
+        if (f0.special === "BUNNY" || f0.special === "BUNNY_PLUS") {
+          if (tryAddBunnyByShopClick()) winBunny++;
+        }
       }
       syncHave(panel);
     }
@@ -329,56 +388,6 @@
     resultEl.textContent = `10連結果：当たり ${winCount}回 / 🪙 +${winCoins} / 🐰 +${winBunny}`;
     spinBtn.disabled = false;
     spin10Btn.disabled = false;
-  }
-
-  function syncHave(panel) {
-    const haveEl = panel.querySelector(".have");
-    if (haveEl) haveEl.textContent = String(getCoins());
-  }
-
-  function buildPanel() {
-    let panel = document.getElementById(OVERLAY_ID);
-    if (panel) return panel;
-
-    panel = document.createElement("div");
-    panel.id = OVERLAY_ID;
-    panel.style.zIndex = "2147483647";
-
-    panel.innerHTML = `
-      <div class="header">
-        <div>
-          <div class="title">🎰 うさぎスロット</div>
-          <div class="mini">（常時表示・最前面）</div>
-        </div>
-        <div class="mini">コスト：<b>${SLOT_COST}</b> 🪙</div>
-      </div>
-
-      <div class="info">
-        <div>所持：<b class="have">0</b> 🪙</div>
-        <div class="hint">縦に流れるリール。本格停止。3つ揃うと当たり！</div>
-      </div>
-
-      <div class="reels">
-        <div class="reelWindow"><div class="reelStrip" data-reel="0"></div></div>
-        <div class="reelWindow"><div class="reelStrip" data-reel="1"></div></div>
-        <div class="reelWindow"><div class="reelStrip" data-reel="2"></div></div>
-      </div>
-
-      <div class="result">回してみよう！</div>
-
-      <div class="actions">
-        <button class="primary spin">回す</button>
-        <button class="spin10">10連</button>
-      </div>
-    `;
-
-    document.body.appendChild(panel);
-
-    // 初期絵柄
-    const strips = [...panel.querySelectorAll(".reelStrip")];
-    for (const s of strips) setStripContent(s, [pickSymbol()]);
-
-    return panel;
   }
 
   function boot() {
@@ -391,14 +400,14 @@
     panel.querySelector(".spin")?.addEventListener("click", () => spinOnce(panel));
     panel.querySelector(".spin10")?.addEventListener("click", () => spinTen(panel));
 
-    // coinValue変化に追従（HUDコインが更新されてもスロット側所持が追従）
+    // coinValueが変わったら反映
     const el = coinValueEl();
     if (el) {
       const mo = new MutationObserver(() => syncHave(panel));
       mo.observe(el, { childList: true, characterData: true, subtree: true });
     }
 
-    // もし誰かにz-indexで負けた時の保険：定期的に最前面を再適用
+    // 最前面の保険
     setInterval(() => {
       panel.style.zIndex = "2147483647";
     }, 1000);
