@@ -162,11 +162,20 @@
 #${PANEL_ID} .controls{
   position:absolute;
   left:50%;
-  bottom:6%;
-  transform:translateX(-50%);
+  top: calc(var(--panelTop) + var(--panelH) * var(--uiY));
+  transform:translate(-50%,-50%);
+
+  width: 86%;
+  max-width: 560px;
+
   display:flex;
+  justify-content:center;
+  align-items:center;
   gap:10px;
+  z-index: 2147483647;
+  pointer-events:auto;
 }
+
 
 #${PANEL_ID} button{
   padding:10px 14px;
