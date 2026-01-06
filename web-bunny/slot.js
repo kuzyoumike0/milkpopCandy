@@ -97,49 +97,57 @@
   function injectStyles() {
     const style = document.createElement("style");
     style.textContent = `
-#${PANEL_ID}{
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%,-50%);
-  z-index: 2147483647;
-  user-select:none;
-  isolation:isolate;
+/* ===== 調整はここだけ ===== */
+#slotStarMachinePanel3x3{
+  --winTop: 44.2%;    /* 3×3窓の縦位置（上げると数字を小さく） */
+  --winH:   34.0%;    /* 3×3窓の高さ（食い込むなら小さく） */
+  --uiBottom: 11.0%;  /* ボタン列（所持/回す/10連）の下からの位置 */
+  --resBottom: 25.0%; /* 結果表示の下からの位置（ボタンより上） */
 }
 
-#${PANEL_ID} .machine{ position: relative; }
-#${PANEL_ID} .machineImg{
-  width: 600px;
-  max-width: 92vw;
-  display:block;
-}
-
-/* 操作UI（下パネル中央にピタッと揃える） */
-#${PANEL_ID} .controlBar{
+/* UIバー：下パネル中央に安定して収める */
+#slotStarMachinePanel3x3 .controlBar{
   position:absolute;
   left:50%;
   transform:translateX(-50%);
   z-index:2147483647;
-  width: 82%;                 /* ★下パネル内に収める */
-  max-width: 520px;
+
+  width: 86%;
+  max-width: 560px;
   display:flex;
-  justify-content:center;     /* ★中央揃え */
+  justify-content:center;
   align-items:center;
   gap:10px;
   flex-wrap:wrap;
   pointer-events:auto;
 }
 
-/* ★ボタン群：下パネルの中央（下からの位置で固定） */
-#${PANEL_ID} .controls{
+/* ボタン列：下パネル内 */
+#slotStarMachinePanel3x3 .controls{
   top:auto;
-  bottom: 9.5%;               /* ★下パネル中央の“下寄り” */
+  bottom: var(--uiBottom);
 }
 
-/* ★結果：ボタンの少し上（同じく中央） */
-#${PANEL_ID} .results{
+/* 結果：ボタン列の上 */
+#slotStarMachinePanel3x3 .results{
   top:auto;
-  bottom: 19.5%;              /* ★下パネル中央の“上寄り” */
+  bottom: var(--resBottom);
+}
+
+/* 3×3スロット窓：今回の筐体スクショに合わせて上げる＆縮める */
+#slotStarMachinePanel3x3 .grid{
+  position:absolute;
+  left:50%;
+  top: var(--winTop);
+  transform:translate(-50%,-50%);
+
+  width:72%;
+  height: var(--winH);
+
+  display:grid;
+  grid-template-columns:repeat(3, 1fr);
+  grid-template-rows:repeat(3, 1fr);
+  gap:4.0%;
 }
 
 #${PANEL_ID} .chip{
@@ -197,11 +205,6 @@
   will-change: transform, filter, opacity;
 }
 
-/* モーションブラー風 */
-#${PANEL_ID}.spinning .strip{
-  filter: blur(2.2px);
-  opacity: 0.65;
-}
 
 /* 回転中の微振動（上下ブレ） */
 #${PANEL_ID}.spinning .strip img.sym{
