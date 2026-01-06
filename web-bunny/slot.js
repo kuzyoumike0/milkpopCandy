@@ -153,7 +153,6 @@
       p.style.opacity = `${0.7 + Math.random() * 0.3}`;
       box.appendChild(p);
     }
-    // 自動掃除
     setTimeout(() => (box.innerHTML = ""), 1800);
   }
 
@@ -162,7 +161,6 @@
     if (!layer) return;
     layer.innerHTML = "";
 
-    // 3x3 の中心点をセルから取る
     const cells = Array.from(panel.querySelectorAll(".cell"));
     const centers = cells.map((c) => {
       const r = c.getBoundingClientRect();
@@ -195,41 +193,30 @@
   }
 
   function triggerWinFx(panel, winLines, totalPay, totalLines) {
-    // 既存タイマーを止める
     if (fxTimer) {
       clearTimeout(fxTimer);
       fxTimer = null;
     }
 
-    // 強さ（当たりライン数 / 払い戻し）
     const big = totalPay >= 1000 || totalLines >= 3;
     const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
 
-    // クラス付与（ランプ点滅/筐体フラッシュ/シェイク）
     panel.classList.add("winFx");
     if (big) panel.classList.add("winBig");
     else panel.classList.remove("winBig");
 
-    // 画面フラッシュ＋振動
     panel.classList.add("flashOn");
     setTimeout(() => panel.classList.remove("flashOn"), 420);
 
     vibrate(big ? [80, 60, 120] : [50, 40, 60]);
-
-    // コインSE連打（豪華）
     coinBurst(big ? 22 : 14, big ? 55 : 65);
-
-    // 紙吹雪
     spawnConfetti(panel, big ? 48 : 30);
 
-    // 勝ちセルを光らせる
     const cells = Array.from(panel.querySelectorAll(".cell"));
     winLines.flat().forEach((i) => cells[i]?.classList.add("winCell"));
 
-    // 当たりラインを描画
     drawPaylines(panel, winLines, intensity);
 
-    // 一定時間で解除
     fxTimer = setTimeout(() => {
       panel.classList.remove("winFx", "winBig");
       clearWinHighlights(panel);
@@ -243,12 +230,8 @@
 #${PANEL_ID}{
   --winTop: 38%;
   --winH: 34%;
-
-  /* ▼▼▼ 下パネル比で自動計算するための変数 ▼▼▼ */
   --panelTop: 68%;
   --panelH:   18%;
-
-  /* UIは「下パネル内でのY比率」で置く（0=上端, 1=下端） */
   --resY: 0.35;
   --uiY:  0.78;
 
@@ -259,12 +242,46 @@
   z-index:2147483647;
   user-select:none;
   isolation:isolate;
+
+  /* ★起動時は隠す（slotBtnで開く） */
+  display:none;
 }
 
+/* ★背景（クリックで閉じる用） */
+#${PANEL_ID} .backdrop{
+  position:fixed;
+  inset:0;
+  background: rgba(0,0,0,.35);
+  z-index:2147483646;
+}
+
+/* ★中身（ここをクリックしても閉じない） */
+#${PANEL_ID} .modal{
+  position:relative;
+  z-index:2147483647;
+}
+
+/* ★閉じるボタン */
+#${PANEL_ID} .closeBtn{
+  position:absolute;
+  right: 10px;
+  top: 10px;
+  z-index:2147483647;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  border:none;
+  font-weight: 900;
+  cursor:pointer;
+  background: rgba(255,255,255,.96);
+  box-shadow:0 12px 32px rgba(0,0,0,.20);
+}
+
+/* 既存 */
 #${PANEL_ID} .machine{ position:relative; }
 #${PANEL_ID} .machineImg{ width:600px; max-width:92vw; display:block; }
 
-/* ===== UIバー（位置は "top" で計算して安定させる） ===== */
+/* ===== UIバー ===== */
 #${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
@@ -279,14 +296,12 @@
   z-index:2147483647;
   pointer-events:auto;
 }
-
 #${PANEL_ID} .results{
   top: calc(var(--panelTop) + var(--panelH) * var(--resY));
 }
 #${PANEL_ID} .controls{
   top: calc(var(--panelTop) + var(--panelH) * var(--uiY));
 }
-
 #${PANEL_ID} .results{ width:88%; max-width:520px; }
 
 #${PANEL_ID} .chip{
@@ -296,7 +311,6 @@
   font-weight:900;
   box-shadow:0 12px 32px rgba(0,0,0,.18);
 }
-
 #${PANEL_ID} .btn{
   padding:10px 14px;
   border-radius:14px;
@@ -351,7 +365,6 @@
   grid-template-rows:repeat(3,1fr);
   gap:4%;
 }
-
 #${PANEL_ID} .cell{
   position:relative;
   overflow:hidden;
@@ -360,14 +373,12 @@
   align-items:center;
   justify-content:center;
 }
-
 #${PANEL_ID} .strip{
   position:absolute;
   inset:0;
   transform:translateY(0);
   will-change:transform,filter,opacity;
 }
-
 #${PANEL_ID}.spinning .strip{
   filter:blur(2px);
   opacity:.65;
@@ -380,7 +391,6 @@
   50%{transform:translateY(1px)}
   100%{transform:translateY(0)}
 }
-
 #${PANEL_ID} img.sym{
   width:78%;
   height:78%;
@@ -412,10 +422,7 @@
   pointer-events:none;
   z-index:2147483645;
 }
-#${PANEL_ID} .lineSvg{
-  position:absolute;
-  inset:0;
-}
+#${PANEL_ID} .lineSvg{ position:absolute; inset:0; }
 #${PANEL_ID} .paylinePath{
   stroke: rgba(255,210,90,.92);
   filter: drop-shadow(0 4px 8px rgba(255,200,0,.35));
@@ -423,17 +430,11 @@
   stroke-dashoffset: 999;
   animation: lineDraw 520ms ease forwards;
 }
-@keyframes lineDraw{
-  to { stroke-dashoffset: 0; }
-}
+@keyframes lineDraw{ to { stroke-dashoffset: 0; } }
 
-/* ===== さらに豪華：筐体を軽く揺らす＆ランプ点滅風 ===== */
-#${PANEL_ID}.winFx{
-  animation: machineShake 520ms ease-in-out 1;
-}
-#${PANEL_ID}.winBig{
-  animation: machineShakeBig 720ms ease-in-out 1;
-}
+/* ===== さらに豪華：揺らす ===== */
+#${PANEL_ID}.winFx{ animation: machineShake 520ms ease-in-out 1; }
+#${PANEL_ID}.winBig{ animation: machineShakeBig 720ms ease-in-out 1; }
 @keyframes machineShake{
   0%{ transform: translate(-50%,-50%); }
   20%{ transform: translate(calc(-50% - 2px), calc(-50% + 1px)); }
@@ -501,42 +502,52 @@
 
   /* ===== DOM ===== */
   function buildPanel() {
-    if (document.getElementById(PANEL_ID)) return;
+    if (document.getElementById(PANEL_ID)) return document.getElementById(PANEL_ID);
 
     const p = document.createElement("div");
     p.id = PANEL_ID;
+
+    // ★背景(backdrop) + modal（クリックで閉じる）
     p.innerHTML = `
-<div class="machine">
-  <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
-  <div class="flash"></div>
+<div class="backdrop"></div>
+<div class="modal">
+  <button class="closeBtn" type="button" aria-label="close">×</button>
 
-  <!-- 当たりライン表示 -->
-  <div class="paylines"></div>
+  <div class="machine">
+    <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
+    <div class="flash"></div>
 
-  <!-- 紙吹雪 -->
-  <div class="confetti"></div>
+    <div class="paylines"></div>
+    <div class="confetti"></div>
 
-  <div class="grid">
-    ${Array.from({ length: 9 }).map((_, i) => `
-      <div class="cell" data-i="${i}"><div class="strip"></div></div>
-    `).join("")}
-  </div>
+    <div class="grid">
+      ${Array.from({ length: 9 }).map((_, i) => `
+        <div class="cell" data-i="${i}"><div class="strip"></div></div>
+      `).join("")}
+    </div>
 
-  <div class="controlBar results">
-    <div class="chip result">回してみよう！</div>
-  </div>
+    <div class="controlBar results">
+      <div class="chip result">回してみよう！</div>
+    </div>
 
-  <div class="controlBar controls">
-    <div class="chip">所持：<b class="have">0</b> 🪙</div>
-    <button class="btn primary spin">回す（-${SLOT_COST}）</button>
-    <button class="btn spin10">10連</button>
+    <div class="controlBar controls">
+      <div class="chip">所持：<b class="have">0</b> 🪙</div>
+      <button class="btn primary spin" type="button">回す（-${SLOT_COST}）</button>
+      <button class="btn spin10" type="button">10連</button>
+    </div>
   </div>
 </div>`;
     document.body.appendChild(p);
 
+    // クリックで閉じる
+    $(".backdrop", p).onclick = () => closePanel();
+    $(".closeBtn", p).onclick = () => closePanel();
+
+    // クリックで回す
     $(".spin", p).onclick = () => spin(p, 1);
     $(".spin10", p).onclick = () => spin(p, 10);
 
+    // 初期絵柄
     p.querySelectorAll(".cell").forEach((c) => {
       setStrip(c.querySelector(".strip"), [pickSymbol()], c);
     });
@@ -635,7 +646,6 @@
       return;
     }
 
-    // 既存の当たりハイライトを消す
     clearWinHighlights(panel);
 
     setCoin(have - cost);
@@ -652,7 +662,6 @@
     let totalLines = 0;
     let totalPay = 0;
 
-    // ★最後に揃ったライン（10連時は最後の結果を見せる）
     let lastWinLines = [];
     let lastPay = 0;
 
@@ -680,11 +689,9 @@
       totalLines += w.length;
       totalPay += payThis;
 
-      // 最後の回の当たりを保持
       lastWinLines = w;
       lastPay = payThis;
 
-      // ★途中当たりでも軽く演出（10連の“ワクワク”）
       if (w.length > 0 && count > 1) {
         triggerWinFx(panel, w, payThis, w.length);
       }
@@ -695,11 +702,9 @@
 
     if (totalPay > 0) {
       setCoin(getCoin() + totalPay);
-      // 最後の当たりラインをしっかり見せる（なければ全体当たりでも軽演出）
       if (lastWinLines.length > 0) {
         triggerWinFx(panel, lastWinLines, totalPay, totalLines);
       } else {
-        // 10連合算で当たりがあるが最後が外れの場合でも一応豪華に
         triggerWinFx(panel, [], totalPay, totalLines);
       }
     }
@@ -714,18 +719,57 @@
     spinning = false;
   }
 
+  /* ===== open/close ===== */
+  let panelRef = null;
+
+  function openPanel() {
+    if (!panelRef) panelRef = document.getElementById(PANEL_ID);
+    if (!panelRef) return;
+    panelRef.style.display = "block";
+    syncHave(panelRef);
+  }
+
+  function closePanel() {
+    if (!panelRef) panelRef = document.getElementById(PANEL_ID);
+    if (!panelRef) return;
+
+    // 回転中は閉じない（事故防止）
+    if (spinning) return;
+
+    panelRef.style.display = "none";
+  }
+
   /* ===== 起動 ===== */
   window.addEventListener("load", () => {
     injectStyles();
-    const panel = buildPanel();
-    if (panel) {
-      syncHave(panel);
+    panelRef = buildPanel();
+    if (panelRef) {
+      syncHave(panelRef);
 
+      // ★起動時は隠す（重要）
+      panelRef.style.display = "none";
+
+      // coinValueが変わったら所持コイン表示を追従
       const cv = $("#coinValue");
       if (cv) {
-        const mo = new MutationObserver(() => syncHave(panel));
+        const mo = new MutationObserver(() => syncHave(panelRef));
         mo.observe(cv, { childList: true, subtree: true, characterData: true });
       }
     }
+
+    // ★slotBtnクリックで開く
+    document.getElementById("slotBtn")?.addEventListener("click", () => {
+      openPanel();
+    });
+
+    // ★ESCで閉じる
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closePanel();
+    });
+
+    // 便利：他から呼べるように
+    window.SLOT = window.SLOT || {};
+    window.SLOT.open = openPanel;
+    window.SLOT.close = closePanel;
   });
 })();
