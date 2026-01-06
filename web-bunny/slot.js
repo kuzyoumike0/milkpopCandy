@@ -10,6 +10,7 @@
   const STOP_SE  = "/web-bunny/assets/stop.mp3";       // 停止「カチッ」
   const COIN_SE  = "/web-bunny/assets/coin.mp3";       // 当たり時コイン連打
 
+  // 絵柄
   const SYMBOLS = [
     { name: "coin2", src: "/web-bunny/assets/coin2.png", w: 30, pay: 100 },
     { name: "coin3", src: "/web-bunny/assets/coin3.png", w: 20, pay: 200 },
@@ -21,6 +22,7 @@
     { name: "ougon", src: "/web-bunny/assets/ougonunchi.png", w: 1, pay: 1500 },
   ];
 
+  // 回転パラメータ
   const SPIN = {
     loops: 22,
     colDelay: 220,
@@ -60,8 +62,8 @@
     reelLoop = null;
   }
 
-  // ★ 当たり時コインSE連打（短い間隔で数回）
-  function coinBurst(times = 10, interval = 80) {
+  // 当たり時コインSE連打
+  function coinBurst(times = 12, interval = 75) {
     let n = 0;
     const id = setInterval(() => {
       oneShot(COIN_SE, 0.75);
@@ -145,18 +147,19 @@
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
 #${PANEL_ID} .btn:disabled{ opacity:0.6; cursor:not-allowed; }
 
-/* 3×3表示窓 */
+/* ===== 3×3表示窓（★ズレ修正版） ===== */
 #${PANEL_ID} .grid{
   position:absolute;
   left:50%;
-  top:52.5%;
+  top:49.2%;
   transform:translate(-50%,-50%);
   width:72%;
-  height:46%;
+  height:40%;
+
   display:grid;
   grid-template-columns:repeat(3, 1fr);
   grid-template-rows:repeat(3, 1fr);
-  gap:4.5%;
+  gap:4.0%;
 }
 
 /* 1マス */
@@ -203,6 +206,7 @@
   justify-content:center;
 }
 
+/* 絵柄 */
 #${PANEL_ID} img.sym{
   width:78%;
   height:78%;
@@ -343,7 +347,7 @@
 
   function forceReflow(el) { void el.offsetHeight; }
 
-  // ★列バウンド：列(0/1/2)の全セルにクラス付与
+  // 列バウンド（列(0/1/2)の3マスに適用）
   function bounceColumn(panel, col) {
     const idxs = [col, col + 3, col + 6];
     for (const i of idxs) {
@@ -355,7 +359,7 @@
     }
   }
 
-  // 1セル回転（停止時に列バウンドを入れる）
+  // 1セル回転
   function spinCell(panel, cell, finalSym, delayMs, col) {
     const strip = cell.querySelector(".strip");
     const h = cellH(cell);
@@ -386,7 +390,7 @@
         setStrip(strip, [finalSym], cell);
         strip.style.transform = "translateY(0px)";
 
-        // ★停止バウンド（列ごと）
+        // 列バウンド
         bounceColumn(panel, col);
 
         resolve(finalSym);
@@ -481,7 +485,7 @@
       const cells = [...panel.querySelectorAll(".cell")];
       const finals = Array.from({ length: 9 }, () => pickSymbol());
 
-      // 停止「カチッ×3」
+      // 停止「カチッ×3」（列ごと）
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
@@ -519,8 +523,6 @@
     if (totalLines > 0) {
       resultEl.textContent = `🎉 当たり ${totalLines}ライン / +${totalPay} 🪙`;
       winEffects(panel);
-
-      // ★当たり時コインSE連打
       coinBurst(12, 75);
     } else {
       resultEl.textContent = "はずれ！";
@@ -539,12 +541,14 @@
     const panel = document.getElementById(PANEL_ID);
     syncHave(panel);
 
+    // coinValue変化に追従
     const cv = $("#coinValue");
     if (cv) {
       const mo = new MutationObserver(() => syncHave(panel));
       mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
 
+    // 最前面保険
     setInterval(() => {
       const p = document.getElementById(PANEL_ID);
       if (p) p.style.zIndex = "2147483647";
