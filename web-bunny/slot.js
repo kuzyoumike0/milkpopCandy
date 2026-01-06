@@ -2,22 +2,23 @@
   const PANEL_ID = "slotStarMachinePanel3x3";
   const SLOT_COST = 50;
 
-  const MACHINE_SRC = "/web-bunny/assets/slot_machine.png";
+  // ★ここはあなたの環境に合わせて（404回避のため相対パス推奨）
+  const MACHINE_SRC = "./assets/slot_machine.png";
 
   /* ===== SE ===== */
-  const START_SE = "/web-bunny/assets/slotse.mp3";
-  const REEL_SE  = "/web-bunny/assets/reelse.mp3";
-  const STOP_SE  = "/web-bunny/assets/stop.mp3";
-  const COIN_SE  = "/web-bunny/assets/coin.mp3";
+  const START_SE = "./assets/slotse.mp3";
+  const REEL_SE  = "./assets/reelse.mp3";
+  const STOP_SE  = "./assets/stop.mp3";
+  const COIN_SE  = "./assets/coin.mp3";
 
   /* ===== 絵柄 ===== */
   const SYMBOLS = [
-    { name: "coin2", src: "/web-bunny/assets/coin2.png", w: 30, pay: 100 },
-    { name: "coin3", src: "/web-bunny/assets/coin3.png", w: 20, pay: 200 },
-    { name: "coin4", src: "/web-bunny/assets/coin4.png", w: 10, pay: 500 },
-    { name: "babybunny", src: "/web-bunny/assets/babybunny.png", w: 15 },
-    { name: "reabunny", src: "/web-bunny/assets/reabunny.png", w: 5 },
-    { name: "ougon", src: "/web-bunny/assets/ougonunchi.png", w: 1, pay: 1500 },
+    { name: "coin2", src: "./assets/coin2.png", w: 30, pay: 100 },
+    { name: "coin3", src: "./assets/coin3.png", w: 20, pay: 200 },
+    { name: "coin4", src: "./assets/coin4.png", w: 10, pay: 500 },
+    { name: "babybunny", src: "./assets/babybunny.png", w: 15 },
+    { name: "reabunny",  src: "./assets/reabunny.png",  w: 5 },
+    { name: "ougon", src: "./assets/ougonunchi.png", w: 1, pay: 1500 },
   ];
 
   const SPIN = { loops: 22, colDelay: 220, baseDuration: 980 };
@@ -25,6 +26,7 @@
 
   /* ===== Audio ===== */
   function oneShot(src, vol = 0.9) {
+    if (!src) return;
     try {
       const a = new Audio(src);
       a.volume = vol;
@@ -35,15 +37,23 @@
 
   let reelLoop = null;
   function startReelLoop() {
+    if (!REEL_SE) return;
     try {
       reelLoop = new Audio(REEL_SE);
       reelLoop.loop = true;
       reelLoop.volume = 0.55;
+      reelLoop.currentTime = 0;
       reelLoop.play().catch(() => {});
-    } catch {}
+    } catch {
+      reelLoop = null;
+    }
   }
   function stopReelLoop() {
-    try { reelLoop?.pause(); } catch {}
+    try {
+      if (!reelLoop) return;
+      reelLoop.pause();
+      reelLoop.currentTime = 0;
+    } catch {}
     reelLoop = null;
   }
 
@@ -62,7 +72,7 @@
   }
   function setCoin(v) {
     const el = $("#coinValue");
-    if (el) el.textContent = Math.max(0, Math.floor(v));
+    if (el) el.textContent = String(Math.max(0, Math.floor(v)));
   }
 
   /* ===== Random ===== */
@@ -73,6 +83,52 @@
       if ((r -= s.w) <= 0) return s;
     }
     return SYMBOLS[0];
+  }
+
+  /* ===== Result (表示ロック + フェードアウト + 数字ポン) ===== */
+  let resultLock = false;
+  let resultTimer = null;
+
+  function parseCoins(text) {
+    // "+200" みたいな数値だけ拾う（無ければ null）
+    const m = text.match(/\+(\d+)/);
+    return m ? Number(m[1]) : null;
+  }
+
+  function showResult(panel, text, holdMs = 2600) {
+    const el = $(".result", panel);
+    if (!el) return;
+
+    // 既存タイマー解除
+    if (resultTimer) {
+      clearTimeout(resultTimer);
+      resultTimer = null;
+    }
+
+    // すぐ表示（フェード状態リセット）
+    resultLock = true;
+    el.classList.remove("fadeOut");
+    el.classList.remove("popNum");
+    el.textContent = text;
+
+    // ★当たり時：数字ポン（+XXX があるとき）
+    const coins = parseCoins(text);
+    if (coins !== null && coins > 0) {
+      // 次フレームで付与（アニメを確実に走らせる）
+      requestAnimationFrame(() => el.classList.add("popNum"));
+    }
+
+    // ★ホールド後にフェードアウト開始（消えはしない。薄くなる）
+    const fadeMs = 650;
+    const fadeStart = Math.max(0, holdMs - fadeMs);
+
+    resultTimer = setTimeout(() => {
+      el.classList.add("fadeOut");
+      // ロック解除はフェード終わり頃
+      setTimeout(() => {
+        resultLock = false;
+      }, fadeMs + 50);
+    }, fadeStart);
   }
 
   /* ===== CSS ===== */
@@ -86,10 +142,12 @@
   --resBottom: 18.5%;
 
   position:fixed;
-  inset:50% auto auto 50%;
+  left:50%;
+  top:50%;
   transform:translate(-50%,-50%);
   z-index:2147483647;
   user-select:none;
+  isolation:isolate;
 }
 
 #${PANEL_ID} .machine{ position:relative; }
@@ -108,6 +166,7 @@
   gap:10px;
   flex-wrap:wrap;
   z-index:2147483647;
+  pointer-events:auto;
 }
 
 #${PANEL_ID} .controls{
@@ -118,6 +177,13 @@
 #${PANEL_ID} .results{
   top:auto;
   bottom:var(--resBottom);
+}
+
+/* ★結果が「見えない」対策：必ず上に出す＆中央寄せ */
+#${PANEL_ID} .results{
+  z-index:2147483647;
+  width: 88%;
+  max-width: 520px;
 }
 
 #${PANEL_ID} .chip{
@@ -135,8 +201,33 @@
   border:none;
   background:#fff;
   cursor:pointer;
+  box-shadow:0 12px 32px rgba(0,0,0,.14);
 }
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
+
+/* ===== 結果テキスト演出 ===== */
+#${PANEL_ID} .result{
+  display:inline-block;
+  will-change: transform, opacity;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* フェードアウト（消えるのではなく薄く） */
+#${PANEL_ID} .result.fadeOut{
+  transition: opacity 650ms ease;
+  opacity: 0.25;
+}
+
+/* 数字ポン（当たり時） */
+#${PANEL_ID} .result.popNum{
+  animation: popNum 420ms cubic-bezier(.2,1.3,.2,1) 1;
+}
+@keyframes popNum{
+  0%{ transform: translateY(0) scale(1); }
+  35%{ transform: translateY(-6px) scale(1.12); }
+  100%{ transform: translateY(0) scale(1); }
+}
 
 /* ===== スロット窓 ===== */
 #${PANEL_ID} .grid{
@@ -172,27 +263,6 @@
   filter:blur(2px);
   opacity:.65;
 }
-let resultLock = false;
-let resultTimer = null;
-
-function showResult(panel, text, duration = 2500) {
-  const el = panel.querySelector(".result");
-  if (!el) return;
-
-  // 既存タイマー解除
-  if (resultTimer) {
-    clearTimeout(resultTimer);
-    resultTimer = null;
-  }
-
-  resultLock = true;
-  el.textContent = text;
-
-  // 指定時間は結果を保持
-  resultTimer = setTimeout(() => {
-    resultLock = false;
-  }, duration);
-}
 
 #${PANEL_ID}.spinning img.sym{
   animation:jitter .12s infinite;
@@ -208,6 +278,7 @@ function showResult(panel, text, duration = 2500) {
   width:78%;
   height:78%;
   object-fit:contain;
+  filter: drop-shadow(0 8px 10px rgba(0,0,0,0.18));
 }
 
 #${PANEL_ID} .win{
@@ -221,6 +292,7 @@ function showResult(panel, text, duration = 2500) {
   background:rgba(255,255,255,.65);
   opacity:0;
   pointer-events:none;
+  z-index: 2147483646;
 }
 #${PANEL_ID}.flashOn .flash{
   animation:flash .35s ease-out;
@@ -237,15 +309,16 @@ function showResult(panel, text, duration = 2500) {
   /* ===== DOM ===== */
   function buildPanel() {
     if (document.getElementById(PANEL_ID)) return;
+
     const p = document.createElement("div");
     p.id = PANEL_ID;
     p.innerHTML = `
 <div class="machine">
-  <img class="machineImg" src="${MACHINE_SRC}">
+  <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
   <div class="flash"></div>
 
   <div class="grid">
-    ${Array.from({length:9}).map((_,i)=>`
+    ${Array.from({ length: 9 }).map((_, i) => `
       <div class="cell" data-i="${i}"><div class="strip"></div></div>
     `).join("")}
   </div>
@@ -265,109 +338,179 @@ function showResult(panel, text, duration = 2500) {
     $(".spin", p).onclick = () => spin(p, 1);
     $(".spin10", p).onclick = () => spin(p, 10);
 
-    p.querySelectorAll(".cell").forEach(c=>{
+    // 初期表示
+    p.querySelectorAll(".cell").forEach((c) => {
       setStrip(c.querySelector(".strip"), [pickSymbol()], c);
     });
+
+    return p;
   }
 
-  function syncHave(p){ $(".have",p).textContent = getCoin(); }
+  function syncHave(p) {
+    const haveEl = $(".have", p);
+    if (haveEl) haveEl.textContent = String(getCoin());
+  }
 
   /* ===== Strip ===== */
-  function cellH(c){ return Math.max(40, c.getBoundingClientRect().height|0); }
-  function setStrip(strip, seq, cell){
-    const h = cellH(cell);
-    strip.innerHTML="";
-    seq.forEach(s=>{
-      const d=document.createElement("div");
-      d.style.height=h+"px";
-      const i=document.createElement("img");
-      i.src=s.src; i.className="sym";
-      d.appendChild(i); strip.appendChild(d);
-    });
+  function cellH(c) {
+    return Math.max(40, (c.getBoundingClientRect().height | 0));
   }
-  function force(el){ void el.offsetHeight; }
 
-  function spinCell(cell, finalSym, delay){
+  function setStrip(strip, seq, cell) {
+    const h = cellH(cell);
+    strip.innerHTML = "";
+    for (const sym of seq) {
+      const d = document.createElement("div");
+      d.style.height = h + "px";
+      d.style.display = "flex";
+      d.style.alignItems = "center";
+      d.style.justifyContent = "center";
+
+      const i = document.createElement("img");
+      i.src = sym.src;
+      i.className = "sym";
+      i.alt = sym.name;
+
+      d.appendChild(i);
+      strip.appendChild(d);
+    }
+  }
+
+  function force(el) { void el.offsetHeight; }
+
+  function spinCell(cell, finalSym, delay) {
     const strip = cell.querySelector(".strip");
     const h = cellH(cell);
-    const seq=[...Array(SPIN.loops)].map(pickSymbol);
+
+    const seq = Array.from({ length: SPIN.loops }, () => pickSymbol());
     seq.push(finalSym);
+
     setStrip(strip, seq, cell);
-    strip.style.transition="none";
-    strip.style.transform="translateY(0)";
+
+    strip.style.transition = "none";
+    strip.style.transform = "translateY(0)";
     force(strip);
-    strip.style.transition=`transform ${SPIN.baseDuration+delay}ms cubic-bezier(.12,.86,.12,1)`;
-    strip.style.transform=`translateY(${-h*(seq.length-1)}px)`;
-    return new Promise(r=>{
-      strip.addEventListener("transitionend",()=>{
-        setStrip(strip,[finalSym],cell);
+
+    strip.style.transition = `transform ${SPIN.baseDuration + delay}ms cubic-bezier(.12,.86,.12,1)`;
+    strip.style.transform = `translateY(${-h * (seq.length - 1)}px)`;
+
+    return new Promise((r) => {
+      const onEnd = (e) => {
+        if (e.propertyName !== "transform") return;
+        strip.removeEventListener("transitionend", onEnd);
+
+        // 最終だけ残す
+        strip.style.transition = "none";
+        setStrip(strip, [finalSym], cell);
+        strip.style.transform = "translateY(0)";
+
         r(finalSym);
-      },{once:true});
+      };
+      strip.addEventListener("transitionend", onEnd);
     });
   }
 
   /* ===== 判定 ===== */
-  const LINES=[[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  const LINES = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6],
+  ];
 
-  function wins(names){
-    return LINES.filter(l=>l.every(i=>names[i]===names[l[0]]));
+  function wins(names) {
+    const out = [];
+    for (const line of LINES) {
+      const a = names[line[0]];
+      if (a && line.every((i) => names[i] === a)) out.push(line);
+    }
+    return out;
   }
 
-  let spinning=false;
+  let spinning = false;
 
-  async function spin(panel,count){
-    if(spinning) return;
-    const have=getCoin();
-    const cost=SLOT_COST*count;
-    if(have<cost) return;
+  async function spin(panel, count) {
+    if (spinning) return;
 
-    setCoin(have-cost);
+    const have = getCoin();
+    const cost = SLOT_COST * count;
+    if (have < cost) {
+      showResult(panel, "コインが足りない…！", 2200);
+      return;
+    }
+
+    setCoin(have - cost);
     syncHave(panel);
 
-    oneShot(START_SE);
+    // 回転開始音
+    oneShot(START_SE, 0.9);
     startReelLoop();
 
-    spinning=true;
+    spinning = true;
     panel.classList.add("spinning");
 
-    let totalLines=0,totalPay=0;
+    // 回転中に結果を上書きしない（見えなくなる原因になる）
+    if (!resultLock) showResult(panel, "回転中…", 1200);
 
-    for(let t=0;t<count;t++){
-      const finals=[...Array(9)].map(pickSymbol);
-      const cells=[...panel.querySelectorAll(".cell")];
-      const res=await Promise.all(
-        finals.map((s,i)=>spinCell(cells[i],s,(i%3)*SPIN.colDelay))
+    let totalLines = 0;
+    let totalPay = 0;
+
+    for (let t = 0; t < count; t++) {
+      const finals = Array.from({ length: 9 }, () => pickSymbol());
+      const cells = Array.from(panel.querySelectorAll(".cell"));
+
+      // 停止音（列ごとに3回）
+      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
+      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
+      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
+
+      const res = await Promise.all(
+        finals.map((s, i) => spinCell(cells[i], s, (i % 3) * SPIN.colDelay))
       );
-      const names=res.map(r=>r.name);
-      const w=wins(names);
-      totalLines+=w.length;
-      w.forEach(l=>{
-        const p=res[l[0]].pay;
-        if(p) totalPay+=p;
-      });
+
+      const names = res.map((r) => r.name);
+      const w = wins(names);
+      totalLines += w.length;
+
+      for (const line of w) {
+        const sym = res[line[0]];
+        if (sym.pay) totalPay += sym.pay;
+      }
     }
 
     panel.classList.remove("spinning");
     stopReelLoop();
 
-    if(totalPay){
-      setCoin(getCoin()+totalPay);
+    if (totalPay > 0) {
+      setCoin(getCoin() + totalPay);
       panel.classList.add("flashOn");
-      coinBurst();
-      setTimeout(()=>panel.classList.remove("flashOn"),400);
+      coinBurst(12, 70);
+      setTimeout(() => panel.classList.remove("flashOn"), 400);
     }
 
-    $(".result",panel).textContent =
-      totalLines ? `🎉 当たり ${totalLines}ライン / +${totalPay}🪙` : "はずれ！";
+    // ★結果を「一定時間しっかり表示」＋「当たり時ポン」＋「フェードアウト」
+    if (totalLines > 0) {
+      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, 3600);
+    } else {
+      showResult(panel, "はずれ！", 2400);
+    }
 
     syncHave(panel);
-    spinning=false;
+    spinning = false;
   }
 
   /* ===== 起動 ===== */
-  window.addEventListener("load",()=>{
+  window.addEventListener("load", () => {
     injectStyles();
-    buildPanel();
-    syncHave(document.getElementById(PANEL_ID));
+    const panel = buildPanel();
+    if (panel) {
+      syncHave(panel);
+
+      // coinValue の変化に追従（app.js側更新も反映）
+      const cv = $("#coinValue");
+      if (cv) {
+        const mo = new MutationObserver(() => syncHave(panel));
+        mo.observe(cv, { childList: true, subtree: true, characterData: true });
+      }
+    }
   });
 })();
