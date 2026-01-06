@@ -200,6 +200,7 @@
     });
   }
 
+  // ★修正版：winFx / winBig は panel ではなく .machine に付ける。解除も .machine
   function triggerWinFx(panel, winLines, totalPay, totalLines) {
     if (fxTimer) {
       clearTimeout(fxTimer);
@@ -209,38 +210,29 @@
     const big = totalPay >= 1000 || totalLines >= 3;
     const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
 
-   function triggerWinFx(panel, winLines, totalPay, totalLines) {
-  if (fxTimer) {
-    clearTimeout(fxTimer);
-    fxTimer = null;
+    const machine = panel.querySelector(".machine") || panel;
+
+    machine.classList.add("winFx");
+    if (big) machine.classList.add("winBig");
+    else machine.classList.remove("winBig");
+
+    panel.classList.add("flashOn");
+    setTimeout(() => panel.classList.remove("flashOn"), 420);
+
+    vibrate(big ? [80, 60, 120] : [50, 40, 60]);
+    coinBurst(big ? 22 : 14, big ? 55 : 65);
+    spawnConfetti(panel, big ? 48 : 30);
+
+    const cells = Array.from(panel.querySelectorAll(".cell"));
+    winLines.flat().forEach((i) => cells[i]?.classList.add("winCell"));
+
+    drawPaylines(panel, winLines, intensity);
+
+    fxTimer = setTimeout(() => {
+      machine.classList.remove("winFx", "winBig");
+      clearWinHighlights(panel);
+    }, big ? 2400 : 1700);
   }
-
-  const big = totalPay >= 1000 || totalLines >= 3;
-  const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
-
-  const machine = panel.querySelector(".machine") || panel;
-
-  machine.classList.add("winFx");
-  if (big) machine.classList.add("winBig");
-  else machine.classList.remove("winBig");
-
-  panel.classList.add("flashOn");
-  setTimeout(() => panel.classList.remove("flashOn"), 420);
-
-  vibrate(big ? [80, 60, 120] : [50, 40, 60]);
-  coinBurst(big ? 22 : 14, big ? 55 : 65);
-  spawnConfetti(panel, big ? 48 : 30);
-
-  const cells = Array.from(panel.querySelectorAll(".cell"));
-  winLines.flat().forEach((i) => cells[i]?.classList.add("winCell"));
-  drawPaylines(panel, winLines, intensity);
-
-  fxTimer = setTimeout(() => {
-    machine.classList.remove("winFx", "winBig"); // ★ここ
-    clearWinHighlights(panel);
-  }, big ? 2400 : 1700);
-}
-
 
   /* =========================
    * 判定
@@ -416,14 +408,13 @@
   to { stroke-dashoffset: 0; }
 }
 
-/* ===== さらに豪華：筐体を軽く揺らす ===== */
+/* ===== さらに豪華：筐体を軽く揺らす（★machineに付与） ===== */
 #${PANEL_ID} .machine.winFx{
   animation: machineShake 520ms ease-in-out 1;
 }
 #${PANEL_ID} .machine.winBig{
   animation: machineShakeBig 720ms ease-in-out 1;
 }
-
 @keyframes machineShake{
   0%{ transform: translate(-50%,-50%); }
   20%{ transform: translate(calc(-50% - 2px), calc(-50% + 1px)); }
@@ -441,7 +432,6 @@
   75%{ transform: translate(calc(-50% - 2px), calc(-50% + 2px)); }
   100%{ transform: translate(-50%,-50%); }
 }
-
 
 /* フラッシュ */
 #${PANEL_ID} .flash{
@@ -581,75 +571,6 @@
     body.style.overflow = prevOverflowBody || "";
   }
 
-  function buildPanel() {
-    if (document.getElementById(PANEL_ID)) {
-      panelRef = document.getElementById(PANEL_ID);
-      return panelRef;
-    }
-
-    const p = document.createElement("div");
-    p.id = PANEL_ID;
-    p.innerHTML = `
-<div class="backdrop"></div>
-<div class="machine">
-  <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
-  <div class="flash"></div>
-
-  <div class="paylines"></div>
-  <div class="confetti"></div>
-
-  <div class="grid">
-    ${Array.from({ length: 9 }).map((_, i) => `
-      <div class="cell" data-i="${i}" data-sym=""><div class="strip"></div></div>
-    `).join("")}
-  </div>
-
-  <div class="controlBar results">
-    <div class="chip result">回してみよう！</div>
-  </div>
-
-  <div class="controlBar controls">
-    <div class="chip">所持：<b class="have">0</b> 🪙</div>
-    <button class="btn primary spin">回す（-${SLOT_COST}）</button>
-    <button class="btn spin10">10連</button>
-  </div>
-</div>
-<button class="closeBtn" aria-label="close">×</button>
-`;
-    document.body.appendChild(p);
-    panelRef = p;
-
-    // 初期絵柄（サイズ確定後に作り直す）
-    p.querySelectorAll(".cell").forEach((c) => {
-      const s = pickSymbol();
-      c.dataset.sym = s.name;
-      setStrip(c.querySelector(".strip"), [s], c);
-    });
-
-    $(".spin", p).onclick = () => spin(p, 1);
-    $(".spin10", p).onclick = () => spin(p, 10);
-
-    $(".closeBtn", p).onclick = closePanel;
-    $(".backdrop", p).onclick = closePanel;
-
-    // 画像読み込み後に再計算（巨大化/ズレ予防）
-    const img = $(".machineImg", p);
-    if (img) {
-      const onReady = () => {
-        requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(p)));
-      };
-      img.addEventListener("load", onReady, { once: true });
-      if (img.complete) onReady();
-    }
-
-    return p;
-  }
-
-  function syncHave(p) {
-    const haveEl = $(".have", p);
-    if (haveEl) haveEl.textContent = String(getCoin());
-  }
-
   /* =========================
    * Strip
    * ========================= */
@@ -725,11 +646,82 @@
         strip.style.transform = "translateY(0)";
 
         cell.dataset.sym = finalSym.name;
-
         resolve(finalSym);
       };
       strip.addEventListener("transitionend", onEnd);
     });
+  }
+
+  /* =========================
+   * DOM build
+   * ========================= */
+  function buildPanel() {
+    if (document.getElementById(PANEL_ID)) {
+      panelRef = document.getElementById(PANEL_ID);
+      return panelRef;
+    }
+
+    const p = document.createElement("div");
+    p.id = PANEL_ID;
+    p.innerHTML = `
+<div class="backdrop"></div>
+<div class="machine">
+  <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
+  <div class="flash"></div>
+
+  <div class="paylines"></div>
+  <div class="confetti"></div>
+
+  <div class="grid">
+    ${Array.from({ length: 9 }).map((_, i) => `
+      <div class="cell" data-i="${i}" data-sym=""><div class="strip"></div></div>
+    `).join("")}
+  </div>
+
+  <div class="controlBar results">
+    <div class="chip result">回してみよう！</div>
+  </div>
+
+  <div class="controlBar controls">
+    <div class="chip">所持：<b class="have">0</b> 🪙</div>
+    <button class="btn primary spin">回す（-${SLOT_COST}）</button>
+    <button class="btn spin10">10連</button>
+  </div>
+</div>
+<button class="closeBtn" aria-label="close">×</button>
+`;
+    document.body.appendChild(p);
+    panelRef = p;
+
+    // 初期絵柄
+    p.querySelectorAll(".cell").forEach((c) => {
+      const s = pickSymbol();
+      c.dataset.sym = s.name;
+      setStrip(c.querySelector(".strip"), [s], c);
+    });
+
+    $(".spin", p).onclick = () => spin(p, 1);
+    $(".spin10", p).onclick = () => spin(p, 10);
+
+    $(".closeBtn", p).onclick = closePanel;
+    $(".backdrop", p).onclick = closePanel;
+
+    // 画像読み込み後に再計算（ズレ予防）
+    const img = $(".machineImg", p);
+    if (img) {
+      const onReady = () => {
+        requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(p)));
+      };
+      img.addEventListener("load", onReady, { once: true });
+      if (img.complete) onReady();
+    }
+
+    return p;
+  }
+
+  function syncHave(p) {
+    const haveEl = $(".have", p);
+    if (haveEl) haveEl.textContent = String(getCoin());
   }
 
   /* =========================
@@ -757,14 +749,11 @@
 
     spinning = true;
     panel.classList.add("spinning");
-
     if (!resultLock) showResult(panel, "回転中…", 1200);
 
     let totalLines = 0;
     let totalPay = 0;
-
     let lastWinLines = [];
-    let lastPay = 0;
 
     for (let t = 0; t < count; t++) {
       const finals = Array.from({ length: 9 }, () => pickSymbol());
@@ -789,10 +778,9 @@
 
       totalLines += w.length;
       totalPay += payThis;
-
       lastWinLines = w;
-      lastPay = payThis;
 
+      // 10連中の途中当たりも軽く演出
       if (w.length > 0 && count > 1) {
         triggerWinFx(panel, w, payThis, w.length);
       }
@@ -803,11 +791,8 @@
 
     if (totalPay > 0) {
       setCoin(getCoin() + totalPay);
-      if (lastWinLines.length > 0) {
-        triggerWinFx(panel, lastWinLines, totalPay, totalLines);
-      } else {
-        triggerWinFx(panel, [], totalPay, totalLines);
-      }
+      if (lastWinLines.length > 0) triggerWinFx(panel, lastWinLines, totalPay, totalLines);
+      else triggerWinFx(panel, [], totalPay, totalLines);
     }
 
     if (totalLines > 0) {
@@ -850,8 +835,9 @@
     injectStyles();
     buildPanel();
 
-    const slotBtn = document.getElementById("slotBtn")
-      || [...document.querySelectorAll("button")].find(b => (b.textContent || "").includes("スロット"));
+    const slotBtn =
+      document.getElementById("slotBtn") ||
+      [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("スロット"));
 
     if (slotBtn) slotBtn.addEventListener("click", openPanel);
 
@@ -862,5 +848,12 @@
       });
       mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
+
+    // リサイズ時もセル高さ再計算（ズレ予防）
+    window.addEventListener("resize", () => {
+      if (panelRef && panelRef.style.display !== "none") {
+        requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(panelRef)));
+      }
+    });
   });
 })();
