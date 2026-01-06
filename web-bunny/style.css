@@ -586,3 +586,35 @@ html,body{
   border-radius: 12px;
   padding: 6px 10px;
 }
+/* ===== フィールド ===== */
+#field {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - var(--hud-height, 0px));
+  overflow: hidden;
+  background: #000; /* 動画ロード前の保険 */
+}
+
+/* ===== 背景動画 ===== */
+#bgVideo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;      /* 画面いっぱい */
+  z-index: 0;             /* 最背面 */
+  pointer-events: none;   /* ★操作を邪魔しない */
+  opacity: 0.9;           /* 少し落ち着かせたい場合 */
+}
+
+/* ===== 天気 ===== */
+#tenkiLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ===== ゲームレイヤー ===== */
+#bunnyLayer { position: relative; z-index: 3; }
+#coinLayer  { position: relative; z-index: 4; }
