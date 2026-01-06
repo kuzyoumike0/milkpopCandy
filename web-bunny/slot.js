@@ -209,9 +209,11 @@
     const big = totalPay >= 1000 || totalLines >= 3;
     const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
 
-    panel.classList.add("winFx");
-    if (big) panel.classList.add("winBig");
-    else panel.classList.remove("winBig");
+    const machine = panel.querySelector(".machine") || panel;
+
+    machine.classList.add("winFx");
+    if (big) machine.classList.add("winBig");
+    else machine.classList.remove("winBig");
 
     panel.classList.add("flashOn");
     setTimeout(() => panel.classList.remove("flashOn"), 420);
