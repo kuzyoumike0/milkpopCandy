@@ -44,6 +44,18 @@
     return true;
   };
 
+  const SLOT_SE_SRC = "/web-bunny/assets/slotse.mp3";
+
+function playSlotSE() {
+  try {
+    const a = new Audio(SLOT_SE_SRC);
+    a.volume = 0.8;
+    a.currentTime = 0;
+    a.play().catch(() => {});
+  } catch (_) {}
+}
+
+  
   // ===== UI =====
   const PANEL_ID = "slotStarMachinePanel";
   const CELL_H = 78; // 窓の高さに合わせたセル高さ（後で微調整OK）
