@@ -850,6 +850,41 @@
   make("sakuLeft", "left");
   make("sakuRight", "right");
 })();
+  (() => {
+  const slotBtn = document.getElementById("slotBtn");
+  const panel = document.getElementById("slotStarMachinePanel3x3");
+  if (!slotBtn || !panel) return;
+
+  slotBtn.addEventListener("click", () => {
+    panel.classList.add("show");
+    // とりあえず見える確認用（後でスロットUIに置き換え）
+    if (!panel.dataset.booted) {
+      panel.dataset.booted = "1";
+      panel.innerHTML = `
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,.55);"></div>
+        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+                    width:min(520px,92vw);background:#fff;border-radius:16px;padding:16px;
+                    box-shadow:0 20px 60px rgba(0,0,0,.35);">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <b>スロット</b>
+            <button id="slotCloseBtn" style="font-size:16px;">×</button>
+          </div>
+          <div style="margin-top:10px;opacity:.8;font-size:14px;">
+            パネル表示OK。次にスロット本体描画を入れます。
+          </div>
+        </div>
+      `;
+      panel.querySelector("#slotCloseBtn")?.addEventListener("click", () => {
+        panel.classList.remove("show");
+      });
+      // 背景クリックで閉じる
+      panel.addEventListener("click", (e) => {
+        if (e.target === panel) panel.classList.remove("show");
+      });
+    }
+  });
+})();
+
 
   init();
 })();
