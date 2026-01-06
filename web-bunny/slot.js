@@ -331,6 +331,8 @@ function playSlotSE() {
   }
 
   async function spinOnce(panel) {
+    playSlotSE();
+
     const resultEl = panel.querySelector(".result");
     const spinBtn = panel.querySelector(".spin");
     const spin10Btn = panel.querySelector(".spin10");
