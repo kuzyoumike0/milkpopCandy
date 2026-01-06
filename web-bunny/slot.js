@@ -125,7 +125,7 @@
     const s = document.createElement("style");
     s.textContent = `
 #${PANEL_ID}{
-  --winTop: 44%;
+  --winTop: 38%;
   --winH: 34%;
 
   /* ▼▼▼ 下パネル比で自動計算するための変数 ▼▼▼
