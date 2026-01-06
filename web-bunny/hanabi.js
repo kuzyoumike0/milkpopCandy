@@ -1,9 +1,9 @@
 // hanabi.js
-// GIF花火 + 効果音版（assets/hanabi）
-// クリックでコイン消費 → 背景に花火GIF表示 + SE再生
+// 1クリック = 花火GIF 1発 + SE
+// assets/hanabi 配下を使用
 
 (() => {
-  const COST = 200; // 花火1回のコスト
+  const COST = 200; // 花火1発のコスト
   const BTN_ID = "hanabiBtn";
 
   const FIREWORKS = [
@@ -31,7 +31,7 @@
   }
 
   /* =========================
-   * Audio（花火SE）
+   * Audio
    * ========================= */
   const hanabiSE = new Audio(HANABI_SE_SRC);
   hanabiSE.volume = 0.8;
@@ -103,18 +103,19 @@
   }
 
   /* =========================
-   * 花火生成
+   * 花火生成（1発）
    * ========================= */
-  function spawnFirework(field, withSound = false) {
+  function spawnFirework(field) {
     const img = document.createElement("img");
     img.className = "hanabi-gif";
     img.src = FIREWORKS[Math.floor(Math.random() * FIREWORKS.length)];
     img.alt = "firework";
 
     const rect = field.getBoundingClientRect();
-    const x = rect.width * (0.1 + Math.random() * 0.8);
-    const y = rect.height * (0.05 + Math.random() * 0.45);
-    const size = 120 + Math.random() * 180;
+
+    const x = rect.width * (0.15 + Math.random() * 0.7);
+    const y = rect.height * (0.1 + Math.random() * 0.4);
+    const size = 160 + Math.random() * 140;
 
     img.style.left = `${x - size / 2}px`;
     img.style.top  = `${y - size / 2}px`;
@@ -122,8 +123,7 @@
     img.style.height = "auto";
 
     field.appendChild(img);
-
-    if (withSound) playHanabiSE();
+    playHanabiSE();
 
     setTimeout(() => {
       try { img.remove(); } catch {}
@@ -157,16 +157,7 @@
       }
 
       setCoin(have - COST);
-      const field = getField();
-
-      // 3〜5発：最初の1発でSEを鳴らす
-      const count = 3 + Math.floor(Math.random() * 3);
-      for (let i = 0; i < count; i++) {
-        setTimeout(
-          () => spawnFirework(field, i === 0),
-          i * 220
-        );
-      }
+      spawnFirework(getField());
     });
   }
 
