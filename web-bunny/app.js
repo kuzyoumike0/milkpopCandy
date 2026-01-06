@@ -77,6 +77,25 @@
 
   const REA_EVOLVE_RATE = 0.01;
   const UNLOCK_BUNNY4_NEED = 10;
+  // ★価格インフレ（現在の総うさぎ数で値上げ）
+// 例：1匹増えるごとに +8%（好みに合わせて調整OK）
+const PRICE_INFLATION_PER_BUNNY = 0.08;
+
+// 端数が気になるなら 10/50/100 単位で丸める
+const PRICE_ROUND_UNIT = 10;
+
+function calcDynamicPrice(kind) {
+  const base = BUNNY_DEFS[kind]?.price ?? 0;
+  if (base <= 0) return 0;
+
+  const n = bunnies.length; // ★現在いる総匹数
+  const mul = 1 + n * PRICE_INFLATION_PER_BUNNY;
+  const raw = Math.floor(base * mul);
+
+  // 丸め
+  return Math.max(base, Math.ceil(raw / PRICE_ROUND_UNIT) * PRICE_ROUND_UNIT);
+}
+
 
   const OUGON_UNCHI_RATE_PER_DROP = 0.0015; // 0.15%
   const OUGON_UNCHI_VALUE = 10000;
