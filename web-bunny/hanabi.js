@@ -1,9 +1,10 @@
 // hanabi.js
 // 1クリック = 花火GIF 1発 + SE
+// コイン消費：-2000
 // assets/hanabi 配下を使用
 
 (() => {
-  const COST = 2000; // 花火1発のコスト
+  const COST = 2000; // ★花火1発のコスト（-2000）
   const BTN_ID = "hanabiBtn";
 
   const FIREWORKS = [
@@ -71,8 +72,8 @@
 /* 花火GIF（背景） */
 .hanabi-gif{
   position: absolute;
-  pointer-events: none;
-  z-index: 1;
+  pointer-events: none; /* ★邪魔しない */
+  z-index: 1;           /* ★うさぎ/コインより下に */
   animation: hanabiFade 2.6s ease-out forwards;
 }
 @keyframes hanabiFade{
@@ -86,7 +87,7 @@
   }
 
   /* =========================
-   * Field取得
+   * Field取得（邪魔しないため z-index 調整）
    * ========================= */
   function getField() {
     const field = document.getElementById("field") || document.body;
@@ -113,9 +114,10 @@
 
     const rect = field.getBoundingClientRect();
 
+    // 画面の上側に出る（背景っぽく）
     const x = rect.width * (0.15 + Math.random() * 0.7);
-    const y = rect.height * (0.1 + Math.random() * 0.4);
-    const size = 160 + Math.random() * 140;
+    const y = rect.height * (0.08 + Math.random() * 0.35);
+    const size = 180 + Math.random() * 180;
 
     img.style.left = `${x - size / 2}px`;
     img.style.top  = `${y - size / 2}px`;
@@ -143,11 +145,12 @@
     if (!btn) {
       btn = document.createElement("button");
       btn.id = BTN_ID;
-      btn.textContent = `🎆 花火（-${COST}）`;
       document.body.appendChild(btn);
     } else {
       btn.id = BTN_ID;
     }
+
+    btn.textContent = `🎆 花火（-${COST}）`;
 
     btn.addEventListener("click", () => {
       const have = getCoin();
@@ -156,7 +159,10 @@
         return;
       }
 
+      // 🪙 -2000
       setCoin(have - COST);
+
+      // 🌌 1発だけ
       spawnFirework(getField());
     });
   }
