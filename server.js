@@ -9,19 +9,21 @@ const PORT = process.env.PORT || 8080;
 const ROOT = process.cwd();
 const INDEX_PATH = path.join(ROOT, "index.html");
 
-// まず静的配信（index.html, app.js, slot.js, style.css, manifest 等）
+// 静的配信（index.html, app.js, slot.js, style.css 等）
 app.use(express.static(ROOT));
 
-// ★ web-bunny を /web-bunny として静的配信（assetsが出るようになる）
+// ★ web-bunny を /web-bunny として配信（assetsが出る）
 app.use("/web-bunny", express.static(path.join(ROOT, "web-bunny")));
 
-// ヘルスチェック（デバッグ用）
 app.get("/__health", (_req, res) => {
   res.type("text").send(
     [
       `PORT=${PORT}`,
       `ROOT=${ROOT}`,
+      `INDEX_PATH=${INDEX_PATH}`,
       `INDEX_EXISTS=${fs.existsSync(INDEX_PATH)}`,
+      `APP_JS_EXISTS=${fs.existsSync(path.join(ROOT, "app.js"))}`,
+      `SLOT_JS_EXISTS=${fs.existsSync(path.join(ROOT, "slot.js"))}`,
       `WEB_BUNNY_EXISTS=${fs.existsSync(path.join(ROOT, "web-bunny"))}`,
       `ASSETS_EXISTS=${fs.existsSync(path.join(ROOT, "web-bunny", "assets"))}`,
       `COIN2_EXISTS=${fs.existsSync(path.join(ROOT, "web-bunny", "assets", "coin2.png"))}`,
@@ -29,20 +31,23 @@ app.get("/__health", (_req, res) => {
   );
 });
 
-// ルート（/）は必ず index.html を返す（これで Cannot GET / が消える）
+// ルートは必ず index.html を返す（これで Cannot GET / が消える）
 app.get("/", (_req, res) => {
   if (fs.existsSync(INDEX_PATH)) {
     res.sendFile(INDEX_PATH);
   } else {
-    // index.html が無い場合でも原因が分かるようにする
     res
       .status(500)
       .type("text")
-      .send(`index.html not found at: ${INDEX_PATH}\nROOT=${ROOT}`);
+      .send(
+        `index.html not found\nROOT=${ROOT}\nINDEX_PATH=${INDEX_PATH}\n` +
+        `Check your deploy working directory / file placement.`
+      );
   }
 });
 
 app.listen(PORT, () => {
   console.log(`Server running on :${PORT}`);
   console.log("ROOT =", ROOT);
+  console.log("INDEX_EXISTS =", fs.existsSync(INDEX_PATH));
 });
