@@ -40,16 +40,8 @@
 
   <!-- ===== メインフィールド ===== -->
   <main id="field">
-
-    <!-- ★ 背景動画（最背面） -->
-    <video
-      id="bgVideo"
-      src="./assets/bg/city-silhouette.mp4"
-      autoplay
-      muted
-      loop
-      playsinline
-    ></video>
+    <!-- ★ 背景色レイヤー（最背面） -->
+    <div id="bgLayer"></div>
 
     <!-- 天気 -->
     <div id="tenkiLayer"></div>
@@ -74,6 +66,9 @@
       clearSpecial: bgmClearSpecial
     };
   </script>
+
+  <!-- ★ 背景（朝昼夜：色だけで判定） -->
+  <script src="./bgcolor.js"></script>
 
   <!-- 天気 -->
   <script src="./tenki.js"></script>
