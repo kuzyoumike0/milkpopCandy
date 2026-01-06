@@ -235,7 +235,7 @@
   --uiY:  0.78;
 
   position:fixed;
-  left:60%;
+  left:70%;
   top:50%;
   transform:translate(-50%,-50%);
   z-index:2147483647;
