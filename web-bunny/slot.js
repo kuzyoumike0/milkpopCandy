@@ -42,6 +42,7 @@
       reelLoop = new Audio(REEL_SE);
       reelLoop.loop = true;
       reelLoop.volume = 0.55;
+      reelLoop.currentTime = 0;
       reelLoop.play().catch(() => {});
     } catch {}
   }
@@ -79,10 +80,12 @@
   }
 
   /* =========================
-   * CSS
+   * CSS（ここが重要：cellをrelativeにする）
    * ========================= */
   function injectStyles() {
+    if (document.getElementById("slotStyleFixV2")) return;
     const s = document.createElement("style");
+    s.id = "slotStyleFixV2";
     s.textContent = `
 #${PANEL_ID}{
   --winTop: 38%;
@@ -116,6 +119,8 @@
   display:block;
   max-width:92vw;
   max-height:92vh;
+  height:auto;
+  width:auto;
 }
 
 #${PANEL_ID} .grid{
@@ -132,6 +137,7 @@
 }
 
 #${PANEL_ID} .cell{
+  position:relative;          /* ★★★ これが無いと全部重なる ★★★ */
   overflow:hidden;
   border-radius:12px;
   display:flex;
@@ -142,12 +148,15 @@
 #${PANEL_ID} .strip{
   position:absolute;
   inset:0;
+  transform:translateY(0);
+  will-change:transform;
 }
 
 #${PANEL_ID} img.sym{
   width:78%;
   height:78%;
   object-fit:contain;
+  display:block;
 }
 
 #${PANEL_ID} .controls{
@@ -164,15 +173,21 @@
   border-radius:14px;
   border:none;
   font-weight:900;
+  cursor:pointer;
 }
 
+#${PANEL_ID} .spin{
+  background:#ffd6e7;
+}
 #${PANEL_ID} .closeBtn{
   position:absolute;
   top:10px;
   right:10px;
-  border-radius:50%;
-  width:36px;
-  height:36px;
+  border-radius:14px;
+  width:44px;
+  height:44px;
+  background:rgba(255,255,255,.95);
+  box-shadow:0 12px 32px rgba(0,0,0,.18);
 }
 `;
     document.head.appendChild(s);
@@ -189,35 +204,70 @@
     p.innerHTML = `
 <div class="backdrop"></div>
 <div class="machine">
-  <img class="machineImg" src="${MACHINE_SRC}">
+  <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
   <div class="grid">
-    ${Array.from({ length: 9 }).map(() =>
-      `<div class="cell"><div class="strip"></div></div>`
+    ${Array.from({ length: 9 }).map((_, i) =>
+      `<div class="cell" data-i="${i}"><div class="strip"></div></div>`
     ).join("")}
   </div>
   <div class="controls">
-    <button class="spin">回す (-50)</button>
+    <button class="spin">回す (-${SLOT_COST})</button>
     <button class="spin10">10連</button>
   </div>
 </div>
-<button class="closeBtn">×</button>
+<button class="closeBtn" aria-label="close">×</button>
 `;
     document.body.appendChild(p);
 
+    // 初期絵柄
+    p.querySelectorAll(".cell").forEach((c) => {
+      const sym = pickSymbol();
+      c.dataset.sym = sym.name;
+      setStrip(c.querySelector(".strip"), [sym], c);
+    });
+
+    // 閉じる
     p.querySelector(".closeBtn").onclick = closePanel;
+    p.querySelector(".backdrop").onclick = closePanel;
+
+    // 回す
     p.querySelector(".spin").onclick = () => spin(p, 1);
     p.querySelector(".spin10").onclick = () => spin(p, 10);
 
-    p.querySelectorAll(".cell").forEach(c => {
-      setStrip(c.querySelector(".strip"), [pickSymbol()], c);
-    });
+    // 画像読み込み後に「高さ再計算」して巨大化/ズレ予防
+    const img = p.querySelector(".machineImg");
+    if (img) {
+      img.addEventListener("load", () => {
+        // 2フレーム待ってから再生成（レイアウト確定後）
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            refreshAllCells(p);
+          });
+        });
+      }, { once: true });
+
+      // すでにキャッシュで読み込み済みでも動く
+      if (img.complete) {
+        requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(p)));
+      }
+    }
   }
 
   /* =========================
    * Strip helpers
    * ========================= */
-  function cellH(c) {
-    return Math.max(40, c.getBoundingClientRect().height | 0);
+  function cellH(cell) {
+    const r = cell.getBoundingClientRect();
+    if (r.height && r.height > 10) return (r.height | 0);
+
+    // もし0っぽいなら gridの高さから推定
+    const grid = cell.closest(".grid");
+    if (grid) {
+      const gr = grid.getBoundingClientRect();
+      const approx = gr.height / 3;
+      return Math.max(40, approx | 0);
+    }
+    return 80;
   }
 
   function setStrip(strip, seq, cell) {
@@ -229,22 +279,38 @@
       d.style.display = "flex";
       d.style.alignItems = "center";
       d.style.justifyContent = "center";
+
       const i = document.createElement("img");
       i.src = sym.src;
       i.className = "sym";
       i.alt = sym.name;
+
       d.appendChild(i);
       strip.appendChild(d);
     }
   }
 
+  function refreshAllCells(panel) {
+    panel.querySelectorAll(".cell").forEach((cell) => {
+      const name = cell.dataset.sym || "";
+      const sym = SYMBOLS.find(s => s.name === name) || SYMBOLS[0];
+      const strip = cell.querySelector(".strip");
+      if (!strip) return;
+      strip.style.transition = "none";
+      strip.style.transform = "translateY(0)";
+      setStrip(strip, [sym], cell);
+    });
+  }
+
   function spinCell(cell, finalSym, delay) {
     const strip = cell.querySelector(".strip");
     const h = cellH(cell);
+
     const seq = Array.from({ length: SPIN.loops }, () => pickSymbol());
     seq.push(finalSym);
 
     setStrip(strip, seq, cell);
+
     strip.style.transition = "none";
     strip.style.transform = "translateY(0)";
     void strip.offsetHeight;
@@ -253,13 +319,19 @@
       `transform ${SPIN.baseDuration + delay}ms cubic-bezier(.12,.86,.12,1)`;
     strip.style.transform = `translateY(${-h * (seq.length - 1)}px)`;
 
-    return new Promise(r => {
-      strip.addEventListener("transitionend", () => {
+    return new Promise((resolve) => {
+      const onEnd = (e) => {
+        if (e.propertyName !== "transform") return;
+        strip.removeEventListener("transitionend", onEnd);
+
         strip.style.transition = "none";
-        setStrip(strip, [finalSym], cell);
         strip.style.transform = "translateY(0)";
-        r(finalSym);
-      }, { once:true });
+        cell.dataset.sym = finalSym.name;
+        setStrip(strip, [finalSym], cell);
+
+        resolve(finalSym);
+      };
+      strip.addEventListener("transitionend", onEnd);
     });
   }
 
@@ -270,11 +342,16 @@
 
   async function spin(panel, count) {
     if (spinning) return;
+
     const cost = SLOT_COST * count;
-    if (getCoin() < cost) return;
+    if (getCoin() < cost) {
+      oneShot(STOP_SE, 0.7);
+      return;
+    }
 
     setCoin(getCoin() - cost);
-    oneShot(START_SE);
+
+    oneShot(START_SE, 0.9);
     startReelLoop();
 
     spinning = true;
@@ -282,47 +359,83 @@
     for (let t = 0; t < count; t++) {
       const finals = Array.from({ length: 9 }, () => pickSymbol());
       const cells = Array.from(panel.querySelectorAll(".cell"));
+
+      // 列ごとに停止SE
+      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
+      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
+      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
+
       await Promise.all(
         finals.map((s, i) => spinCell(cells[i], s, (i % 3) * SPIN.colDelay))
       );
     }
 
     stopReelLoop();
+    oneShot(COIN_SE, 0.65); // 〆SE（軽く）
+
     spinning = false;
   }
 
   /* =========================
    * Open / Close + scroll lock
    * ========================= */
-  let prevOverflow = "";
+  let prevOverflowHtml = "";
+  let prevOverflowBody = "";
+
+  function lockScroll() {
+    const html = document.documentElement;
+    const body = document.body;
+    prevOverflowHtml = html.style.overflow;
+    prevOverflowBody = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+  }
+  function unlockScroll() {
+    const html = document.documentElement;
+    const body = document.body;
+    html.style.overflow = prevOverflowHtml || "";
+    body.style.overflow = prevOverflowBody || "";
+  }
 
   function openPanel() {
     const p = document.getElementById(PANEL_ID);
     if (!p) return;
-    prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+
+    lockScroll();
     p.style.display = "block";
+
+    // 開いた直後にレイアウト確定→再生成（巨大化/ずれ防止）
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        refreshAllCells(p);
+      });
+    });
   }
 
   function closePanel() {
     const p = document.getElementById(PANEL_ID);
-    if (!p || spinning) return;
+    if (!p) return;
+    if (spinning) return; // 回転中は閉じさせない
+
     p.style.display = "none";
-    document.body.style.overflow = prevOverflow || "";
+    unlockScroll();
   }
 
   /* =========================
-   * Init
+   * Init（slotBtnクリックで表示）
    * ========================= */
   window.addEventListener("load", () => {
     injectStyles();
     buildPanel();
 
-    const slotBtn =
-      document.getElementById("slotBtn") ||
-      [...document.querySelectorAll("button")].find(b => b.textContent === "スロット");
-
-    slotBtn?.addEventListener("click", openPanel);
+    const slotBtn = document.getElementById("slotBtn");
+    if (slotBtn) {
+      slotBtn.addEventListener("click", openPanel);
+    } else {
+      // 保険：文言から探す
+      const any = [...document.querySelectorAll("button")].find(b => b.textContent.includes("スロット"));
+      any?.addEventListener("click", openPanel);
+    }
   });
 
 })();
