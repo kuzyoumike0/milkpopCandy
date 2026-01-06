@@ -2,7 +2,7 @@
   const PANEL_ID = "slotStarMachinePanel3x3";
   const SLOT_COST = 50;
 
-  // ★ここはあなたの環境に合わせて（404回避のため相対パス推奨）
+  // 404回避のため相対パス（index.html から見た assets）
   const MACHINE_SRC = "./assets/slot_machine.png";
 
   /* ===== SE ===== */
@@ -90,7 +90,6 @@
   let resultTimer = null;
 
   function parseCoins(text) {
-    // "+200" みたいな数値だけ拾う（無ければ null）
     const m = text.match(/\+(\d+)/);
     return m ? Number(m[1]) : null;
   }
@@ -99,35 +98,25 @@
     const el = $(".result", panel);
     if (!el) return;
 
-    // 既存タイマー解除
     if (resultTimer) {
       clearTimeout(resultTimer);
       resultTimer = null;
     }
 
-    // すぐ表示（フェード状態リセット）
     resultLock = true;
-    el.classList.remove("fadeOut");
-    el.classList.remove("popNum");
+    el.classList.remove("fadeOut", "popNum");
     el.textContent = text;
 
-    // ★当たり時：数字ポン（+XXX があるとき）
     const coins = parseCoins(text);
     if (coins !== null && coins > 0) {
-      // 次フレームで付与（アニメを確実に走らせる）
       requestAnimationFrame(() => el.classList.add("popNum"));
     }
 
-    // ★ホールド後にフェードアウト開始（消えはしない。薄くなる）
     const fadeMs = 650;
     const fadeStart = Math.max(0, holdMs - fadeMs);
-
     resultTimer = setTimeout(() => {
       el.classList.add("fadeOut");
-      // ロック解除はフェード終わり頃
-      setTimeout(() => {
-        resultLock = false;
-      }, fadeMs + 50);
+      setTimeout(() => (resultLock = false), fadeMs + 50);
     }, fadeStart);
   }
 
@@ -136,10 +125,21 @@
     const s = document.createElement("style");
     s.textContent = `
 #${PANEL_ID}{
-  --winTop: 38%;
+  --winTop: 44%;
   --winH: 34%;
-  --uiBottom: 8.5%;
-  --resBottom: 18.5%;
+
+  /* ▼▼▼ 下パネル比で自動計算するための変数 ▼▼▼
+     下パネルは「筐体画像の高さに対して何%か」という比率で扱う。
+     - panelTop: 下パネル上端の位置（筐体画像の上からの割合）
+     - panelH  : 下パネルの高さ（筐体画像の高さに対する割合）
+     この2つを決めれば、UI位置は比率で自動配置できる。
+  */
+  --panelTop: 68%;     /* ★下パネル開始位置（要調整ポイント） */
+  --panelH:   28%;     /* ★下パネル高さ（要調整ポイント） */
+
+  /* UIは「下パネル内でのY比率」で置く（0=上端, 1=下端） */
+  --resY: 0.35;        /* 結果：下パネルの上から35%の位置 */
+  --uiY:  0.78;        /* ボタン：下パネルの上から78%の位置 */
 
   position:fixed;
   left:50%;
@@ -153,7 +153,7 @@
 #${PANEL_ID} .machine{ position:relative; }
 #${PANEL_ID} .machineImg{ width:600px; max-width:92vw; display:block; }
 
-/* ===== UI（下パネル中央固定） ===== */
+/* ===== UIバー（位置は "top" で計算して安定させる） ===== */
 #${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
@@ -169,22 +169,17 @@
   pointer-events:auto;
 }
 
+/* ▼ 計算式：
+   top = panelTop + panelH * (resY or uiY)
+*/
+#${PANEL_ID} .results{
+  top: calc(var(--panelTop) + var(--panelH) * var(--resY));
+}
 #${PANEL_ID} .controls{
-  top:auto;
-  bottom:var(--uiBottom);
+  top: calc(var(--panelTop) + var(--panelH) * var(--uiY));
 }
 
-#${PANEL_ID} .results{
-  top:auto;
-  bottom:var(--resBottom);
-}
-
-/* ★結果が「見えない」対策：必ず上に出す＆中央寄せ */
-#${PANEL_ID} .results{
-  z-index:2147483647;
-  width: 88%;
-  max-width: 520px;
-}
+#${PANEL_ID} .results{ width:88%; max-width:520px; }
 
 #${PANEL_ID} .chip{
   background:rgba(255,255,255,.96);
@@ -205,21 +200,17 @@
 }
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
 
-/* ===== 結果テキスト演出 ===== */
+/* ===== 結果演出 ===== */
 #${PANEL_ID} .result{
   display:inline-block;
   will-change: transform, opacity;
   opacity: 1;
   transform: translateY(0) scale(1);
 }
-
-/* フェードアウト（消えるのではなく薄く） */
 #${PANEL_ID} .result.fadeOut{
   transition: opacity 650ms ease;
   opacity: 0.25;
 }
-
-/* 数字ポン（当たり時） */
 #${PANEL_ID} .result.popNum{
   animation: popNum 420ms cubic-bezier(.2,1.3,.2,1) 1;
 }
@@ -251,29 +242,24 @@
   align-items:center;
   justify-content:center;
 }
-
 #${PANEL_ID} .strip{
   position:absolute;
   inset:0;
   transform:translateY(0);
   will-change:transform,filter,opacity;
 }
-
 #${PANEL_ID}.spinning .strip{
   filter:blur(2px);
   opacity:.65;
 }
-
 #${PANEL_ID}.spinning img.sym{
   animation:jitter .12s infinite;
 }
-
 @keyframes jitter{
   0%{transform:translateY(0)}
   50%{transform:translateY(1px)}
   100%{transform:translateY(0)}
 }
-
 #${PANEL_ID} img.sym{
   width:78%;
   height:78%;
@@ -338,7 +324,6 @@
     $(".spin", p).onclick = () => spin(p, 1);
     $(".spin10", p).onclick = () => spin(p, 10);
 
-    // 初期表示
     p.querySelectorAll(".cell").forEach((c) => {
       setStrip(c.querySelector(".strip"), [pickSymbol()], c);
     });
@@ -399,7 +384,6 @@
         if (e.propertyName !== "transform") return;
         strip.removeEventListener("transitionend", onEnd);
 
-        // 最終だけ残す
         strip.style.transition = "none";
         setStrip(strip, [finalSym], cell);
         strip.style.transform = "translateY(0)";
@@ -441,14 +425,12 @@
     setCoin(have - cost);
     syncHave(panel);
 
-    // 回転開始音
     oneShot(START_SE, 0.9);
     startReelLoop();
 
     spinning = true;
     panel.classList.add("spinning");
 
-    // 回転中に結果を上書きしない（見えなくなる原因になる）
     if (!resultLock) showResult(panel, "回転中…", 1200);
 
     let totalLines = 0;
@@ -458,7 +440,6 @@
       const finals = Array.from({ length: 9 }, () => pickSymbol());
       const cells = Array.from(panel.querySelectorAll(".cell"));
 
-      // 停止音（列ごとに3回）
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
       setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
@@ -487,7 +468,6 @@
       setTimeout(() => panel.classList.remove("flashOn"), 400);
     }
 
-    // ★結果を「一定時間しっかり表示」＋「当たり時ポン」＋「フェードアウト」
     if (totalLines > 0) {
       showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, 3600);
     } else {
@@ -505,7 +485,6 @@
     if (panel) {
       syncHave(panel);
 
-      // coinValue の変化に追従（app.js側更新も反映）
       const cv = $("#coinValue");
       if (cv) {
         const mo = new MutationObserver(() => syncHave(panel));
