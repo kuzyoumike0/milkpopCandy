@@ -627,6 +627,12 @@ html,body{
   z-index: 1;
   pointer-events: none;
 }
+#departBtn.on{
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0,0,0,.18);
+  filter: brightness(1.05);
+}
+
 
 /* ===== ゲームレイヤー ===== */
 #bunnyLayer { position: relative; z-index: 3; }
