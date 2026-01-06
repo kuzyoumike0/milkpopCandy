@@ -1,15 +1,20 @@
 (() => {
   /* =========================
-   * Bunny牧場 app.js（統合完全版 / 称号は syougou.js に移動済み）
+   * Bunny牧場 app.js（統合完全版）
    * - うさぎ種別: bunny1 / bunny3 / bunny4 / bunny5 / reabunny
    * - お迎え: モーダル＋サムネ＋不足は赤＋箱パカ/虹キラ演出
    * - baby: 3分、ハート（チャージ）なし、遅い、クリックでcoin1を1枚、他のうさぎの後ろを追従
    * - 成体: ゲージ（非表示）チャージ→ハート出しっぱなし、クリックで混合コイン雨（種類で増える）
    * - 画面端で折り返し、画面外に出ない
-   * - 図鑑: うさぎ一覧 + 称号ページ（syougou.js から取得）
-   * - 低確率で黄金うんち(assets/ougonunchi.png)出現、クリックで+10000（称号進行も syougou.js）
+   * - 図鑑: うさぎ一覧 + 称号ページ（黄金うんち回数／残り回数／進捗バー／装備切替）
+   * - 低確率で黄金うんち(assets/ougonunchi.png)出現、クリックで+10000
+   * - 黄金うんち称号: 10/20/50 で解放、一覧から装備切替
    * - 旅立ち回数: 種類ごとに記録、10/20/50で段階フレーバー（reabunnyは重い）＋到達通知
-   * - iPad/スマホ: タップ＆スライドでコイン/黄金うんち回収できる（指の下の要素を回収）
+   *
+   * ★今回追加
+   * - お迎えを連続でできる（ショップを閉じない）
+   * - 現在いる匹数に合わせて値段を上げる（動的価格）
+   * - iPad/スマホ: タップ＆スライド（指を滑らせて）でもコイン回収できる
    * ========================= */
 
   /* ===== Assets ===== */
@@ -37,35 +42,35 @@
     bunny1: {
       label: "bunny1",
       img: "./assets/bunny1.png",
-      price: 300,
+      price: 300, // ★高額化
       coinMul: 0.55,
       desc: "基本のうさぎ。コインは控えめ。",
     },
     bunny3: {
       label: "bunny3",
       img: "./assets/bunny3.png",
-      price: 1800,
+      price: 1800, // ★高額化
       coinMul: 1.0,
       desc: "安定してコインを稼ぐ中級うさぎ。",
     },
     bunny4: {
       label: "bunny4",
       img: "./assets/bunny4.png",
-      price: 6000,
+      price: 6000, // ★高額化
       coinMul: 1.8,
       desc: "大量のコインを生み出す上級うさぎ。",
     },
     bunny5: {
       label: "bunny5",
       img: "./assets/bunny5.png",
-      price: 20000,
+      price: 20000, // ★高額化
       coinMul: 2.8,
       desc: "牧場最上級クラス。圧倒的生産力。",
     },
     reabunny: {
       label: "reabunny",
       img: "./assets/reabunny.png",
-      price: 0,
+      price: 0, // ショップに出さない（突然変異のみ）
       coinMul: 4.0,
       desc: "突然変異でのみ現れる幻のうさぎ。",
     },
@@ -75,40 +80,34 @@
   const BABY_DURATION_MS = 3 * 60 * 1000;
   const BABY_SPEED_MUL = 0.65;
 
+  // baby->成体に成長した瞬間の突然変異率（reabunny）
   const REA_EVOLVE_RATE = 0.01;
+
+  // 実績（同時うさぎ数 >= 10 で shop 拡張：bunny4/bunny5解禁）
   const UNLOCK_BUNNY4_NEED = 10;
-  // ★価格インフレ（現在の総うさぎ数で値上げ）
-// 例：1匹増えるごとに +8%（好みに合わせて調整OK）
-const PRICE_INFLATION_PER_BUNNY = 0.08;
 
-// 端数が気になるなら 10/50/100 単位で丸める
-const PRICE_ROUND_UNIT = 10;
-
-function calcDynamicPrice(kind) {
-  const base = BUNNY_DEFS[kind]?.price ?? 0;
-  if (base <= 0) return 0;
-
-  const n = bunnies.length; // ★現在いる総匹数
-  const mul = 1 + n * PRICE_INFLATION_PER_BUNNY;
-  const raw = Math.floor(base * mul);
-
-  // 丸め
-  return Math.max(base, Math.ceil(raw / PRICE_ROUND_UNIT) * PRICE_ROUND_UNIT);
-}
-
-
+  // 黄金うんち（コインを「生成するたび」に抽選）
   const OUGON_UNCHI_RATE_PER_DROP = 0.0015; // 0.15%
   const OUGON_UNCHI_VALUE = 10000;
 
+  // baby 追従（行列）
   const BABY_FOLLOW_GAP = 46;
   const BABY_FOLLOW_FORCE = 6.0;
   const BABY_FOLLOW_MAX_SPEED = 180;
 
+  // コイン雨（ベース枚数）
+  // tier=1..4（ゲージに応じて tier 上限が上がる）
   const BASE_RAIN_COUNT_BY_TIER = [0, 14, 26, 42, 68];
+
+  // ゲージチャージ（秒）
   const GAUGE_PERIOD_RANGE = [7, 14];
 
-  // 旅立ち（tabidati.js で使用）
+  // 旅立ち（ボタンがある場合）
   const DEPART_COST = 10;
+
+  // ★価格インフレ（現在の総うさぎ数で値上げ）
+  const PRICE_INFLATION_PER_BUNNY = 0.08; // 1匹ごとに +8%
+  const PRICE_ROUND_UNIT = 10;            // 10コイン単位に丸め
 
   /* ===== 段階：旅立ちフレーバー（10/20/50） ===== */
   const FAREWELL_FLAVOR = {
@@ -133,17 +132,24 @@ function calcDynamicPrice(kind) {
     return "";
   }
 
+  /* ===== 称号（黄金うんち 10/20/50） ===== */
+  const GOLDEN_UNCHI_TITLES = [
+    { at: 10, title: "黄金を踏みし者" },
+    { at: 20, title: "黄金に選ばれし者" },
+    { at: 50, title: "黄金の王" },
+  ];
+
   /* ===== Storage keys ===== */
   const LS = {
     coins: "wb_coins_v6",
-    bunnies: "wb_bunnies_v6",
+    bunnies: "wb_bunnies_v6", // [{bornAt, kind}]
     ach: "wb_ach_v2",
     dex: "wb_dex_v1",
 
-    // reset時に一緒に消す（称号は syougou.js が保持）
+    // 黄金うんち＆称号
     unchi: "wb_unchi_v1",
-    title: "wb_title_v1",
-    titleList: "wb_title_list_v1",
+    title: "wb_title_v1",          // 装備中
+    titleList: "wb_title_list_v1", // 所持称号配列
   };
 
   /* =========================
@@ -153,7 +159,7 @@ function calcDynamicPrice(kind) {
   const bunnyLayer = document.getElementById("bunnyLayer");
   const coinLayer = document.getElementById("coinLayer");
   const coinValueEl = document.getElementById("coinValue");
-  const titleEl = document.getElementById("title");
+  const titleEl = document.getElementById("title"); // index.htmlにあると表示（無くてもOK）
 
   const shopBtn = document.getElementById("shopBtn");
   const departBtn = document.getElementById("departBtn");
@@ -270,6 +276,34 @@ function calcDynamicPrice(kind) {
     );
   }
 
+  /* ===== 黄金うんち回数＆称号 ===== */
+  function loadGoldenUnchiCount() {
+    const n = parseInt(localStorage.getItem(LS.unchi) || "0", 10);
+    return Number.isFinite(n) ? n : 0;
+  }
+  function saveGoldenUnchiCount() {
+    localStorage.setItem(LS.unchi, String(goldenUnchiCount));
+  }
+
+  function loadOwnedTitles() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(LS.titleList) || "[]");
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+  function saveOwnedTitles() {
+    localStorage.setItem(LS.titleList, JSON.stringify(ownedTitles));
+  }
+
+  function loadEquippedTitle() {
+    return String(localStorage.getItem(LS.title) || "");
+  }
+  function saveEquippedTitle() {
+    localStorage.setItem(LS.title, String(currentTitle || ""));
+  }
+
   /* =========================
    * Utils
    * ========================= */
@@ -287,12 +321,21 @@ function calcDynamicPrice(kind) {
 
   function updateHud() {
     coinValueEl.textContent = String(coins);
-
-    // ★称号表示は syougou.js から取得
-    const ct = window.SYOUGOU?.getCurrentTitle?.() || "";
     if (titleEl) {
-      titleEl.textContent = ct ? `称号：${ct}` : "";
+      titleEl.textContent = currentTitle ? `称号：${currentTitle}` : "";
     }
+  }
+
+  // ★動的価格（現在の総匹数で値上げ）
+  function calcDynamicPrice(kind) {
+    const base = BUNNY_DEFS[kind]?.price ?? 0;
+    if (base <= 0) return 0;
+
+    const n = bunnies.length; // ★いまいる総匹数
+    const mul = 1 + n * PRICE_INFLATION_PER_BUNNY;
+    const raw = Math.floor(base * mul);
+
+    return Math.max(base, Math.ceil(raw / PRICE_ROUND_UNIT) * PRICE_ROUND_UNIT);
   }
 
   /* =========================
@@ -302,65 +345,18 @@ function calcDynamicPrice(kind) {
   let ach = loadAch();
   let dex = loadDex();
 
+  let goldenUnchiCount = loadGoldenUnchiCount();
+  let ownedTitles = loadOwnedTitles();
+  let currentTitle = loadEquippedTitle();
+
   const bunnies = [];
   const dropsOnField = []; // Coin / OugonUnchi をまとめて管理
 
   let lastFrame = performance.now();
 
   /* =========================
-   * iPad/スマホ：タップ&スライド回収
-   * ========================= */
-  let touchDragging = false;
-  let touchPointerId = null;
-
-  function tryCollectAtClientXY(clientX, clientY) {
-    const el = document.elementFromPoint(clientX, clientY);
-    if (!el) return;
-
-    // coin / ougonunchi の要素に __collect を仕込む
-    if (typeof el.__collect === "function") {
-      el.__collect();
-      return;
-    }
-
-    // 親に __collect がある場合（画像の上に何か被った場合の保険）
-    const p = el.parentElement;
-    if (p && typeof p.__collect === "function") {
-      p.__collect();
-      return;
-    }
-  }
-
-  field.addEventListener("pointerdown", (e) => {
-    if (e.pointerType !== "touch") return;
-    touchDragging = true;
-    touchPointerId = e.pointerId;
-    tryCollectAtClientXY(e.clientX, e.clientY);
-  });
-
-  field.addEventListener("pointermove", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (!touchDragging) return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    tryCollectAtClientXY(e.clientX, e.clientY);
-  });
-
-  window.addEventListener("pointerup", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    touchDragging = false;
-    touchPointerId = null;
-  });
-
-  window.addEventListener("pointercancel", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    touchDragging = false;
-    touchPointerId = null;
-  });
-
-  /* =========================
    * UI FX（ふわっと通知）
+   * ※CSS: .farewellMsg / .farewellMilestone がある前提（無くても動作はする）
    * ========================= */
   function showFarewellMessage(kind) {
     const texts = [
@@ -404,6 +400,35 @@ function calcDynamicPrice(kind) {
     }, 3200);
   }
 
+  function showTitleMilestone(title) {
+    const el = document.createElement("div");
+    el.className = "farewellMilestone";
+    el.textContent = `🏅 称号解放：${title}`;
+    document.body.appendChild(el);
+    setTimeout(() => {
+      try { el.remove(); } catch {}
+    }, 3200);
+  }
+
+  /* =========================
+   * 称号：装備＆解放
+   * ========================= */
+  function equipTitle(name) {
+    currentTitle = String(name || "");
+    saveEquippedTitle();
+    updateHud();
+  }
+
+  function unlockTitle(name) {
+    if (!ownedTitles.includes(name)) {
+      ownedTitles.push(name);
+      saveOwnedTitles();
+    }
+    // 新称号は自動装備
+    equipTitle(name);
+    showTitleMilestone(name);
+  }
+
   /* =========================
    * Achievements (unlock shop)
    * ========================= */
@@ -435,9 +460,12 @@ function calcDynamicPrice(kind) {
     dex[kind].farewell = (dex[kind].farewell || 0) + 1;
 
     const c = dex[kind].farewell;
+
+    // ★節目到達通知（10/20/50）
     if (c === 10 || c === 20 || c === 50) {
       showFarewellMilestone(kind, c);
     }
+
     saveDex();
   }
 
@@ -451,11 +479,15 @@ function calcDynamicPrice(kind) {
     return 1;
   }
 
+  // ★指スライド回収用：DOM要素→Dropインスタンス
+  const dropByEl = new WeakMap();
+
   class DropBase {
     constructor(x, y) {
       this.x = x;
       this.y = y;
 
+      // ちょい弾み
       this.vx = (Math.random() * 2 - 1) * 110;
       this.vy = -(420 + Math.random() * 240);
       this.gravity = 2200;
@@ -503,19 +535,26 @@ function calcDynamicPrice(kind) {
       this.el.src = ASSETS.coins[tier - 1];
       this.el.draggable = false;
 
-      // hover/click/tap で回収
+      dropByEl.set(this.el, this);
+
+      // PC: hover/click で回収
       this.el.addEventListener("pointerenter", () => this.collect());
       this.el.addEventListener("click", () => this.collect());
-      this.el.addEventListener("pointerdown", () => this.collect());
 
-      // ★タップ&スライド用：指の下で拾える
-      this.el.__collect = () => this.collect();
+      // タップでも確実に（iOSでclick遅延など対策）
+      this.el.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        this.collect();
+      });
 
       coinLayer.appendChild(this.el);
       this.render();
     }
 
     collect() {
+      // 既に消えてたら無視
+      if (!this.el || !this.el.isConnected) return;
+
       coins += this.value;
       saveCoins();
       updateHud();
@@ -534,29 +573,40 @@ function calcDynamicPrice(kind) {
       this.el.src = ASSETS.ougonUnchi;
       this.el.draggable = false;
 
-      this.el.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.collect();
-      });
+      dropByEl.set(this.el, this);
+
+      // タップ/クリックで回収
       this.el.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         e.stopPropagation();
         this.collect();
       });
-
-      // ★タップ&スライド用
-      this.el.__collect = () => this.collect();
+      this.el.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.collect();
+      });
 
       coinLayer.appendChild(this.el);
       this.render();
     }
 
     collect() {
+      if (!this.el || !this.el.isConnected) return;
+
       coins += this.value;
 
-      // ★称号進行は syougou.js に委譲
-      window.SYOUGOU?.onGoldenUnchiCollected?.();
+      // ★黄金うんち回数
+      goldenUnchiCount += 1;
+      saveGoldenUnchiCount();
+
+      // ★称号（10/20/50到達“瞬間”だけ解放）
+      for (const t of GOLDEN_UNCHI_TITLES) {
+        if (goldenUnchiCount === t.at) {
+          unlockTitle(t.title);
+          break;
+        }
+      }
 
       saveCoins();
       updateHud();
@@ -578,6 +628,7 @@ function calcDynamicPrice(kind) {
     return clamp(Math.ceil(clamp(g01, 0, 1) * 4), 1, 4);
   }
 
+  // 「混合で雨みたいに」：上tierほど出やすい（maxTierに応じた重み）
   function pickTierMixed(maxTier) {
     const wTable = {
       1: [0, 1],
@@ -600,6 +651,7 @@ function calcDynamicPrice(kind) {
     const maxTier = gaugeToTier(gauge01);
     const mul = BUNNY_DEFS[bunny.kind]?.coinMul ?? 1;
 
+    // ハートMAXならさらにちょい増し
     const chargedBonus = bunny.charged ? 1.15 : 1.0;
 
     const baseCount = BASE_RAIN_COUNT_BY_TIER[maxTier];
@@ -618,6 +670,7 @@ function calcDynamicPrice(kind) {
         const x = baseX + (Math.random() * 2 - 1) * spreadX;
         const y = baseY + (Math.random() * 2 - 1) * 10;
 
+        // ★低確率で黄金うんち
         if (maybeSpawnOugonUnchi(x, y)) return;
 
         const tier = pickTierMixed(maxTier);
@@ -645,6 +698,7 @@ function calcDynamicPrice(kind) {
       this.kind = safeKind(kind);
       this.isBaby = (Date.now() - bornAt) < BABY_DURATION_MS;
 
+      // 図鑑登録（seen）
       if (!dex[this.kind]) dex[this.kind] = { seen: true, farewell: 0 };
       else dex[this.kind].seen = true;
       saveDex();
@@ -671,6 +725,7 @@ function calcDynamicPrice(kind) {
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
 
+      // ゲージ（非表示）
       this.gauge = 0;
       this.gaugePeriod = rand(GAUGE_PERIOD_RANGE[0], GAUGE_PERIOD_RANGE[1]);
       this.charged = false;
@@ -697,6 +752,7 @@ function calcDynamicPrice(kind) {
 
       this.isBaby = false;
 
+      // 成長時突然変異
       if (Math.random() < REA_EVOLVE_RATE) {
         this.kind = "reabunny";
         if (!dex.reabunny) dex.reabunny = { seen: true, farewell: 0 };
@@ -715,6 +771,7 @@ function calcDynamicPrice(kind) {
     }
 
     updateGauge(dt) {
+      // babyはチャージ無し＆ハート無し
       if (this.isBaby) {
         this.gauge = 0;
         this.charged = false;
@@ -730,6 +787,7 @@ function calcDynamicPrice(kind) {
         }
       }
 
+      // MAXならハート出しっぱなし
       if (this.charged) this.heart.classList.add("show");
       else this.heart.classList.remove("show");
     }
@@ -744,18 +802,22 @@ function calcDynamicPrice(kind) {
 
       spawnRainFromBunny(this, this.gauge);
 
+      // クリックでゲージ消費
       this.gauge = 0;
       this.charged = false;
       this.gaugePeriod = rand(GAUGE_PERIOD_RANGE[0], GAUGE_PERIOD_RANGE[1]);
       this.heart.classList.remove("show");
     }
 
+    // babyが追従する相手を探す（近い成体優先）
     findLeaderForBaby() {
       let best = null;
       let bestD = Infinity;
 
       for (const b of bunnies) {
         if (b === this) continue;
+
+        // 成体を優先、いなければ先に生まれたbabyもリーダー可（行列感）
         const canLead = (!b.isBaby) || (b.isBaby && b.bornAt < this.bornAt);
         if (!canLead) continue;
 
@@ -799,6 +861,7 @@ function calcDynamicPrice(kind) {
         this.x += this.dir * this.baseSpeed * dt;
       }
 
+      // 画面端で折り返し
       if (this.x <= minX) {
         this.x = minX;
         this.dir = 1;
@@ -852,36 +915,47 @@ function calcDynamicPrice(kind) {
     const renderBunnyDex = () => {
       const kinds = Object.keys(BUNNY_DEFS);
 
-      const cards = kinds
-  .map((kind) => {
-    const def = BUNNY_DEFS[kind];
-    const priceNow = calcDynamicPrice(kind);      // ★動的価格
-    const canBuy = coins >= priceNow;
+      const cards = kinds.map(kind => {
+        const def = BUNNY_DEFS[kind];
+        const entry = dex[kind];
+        const known = !!entry?.seen;
+        const farewellCount = entry?.farewell ?? 0;
 
-    return `
-      <div class="shopCard ${canBuy ? "" : "disabled"}">
-        <img src="${def.img}" class="shopThumb" alt="${def.label}">
-        <div class="shopName">${def.label}</div>
-        <div class="shopDesc">${def.desc}</div>
-        <div class="shopPrice ${canBuy ? "" : "bad"}">${priceNow} 🪙</div>
-        <button data-buy="${kind}" ${canBuy ? "" : "disabled"}>お迎え</button>
-      </div>
-    `;
-  })
-  .join("");
+        const img = known ? def.img : UNKNOWN_SVG;
+        const name = known ? def.label : "？？？";
+        const desc = known ? def.desc : "まだ出会っていません";
 
+        const flavor = known ? getFarewellFlavor(kind, farewellCount) : "";
+
+        return `
+          <div class="dexCard ${known ? "" : "unknown"}">
+            <img src="${img}" alt="${name}">
+            <div class="dexName">${name}</div>
+            <div class="dexDesc">${desc}</div>
+            <div style="font-size:12px;opacity:.8;margin-top:4px;">旅立ち：${farewellCount} 回</div>
+            ${flavor ? `
+              <div style="
+                margin-top:6px;
+                font-size:12px;
+                line-height:1.5;
+                font-style:italic;
+                opacity:.9;
+                color:${kind === "reabunny" ? "#5a2a2a" : "#7a5a6e"};
+              ">
+                ${flavor}
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }).join("");
 
       return `<div class="dexGrid">${cards}</div>`;
     };
 
     const renderTitleDex = () => {
-      const S = window.SYOUGOU;
-      const count = Number(S?.getCount?.() || 0);
-      const ownedTitles = S?.getOwnedTitles?.() || [];
-      const currentTitle = S?.getCurrentTitle?.() || "";
-      const TITLES = S?.getTitlesMaster?.() || [];
+      const count = Number(goldenUnchiCount || 0);
 
-      const next = (TITLES || [])
+      const next = (GOLDEN_UNCHI_TITLES || [])
         .slice()
         .sort((a, b) => a.at - b.at)
         .find(t => count < t.at);
@@ -916,7 +990,7 @@ function calcDynamicPrice(kind) {
         </div>
       `;
 
-      const list = (TITLES || []).map(t => {
+      const list = (GOLDEN_UNCHI_TITLES || []).map(t => {
         const owned = (ownedTitles || []).includes(t.title);
         const equipped = currentTitle === t.title;
 
@@ -971,14 +1045,13 @@ function calcDynamicPrice(kind) {
       modal.querySelector("#tabBunny").onclick = () => { tab = "bunny"; paint(); };
       modal.querySelector("#tabTitle").onclick = () => { tab = "title"; paint(); };
 
-      // 称号：装備（syougou.js に委譲）
+      // 称号：装備
       modal.querySelectorAll("[data-equip]").forEach(btn => {
         btn.onclick = () => {
           const name = btn.getAttribute("data-equip");
-          window.SYOUGOU?.equipTitle?.(name);
+          equipTitle(name);
           tab = "title";
           paint();
-          updateHud();
         };
       });
     };
@@ -1023,16 +1096,20 @@ function calcDynamicPrice(kind) {
     }
 
     const kinds = getShopKinds();
+
+    // ★現在の匹数で価格が上がる
     const cards = kinds
       .map((kind) => {
         const def = BUNNY_DEFS[kind];
-        const canBuy = coins >= def.price;
+        const priceNow = calcDynamicPrice(kind);
+        const canBuy = coins >= priceNow;
+
         return `
           <div class="shopCard ${canBuy ? "" : "disabled"}">
             <img src="${def.img}" class="shopThumb" alt="${def.label}">
             <div class="shopName">${def.label}</div>
             <div class="shopDesc">${def.desc}</div>
-            <div class="shopPrice ${canBuy ? "" : "bad"}">${def.price} 🪙</div>
+            <div class="shopPrice ${canBuy ? "" : "bad"}">${priceNow} 🪙</div>
             <button data-buy="${kind}" ${canBuy ? "" : "disabled"}>お迎え</button>
           </div>
         `;
@@ -1052,13 +1129,14 @@ function calcDynamicPrice(kind) {
 
       <div style="font-size:12px;opacity:.85;margin-bottom:10px;line-height:1.5;">
         ${progText}<br>
-        お迎えした子は <b>baby</b> で来て、<b>3分</b>で成長します。
+        お迎えした子は <b>baby</b> で来て、<b>3分</b>で成長します。<br>
+        <span style="opacity:.85;">※現在の匹数に応じて価格が上がります</span>
       </div>
 
       <div class="shopGrid">${cards}</div>
 
       <div style="margin-top:10px;font-size:12px;opacity:.9;">
-        所持：<b>${coins}🪙</b>
+        所持：<b>${coins}🪙</b> / 現在：<b>${bunnies.length}匹</b>
       </div>
     `;
 
@@ -1067,11 +1145,14 @@ function calcDynamicPrice(kind) {
       if (e.target === shopBackdrop) closeShopModal();
     };
 
+    // ★連続お迎え：買っても閉じない
     shopModal.querySelectorAll("[data-buy]").forEach((btn) => {
       btn.onclick = () => {
         const kind = btn.getAttribute("data-buy");
-        closeShopModal();
-        buyBunny(kind);
+        const ok = buyBunny(kind);
+        // 買えた/買えないに関係なくUI更新（価格/所持金/disabled反映）
+        refreshShopUI();
+        return ok;
       };
     });
   }
@@ -1152,16 +1233,18 @@ function calcDynamicPrice(kind) {
     return 520;
   }
 
+  // ★動的価格で支払い（ショップ表示と完全一致）
   function buyBunny(kind) {
     kind = safeKind(kind);
     const def = BUNNY_DEFS[kind];
-    if (!def || def.price <= 0) return;
-    if (coins < def.price) return;
+    if (!def || def.price <= 0) return false;
 
-    coins -= def.price;
+    const priceNow = calcDynamicPrice(kind);
+    if (coins < priceNow) return false;
+
+    coins -= priceNow;
     saveCoins();
     updateHud();
-    refreshShopUI();
 
     const waitMs = showAdoptEffect(kind);
 
@@ -1170,12 +1253,18 @@ function calcDynamicPrice(kind) {
       bunnies.push(b);
       saveBunnyMeta();
       checkUnlocks();
+
+      // 購入で匹数が増えたので、次の価格に即反映
+      refreshShopUI();
     }, waitMs);
+
+    return true;
   }
 
   /* =========================
-   * Reset
+   * Depart / Reset
    * ========================= */
+
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       unlockAudioOnce();
@@ -1186,7 +1275,6 @@ function calcDynamicPrice(kind) {
       localStorage.removeItem(LS.ach);
       localStorage.removeItem(LS.dex);
 
-      // syougou.js のキーも消す
       localStorage.removeItem(LS.unchi);
       localStorage.removeItem(LS.title);
       localStorage.removeItem(LS.titleList);
@@ -1194,6 +1282,60 @@ function calcDynamicPrice(kind) {
       location.reload();
     });
   }
+
+  /* =========================
+   * iPad/スマホ：タップ＆スライド回収
+   * - 指でフィールド上をなぞると、指の下に来たコイン/黄金うんちを回収
+   * ========================= */
+  let touchCollectActive = false;
+  let touchPointerId = null;
+
+  function collectAtClientPoint(clientX, clientY) {
+    // 画面上の要素を拾って coin/ougonunchi を探す
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return;
+
+    const target =
+      el.classList?.contains("coin") || el.classList?.contains("ougonunchi")
+        ? el
+        : el.closest?.(".coin, .ougonunchi");
+
+    if (!target) return;
+
+    const drop = dropByEl.get(target);
+    if (drop && typeof drop.collect === "function") {
+      drop.collect();
+    }
+  }
+
+  // フィールド上だけで有効にする（HUD上での誤爆を避ける）
+  field.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    touchCollectActive = true;
+    touchPointerId = e.pointerId;
+    collectAtClientPoint(e.clientX, e.clientY);
+  }, { passive: true });
+
+  field.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (!touchCollectActive) return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    collectAtClientPoint(e.clientX, e.clientY);
+  }, { passive: true });
+
+  window.addEventListener("pointerup", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    touchCollectActive = false;
+    touchPointerId = null;
+  }, { passive: true });
+
+  window.addEventListener("pointercancel", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    touchCollectActive = false;
+    touchPointerId = null;
+  }, { passive: true });
 
   /* =========================
    * Init / Loop
@@ -1218,6 +1360,7 @@ function calcDynamicPrice(kind) {
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
+    // 地面補正
     const gy = groundY();
     for (const d of dropsOnField) d.floor = gy;
 
@@ -1266,10 +1409,21 @@ function calcDynamicPrice(kind) {
     showFarewellMessage,
     saveBunnyMeta,
     checkUnlocks,
-  };
 
-  // ★syougou.js に WB を渡して同期（HUD更新など）
-  window.SYOUGOU?.attach?.(window.WB);
+    // title state (syougou.js で触る用に公開)
+    get goldenUnchiCount() { return goldenUnchiCount; },
+    set goldenUnchiCount(v) { goldenUnchiCount = v; },
+    get ownedTitles() { return ownedTitles; },
+    set ownedTitles(v) { ownedTitles = v; },
+    get currentTitle() { return currentTitle; },
+    set currentTitle(v) { currentTitle = v; },
+    saveGoldenUnchiCount,
+    saveOwnedTitles,
+    saveEquippedTitle,
+    unlockTitle,
+    equipTitle,
+    GOLDEN_UNCHI_TITLES,
+  };
 
   init();
 })();
