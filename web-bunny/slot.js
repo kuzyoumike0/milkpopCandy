@@ -158,7 +158,7 @@
   }
 
   /* =========================
-   * CSS（最低限：中央固定＆サイズ調整）
+   * CSS（最小 + spinning時の効果）
    * ========================= */
   function injectStyles() {
     if (document.getElementById("slotStyleFixMin")) return;
@@ -212,9 +212,21 @@
   grid-template-rows:repeat(3,1fr);
   gap:4%;
 }
-#${PANEL_ID} .cell{ position:relative; overflow:hidden; border-radius:12px; display:flex; align-items:center; justify-content:center; }
-#${PANEL_ID} .strip{ position:absolute; inset:0; transform:translateY(0); will-change:transform; }
+#${PANEL_ID} .cell{
+  position:relative; overflow:hidden; border-radius:12px;
+  display:flex; align-items:center; justify-content:center;
+}
+#${PANEL_ID} .strip{
+  position:absolute; inset:0;
+  transform:translateY(0);
+  will-change:transform,filter,opacity;
+}
+#${PANEL_ID}.spinning .strip{
+  filter: blur(1.6px);
+  opacity: .70;
+}
 #${PANEL_ID} img.sym{ width:78%; height:78%; object-fit:contain; display:block; }
+
 #${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
@@ -227,6 +239,7 @@
   gap:10px;
   flex-wrap:wrap;
   z-index:2147483647;
+  pointer-events:auto;
 }
 #${PANEL_ID} .controlBar.results{ top: calc(68% + 18% * 0.35); }
 #${PANEL_ID} .controlBar.controls{ top: calc(68% + 18% * 0.78); }
@@ -247,6 +260,10 @@
   box-shadow:0 12px 32px rgba(0,0,0,.14);
 }
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
+#${PANEL_ID} .btn:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
 `;
     document.head.appendChild(s);
   }
@@ -281,12 +298,10 @@
       p.id = PANEL_ID;
       document.body.appendChild(p);
     } else {
-      // index.html内に置かれてても確実にbody直下へ
       if (p.parentElement !== document.body) document.body.appendChild(p);
     }
     panelRef = p;
 
-    // 既に構築済みならOK
     if (p.querySelector(".machine")) return p;
 
     p.innerHTML = `
@@ -319,10 +334,19 @@
       setStrip(c.querySelector(".strip"), [s], c);
     });
 
+    // ✅ machine内クリックで閉じない（伝播止め）
+    const machine = $(".machine", p);
+    if (machine) {
+      machine.addEventListener("pointerdown", (e) => e.stopPropagation());
+      machine.addEventListener("click", (e) => e.stopPropagation());
+    }
+
+    // ✅ backdrop のみで閉じる
+    $(".closeBtn", p).onclick = (e) => { e.stopPropagation(); closePanel(); };
+    $(".backdrop", p).onclick = (e) => { e.stopPropagation(); closePanel(); };
+
     $(".spin", p).onclick = () => spin(p, 1);
     $(".spin10", p).onclick = () => spin(p, 10);
-    $(".closeBtn", p).onclick = closePanel;
-    $(".backdrop", p).onclick = closePanel;
 
     const img = $(".machineImg", p);
     if (img) {
@@ -387,6 +411,7 @@
 
   function force(el) { void el.offsetHeight; }
 
+  // ✅ transitionend が来ない事故に備えてタイムアウト保険を入れる
   function spinCell(cell, finalSym, delay) {
     const strip = cell.querySelector(".strip");
     const h = cellH(cell);
@@ -400,22 +425,36 @@
     strip.style.transform = "translateY(0)";
     force(strip);
 
-    strip.style.transition = `transform ${SPIN.baseDuration + delay}ms cubic-bezier(.12,.86,.12,1)`;
+    const dur = SPIN.baseDuration + delay;
+    strip.style.transition = `transform ${dur}ms cubic-bezier(.12,.86,.12,1)`;
     strip.style.transform = `translateY(${-h * (seq.length - 1)}px)`;
 
     return new Promise((resolve) => {
-      const onEnd = (e) => {
-        if (e.propertyName !== "transform") return;
-        strip.removeEventListener("transitionend", onEnd);
+      let done = false;
 
+      const finish = () => {
+        if (done) return;
+        done = true;
         strip.style.transition = "none";
         setStrip(strip, [finalSym], cell);
         strip.style.transform = "translateY(0)";
         cell.dataset.sym = finalSym.name;
-
         resolve(finalSym);
       };
+
+      const onEnd = (e) => {
+        if (e.propertyName !== "transform") return;
+        strip.removeEventListener("transitionend", onEnd);
+        finish();
+      };
+
       strip.addEventListener("transitionend", onEnd);
+
+      // 保険：transitionendが来ない端末でも必ず完了
+      setTimeout(() => {
+        try { strip.removeEventListener("transitionend", onEnd); } catch {}
+        finish();
+      }, dur + 120);
     });
   }
 
@@ -434,54 +473,76 @@
       return;
     }
 
-    setCoin(have - cost);
-    syncHave(panel);
-
-    oneShot(START_SE, 0.9);
-    startReelLoop();
+    // ✅ 連打抑止：ボタン無効化
+    const btn1 = $(".spin", panel);
+    const btn10 = $(".spin10", panel);
 
     spinning = true;
     panel.classList.add("spinning");
-    if (!resultLock) showResult(panel, "回転中…", 1200);
+    if (btn1) btn1.disabled = true;
+    if (btn10) btn10.disabled = true;
 
-    let totalLines = 0;
-    let totalPay = 0;
+    try {
+      setCoin(have - cost);
+      syncHave(panel);
 
-    for (let t = 0; t < count; t++) {
-      const finals = Array.from({ length: 9 }, () => pickSymbol());
-      const cells = Array.from(panel.querySelectorAll(".cell"));
+      oneShot(START_SE, 0.9);
+      startReelLoop();
 
-      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
-      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
-      setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
+      if (!resultLock) showResult(panel, "回転中…", 1200);
 
-      const res = await Promise.all(
-        finals.map((s, i) => spinCell(cells[i], s, (i % 3) * SPIN.colDelay))
-      );
+      let totalLines = 0;
+      let totalPay = 0;
 
-      const names = res.map((r) => r.name);
-      const w = wins(names);
+      for (let t = 0; t < count; t++) {
+        const finals = Array.from({ length: 9 }, () => pickSymbol());
+        const cells = Array.from(panel.querySelectorAll(".cell"));
 
-      let payThis = 0;
-      for (const line of w) {
-        const sym = res[line[0]];
-        if (sym.pay) payThis += sym.pay;
+        setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 0 * SPIN.colDelay);
+        setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 1 * SPIN.colDelay);
+        setTimeout(() => oneShot(STOP_SE, 0.9), SPIN.baseDuration + 2 * SPIN.colDelay);
+
+        const res = await Promise.all(
+          finals.map((s, i) => spinCell(cells[i], s, (i % 3) * SPIN.colDelay))
+        );
+
+        const names = res.map((r) => r.name);
+        const w = wins(names);
+
+        let payThis = 0;
+        for (const line of w) {
+          const sym = res[line[0]];
+          if (sym.pay) payThis += sym.pay;
+        }
+
+        totalLines += w.length;
+        totalPay += payThis;
       }
 
-      totalLines += w.length;
-      totalPay += payThis;
+      stopReelLoop();
+
+      if (totalPay > 0) {
+        setCoin(getCoin() + totalPay);
+        coinBurst(Math.min(20, 8 + totalLines * 2), 55, 0.85);
+      }
+
+      if (totalLines > 0) showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, 3600);
+      else showResult(panel, "はずれ！", 2400);
+
+      syncHave(panel);
+
+    } catch (err) {
+      console.error("[slot] spin error:", err);
+      stopReelLoop();
+      showResult(panel, "エラーで停止しました", 2400);
+
+    } finally {
+      panel.classList.remove("spinning");
+      spinning = false;
+
+      if (btn1) btn1.disabled = false;
+      if (btn10) btn10.disabled = false;
     }
-
-    stopReelLoop();
-
-    if (totalPay > 0) setCoin(getCoin() + totalPay);
-
-    if (totalLines > 0) showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, 3600);
-    else showResult(panel, "はずれ！", 2400);
-
-    syncHave(panel);
-    panel.classList.remove("spinning");
-    spinning = false;
   }
 
   /* =========================
