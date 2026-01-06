@@ -407,12 +407,13 @@
 }
 
 /* ===== さらに豪華：筐体を軽く揺らす ===== */
-#${PANEL_ID}.winFx{
+#${PANEL_ID} .machine.winFx{
   animation: machineShake 520ms ease-in-out 1;
 }
-#${PANEL_ID}.winBig{
+#${PANEL_ID} .machine.winBig{
   animation: machineShakeBig 720ms ease-in-out 1;
 }
+
 @keyframes machineShake{
   0%{ transform: translate(-50%,-50%); }
   20%{ transform: translate(calc(-50% - 2px), calc(-50% + 1px)); }
@@ -430,6 +431,7 @@
   75%{ transform: translate(calc(-50% - 2px), calc(-50% + 2px)); }
   100%{ transform: translate(-50%,-50%); }
 }
+
 
 /* フラッシュ */
 #${PANEL_ID} .flash{
