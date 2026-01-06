@@ -1,29 +1,45 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// いま実行しているカレントディレクトリ（Railwayでズレにくい）
+// Railway/コンテナでは process.cwd() が一番安定
 const ROOT = process.cwd();
+const INDEX_PATH = path.join(ROOT, "index.html");
 
-// ルート配信（index.html, app.js, slot.js, style.css など）
+// まず静的配信（index.html, app.js, slot.js, style.css, manifest 等）
 app.use(express.static(ROOT));
 
-// web-bunny 配信（★これが /web-bunny/assets/.. を生やす）
+// ★ web-bunny を /web-bunny として静的配信（assetsが出るようになる）
 app.use("/web-bunny", express.static(path.join(ROOT, "web-bunny")));
 
-// ついでに assets を直でも配信したい場合（任意：保険）
-// app.use("/assets", express.static(path.join(ROOT, "web-bunny", "assets")));
-
+// ヘルスチェック（デバッグ用）
 app.get("/__health", (_req, res) => {
   res.type("text").send(
     [
+      `PORT=${PORT}`,
       `ROOT=${ROOT}`,
-      `WEB_BUNNY=${path.join(ROOT, "web-bunny")}`,
-      `ASSETS=${path.join(ROOT, "web-bunny", "assets")}`,
+      `INDEX_EXISTS=${fs.existsSync(INDEX_PATH)}`,
+      `WEB_BUNNY_EXISTS=${fs.existsSync(path.join(ROOT, "web-bunny"))}`,
+      `ASSETS_EXISTS=${fs.existsSync(path.join(ROOT, "web-bunny", "assets"))}`,
+      `COIN2_EXISTS=${fs.existsSync(path.join(ROOT, "web-bunny", "assets", "coin2.png"))}`,
     ].join("\n")
   );
+});
+
+// ルート（/）は必ず index.html を返す（これで Cannot GET / が消える）
+app.get("/", (_req, res) => {
+  if (fs.existsSync(INDEX_PATH)) {
+    res.sendFile(INDEX_PATH);
+  } else {
+    // index.html が無い場合でも原因が分かるようにする
+    res
+      .status(500)
+      .type("text")
+      .send(`index.html not found at: ${INDEX_PATH}\nROOT=${ROOT}`);
+  }
 });
 
 app.listen(PORT, () => {
