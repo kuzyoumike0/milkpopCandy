@@ -1,10 +1,58 @@
 (() => {
   if (!window.WB) return;
-
   const WB = window.WB;
 
   let running = false;
   let timer = null;
+
+  function showFarewellMessage(kind) {
+    const texts = [
+      "またどこかで会えるよ。",
+      "ありがとう。元気でね。",
+      "やさしい時間をありがとう。",
+      "旅立ちは、はじまり。",
+      "ずっと忘れないよ。",
+    ];
+    const def = WB.BUNNY_DEFS[kind];
+    const name = def?.label ?? "うさぎ";
+    const msg = `${name} は旅立っていった…`;
+
+    const el = document.createElement("div");
+    el.className = "farewellMsg";
+    el.textContent = msg + " " + texts[Math.floor(Math.random() * texts.length)];
+
+    document.body.appendChild(el);
+    setTimeout(() => { try { el.remove(); } catch {} }, 2600);
+  }
+
+  function showFarewellMilestone(kind, count) {
+    const isRea = kind === "reabunny";
+    let text = "";
+    if (count === 10) text = "たくさんの別れが、記憶になった。";
+    if (count === 20) text = "見送ることにも、意味が宿りはじめた。";
+    if (count === 50) text = "それでも忘れなかった。その名前を。";
+    if (!text) return;
+
+    const el = document.createElement("div");
+    el.className = "farewellMilestone" + (isRea ? " rea" : "");
+    el.textContent = isRea ? `reabunny ─ ${text}` : `${kind} ─ ${text}`;
+
+    document.body.appendChild(el);
+    setTimeout(() => { try { el.remove(); } catch {} }, 3200);
+  }
+
+  function recordFarewell(kind) {
+    const dex = WB.dex || {};
+    if (!dex[kind]) dex[kind] = { seen: true, farewell: 0 };
+    dex[kind].seen = true;
+    dex[kind].farewell = (dex[kind].farewell || 0) + 1;
+
+    const c = dex[kind].farewell;
+    if (c === 10 || c === 20 || c === 50) showFarewellMilestone(kind, c);
+
+    WB.dex = dex;
+    WB.saveDex();
+  }
 
   function stop() {
     running = false;
@@ -12,34 +60,24 @@
       clearInterval(timer);
       timer = null;
     }
-    // ボタン見た目があるなら（CSSで .on を使う想定）
     try { WB.departBtn?.classList.remove("on"); } catch {}
   }
 
   function departOne() {
-    // 最後の1匹は残す（空になると寂しい＆挙動事故防止）
     if (WB.bunnies.length <= 1) return false;
-
     if (WB.coins < WB.DEPART_COST) return false;
 
-    // 1匹選ぶ（ここは「最後尾」＝最後の要素）
     const b = WB.bunnies[WB.bunnies.length - 1];
 
-    // 支払い
     WB.coins -= WB.DEPART_COST;
     WB.saveCoins();
     WB.updateHud();
 
-    // 効果音
     WB.playSE(WB.seTabidati);
 
-    // 図鑑：旅立ち回数
-    WB.recordFarewell(b.kind);
+    recordFarewell(b.kind);
+    showFarewellMessage(b.kind);
 
-    // メッセージ
-    WB.showFarewellMessage(b.kind);
-
-    // 消す
     WB.removeBunnyInstance(b);
 
     return true;
@@ -48,10 +86,8 @@
   function start() {
     if (running) return;
     running = true;
-
     try { WB.departBtn?.classList.add("on"); } catch {}
 
-    // 連続旅立ち（再クリックで停止）
     timer = setInterval(() => {
       const ok = departOne();
       if (!ok) stop();
@@ -73,6 +109,8 @@
     stop,
     toggle,
     departOne,
+    showFarewellMessage,
+    recordFarewell,
     get running() { return running; },
   };
 })();
