@@ -4,11 +4,17 @@
   <meta charset="utf-8" />
   <title>Milkpop牧場</title>
 
+  <!-- viewport -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+  <!-- PWA -->
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#ffd6e7" />
+
+  <!-- style -->
   <link rel="stylesheet" href="./style.css" />
 
+  <!-- セキュリティ系（RailwayでのCSP事故防止：最低限） -->
   <meta http-equiv="Content-Security-Policy"
         content="
           default-src 'self';
@@ -20,79 +26,66 @@
 </head>
 
 <body>
-  <!-- ===== HUD ===== -->
+  <!-- ===== HUD（app.js が使用） ===== -->
   <header id="hud">
-    <div id="coin">🪙 <span id="coinValue">0</span></div>
-
-    <div id="hudButtons">
-      <button id="petBtn">なでる</button>
-
-      <!-- ショップ → お迎え -->
-      <button id="adoptBtn">お迎え</button>
-
-      <!-- スロットはクリックで表示 -->
-      <button id="slotBtn">スロット</button>
-
-      <!-- 図鑑 / 称号 もクリックで表示 -->
-      <button id="bookBtn">図鑑</button>
-      <button id="titleBtn">称号</button>
-
-      <button id="departBtn">旅立ち</button>
+    <div id="coin">
+      🪙 <span id="coinValue">0</span>
     </div>
+
+    <!-- ※ app.js が探すIDに合わせる（表示名は自由） -->
+    <div id="hudButtons">
+      <button id="petBtn" type="button">なでる</button>
+
+      <!-- ★ショップ→お迎え（IDは shopBtn のまま） -->
+      <button id="shopBtn" type="button">お迎え</button>
+
+      <!-- スロット：クリックして表示（slot.js 側で制御） -->
+      <button id="slotBtn" type="button">スロット</button>
+
+      <!-- 図鑑＋称号：app.js の rankBtn が openDex() を開く -->
+      <button id="rankBtn" type="button">図鑑/称号</button>
+
+      <!-- 旅立ち -->
+      <button id="departBtn" type="button">旅立ち</button>
+
+      <!-- リセット -->
+      <button id="resetBtn" type="button">リセット</button>
+    </div>
+
+    <!-- 称号表示（app.js は #title があればそこに表示する） -->
+    <div id="title"></div>
   </header>
 
-  <!-- ===== FIELD ===== -->
+  <!-- ===== メインフィールド（うさぎ表示） ===== -->
   <main id="field">
     <div id="bunnyLayer"></div>
     <div id="coinLayer"></div>
-    <div id="toastLayer"></div>
   </main>
 
-  <!-- ===== お迎え（全面） ===== -->
-  <section id="adoptOverlay" class="overlay" aria-hidden="true">
-    <div class="overlayCard">
-      <h1>🐰 お迎え</h1>
-      <p>新しいうさぎをお迎えしますか？</p>
-      <div class="overlayActions">
-        <button id="adoptConfirmBtn" class="primary">お迎えする</button>
-        <button id="adoptCancelBtn">やめる</button>
-      </div>
-    </div>
-  </section>
+  <!-- ===== スロットは slot.js が body 直下に自動生成 ===== -->
 
-  <!-- ===== 図鑑（全面） ===== -->
-  <section id="bookOverlay" class="overlay" aria-hidden="true">
-    <div class="overlayCard wide">
-      <div class="overlayHeader">
-        <h1>📖 うさぎ図鑑</h1>
-        <button class="overlayClose" data-close="bookOverlay">閉じる</button>
-      </div>
-      <div id="bookContent" class="overlayBody"></div>
-    </div>
-  </section>
-
-  <!-- ===== 称号（全面） ===== -->
-  <section id="titleOverlay" class="overlay" aria-hidden="true">
-    <div class="overlayCard wide">
-      <div class="overlayHeader">
-        <h1>🏆 称号</h1>
-        <button class="overlayClose" data-close="titleOverlay">閉じる</button>
-      </div>
-      <div id="titleContent" class="overlayBody"></div>
-    </div>
-  </section>
-
-  <!-- ===== BGM（朝昼夜＋旅立ち専用） ===== -->
+  <!-- ===== BGM（朝昼夜＋旅立ち対応） ===== -->
   <script type="module">
-    import { bgmMountSettingsUI, bgmPlaySpecial, bgmClearSpecial } from "./BGM.js";
+    import {
+      bgmMountSettingsUI,
+      bgmPlaySpecial,
+      bgmClearSpecial
+    } from "./BGM.js";
+
+    // 設定UI（右上）
     bgmMountSettingsUI({ position: "top-right", title: "BGM" });
-    window.BGM = { playSpecial: bgmPlaySpecial, clearSpecial: bgmClearSpecial };
+
+    // app.js から使えるように公開（旅立ちBGMなど）
+    window.BGM = {
+      playSpecial: bgmPlaySpecial,
+      clearSpecial: bgmClearSpecial
+    };
   </script>
 
   <!-- ===== 既存ロジック ===== -->
   <script src="./app.js"></script>
 
-  <!-- ===== スロット拡張（クリックで表示にする） ===== -->
+  <!-- ===== スロット拡張（クリックで表示にする想定） ===== -->
   <script src="./slot.js"></script>
 
   <!-- ===== Service Worker ===== -->
