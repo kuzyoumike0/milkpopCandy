@@ -130,13 +130,20 @@
       }
 
       /* コントロール（筐体の下に固定） */
-      #${PANEL_ID} .controlBar{
-        margin-top: 10px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        gap: 10px;
-      }
+     #slotStarMachinePanel3x3 .controlBar{
+  position: absolute;
+  top: -72px;              /* ★筐体の上に出す */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2147483647;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
       #${PANEL_ID} .chip{
         padding: 10px 12px;
         border-radius: 12px;
