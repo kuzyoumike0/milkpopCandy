@@ -47,23 +47,23 @@
    * Style
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("hanabiGifStyleV2")) return;
+    if (document.getElementById("hanabiGifStyleV3")) return;
     const s = document.createElement("style");
-    s.id = "hanabiGifStyleV2";
+    s.id = "hanabiGifStyleV3";
     s.textContent = `
 .hanabi-gif{
   position:absolute;
   pointer-events:none; /* ★邪魔しない */
   z-index:1;           /* ★うさぎ/コインより下 */
   opacity:1;
-  animation: hanabiFade 2.6s ease-out forwards;
+  animation: hanabiFade 2.8s ease-out forwards;
   will-change: transform, opacity;
 }
 @keyframes hanabiFade{
-  0%{ opacity:0; transform: scale(.6); }
-  8%{ opacity:1; }
-  80%{ opacity:1; }
-  100%{ opacity:0; transform: scale(1.15); }
+  0%{ opacity:0; transform: scale(.55); }
+  10%{ opacity:1; }
+  82%{ opacity:1; }
+  100%{ opacity:0; transform: scale(1.25); }
 }
 `;
     document.head.appendChild(s);
@@ -99,7 +99,7 @@
 
     const p = new Promise((resolve) => {
       img.onload = () => resolve(img);
-      img.onerror = () => resolve(img); // 失敗しても進める
+      img.onerror = () => resolve(img);
     });
 
     img.src = src;
@@ -107,7 +107,6 @@
 
     await p;
 
-    // decodeできるならしておく（表示の「一瞬遅れ」を減らす）
     try {
       if (img.decode) await img.decode();
     } catch {}
@@ -124,7 +123,6 @@
    * ========================= */
   function getRectSafe(el) {
     const r = el.getBoundingClientRect();
-    // もし0に近いなら、viewportで代用（稀な初期化ズレ対策）
     if (r.width < 50 || r.height < 50) {
       return { width: window.innerWidth, height: window.innerHeight, left: 0, top: 0 };
     }
@@ -137,23 +135,22 @@
 
   function spawnFirework(field) {
     const src = pickSrc();
-
-    // ★「すぐ動かない」最大原因：初回未キャッシュ
-    // ここで確実に preload 済みを優先
     const cached = preloadImgs.get(src);
 
     const img = document.createElement("img");
     img.className = "hanabi-gif";
     img.alt = "firework";
-
-    // キャッシュがあるなら即セット（無くても普通にセット）
     img.src = cached ? cached.src : src;
 
     const rect = getRectSafe(field);
 
     const x = rect.width * (0.15 + Math.random() * 0.7);
     const y = rect.height * (0.08 + Math.random() * 0.35);
-    const size = 180 + Math.random() * 180;
+
+    // ★サイズを大きくする（ここが本体）
+    // 以前: 180〜360
+    // 今回: 320〜520 くらい（迫力）
+    const size = 320 + Math.random() * 200;
 
     img.style.left = `${x - size / 2}px`;
     img.style.top  = `${y - size / 2}px`;
@@ -162,7 +159,6 @@
 
     field.appendChild(img);
 
-    // 「描画されない/遅れる」対策：次フレームでopacityを確定（保険）
     requestAnimationFrame(() => {
       img.style.opacity = "1";
     });
@@ -171,9 +167,8 @@
 
     setTimeout(() => {
       try { img.remove(); } catch {}
-    }, 2800);
+    }, 3000);
 
-    // 次に備えて別のgifも温める（キャッシュ偏り対策）
     preloadOne(pickSrc()).catch(() => {});
   }
 
@@ -220,8 +215,6 @@
   window.addEventListener("load", () => {
     injectStyles();
     ensureButton();
-
-    // ★ページ読み込み時にプリロード開始（初回クリックでも即）
     preloadAll().catch(() => {});
   });
 })();
