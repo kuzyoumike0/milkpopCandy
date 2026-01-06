@@ -17,7 +17,8 @@
     "./assets/hanabi/fireworks_bl.gif",
   ];
 
-  const HANABI_SE_SRC = "./assets/hanabi/hanabi.se";
+  const HANABI_SE_SRC = "./assets/hanabi/hanabi.mp3";
+
 
   // ===== サイズ基本（通常）=====
   // 以前の「大きめ」：320〜520
