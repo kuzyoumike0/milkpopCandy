@@ -2,19 +2,13 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>Bunny牧場</title>
+  <title>Milkpop牧場</title>
 
-  <!-- viewport -->
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-
-  <!-- PWA -->
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#ffd6e7" />
-
-  <!-- style -->
   <link rel="stylesheet" href="./style.css" />
 
-  <!-- CSP（Railway事故防止） -->
   <meta http-equiv="Content-Security-Policy"
         content="
           default-src 'self';
@@ -26,86 +20,86 @@
 </head>
 
 <body>
-
-  <!-- ================= HUD ================= -->
+  <!-- ===== HUD ===== -->
   <header id="hud">
-    <div id="coin">
-      🪙 <span id="coinValue">2187540</span>
-    </div>
+    <div id="coin">🪙 <span id="coinValue">0</span></div>
 
     <div id="hudButtons">
       <button id="petBtn">なでる</button>
 
-      <!-- ★ ショップ → お迎え -->
+      <!-- ショップ → お迎え -->
       <button id="adoptBtn">お迎え</button>
 
+      <!-- スロットはクリックで表示 -->
       <button id="slotBtn">スロット</button>
+
+      <!-- 図鑑 / 称号 もクリックで表示 -->
       <button id="bookBtn">図鑑</button>
       <button id="titleBtn">称号</button>
+
       <button id="departBtn">旅立ち</button>
     </div>
   </header>
 
-  <!-- ================= FIELD ================= -->
+  <!-- ===== FIELD ===== -->
   <main id="field">
     <div id="bunnyLayer"></div>
     <div id="coinLayer"></div>
     <div id="toastLayer"></div>
   </main>
 
-  <!-- =================================================
-       お迎え（全面表示オーバーレイ）
-       ・display:none → 表示時は flex
-       ・app.js 側で制御しやすいID設計
-  ================================================= -->
-  <section id="adoptOverlay" aria-hidden="true">
-    <div class="adoptContent">
+  <!-- ===== お迎え（全面） ===== -->
+  <section id="adoptOverlay" class="overlay" aria-hidden="true">
+    <div class="overlayCard">
       <h1>🐰 お迎え</h1>
-
-      <p class="adoptText">
-        新しいうさぎをお迎えしますか？
-      </p>
-
-      <div class="adoptActions">
-        <button id="adoptConfirmBtn" class="primary">
-          お迎えする
-        </button>
-        <button id="adoptCancelBtn">
-          やめる
-        </button>
+      <p>新しいうさぎをお迎えしますか？</p>
+      <div class="overlayActions">
+        <button id="adoptConfirmBtn" class="primary">お迎えする</button>
+        <button id="adoptCancelBtn">やめる</button>
       </div>
     </div>
   </section>
 
-  <!-- ================= BGM（朝昼夜＋旅立ち対応） ================= -->
+  <!-- ===== 図鑑（全面） ===== -->
+  <section id="bookOverlay" class="overlay" aria-hidden="true">
+    <div class="overlayCard wide">
+      <div class="overlayHeader">
+        <h1>📖 うさぎ図鑑</h1>
+        <button class="overlayClose" data-close="bookOverlay">閉じる</button>
+      </div>
+      <div id="bookContent" class="overlayBody"></div>
+    </div>
+  </section>
+
+  <!-- ===== 称号（全面） ===== -->
+  <section id="titleOverlay" class="overlay" aria-hidden="true">
+    <div class="overlayCard wide">
+      <div class="overlayHeader">
+        <h1>🏆 称号</h1>
+        <button class="overlayClose" data-close="titleOverlay">閉じる</button>
+      </div>
+      <div id="titleContent" class="overlayBody"></div>
+    </div>
+  </section>
+
+  <!-- ===== BGM（朝昼夜＋旅立ち専用） ===== -->
   <script type="module">
-    import {
-      bgmMountSettingsUI,
-      bgmPlaySpecial,
-      bgmClearSpecial
-    } from "./BGM.js";
-
-    bgmMountSettingsUI({
-      position: "top-right",
-      title: "BGM"
-    });
-
-    window.BGM = {
-      playSpecial: bgmPlaySpecial,
-      clearSpecial: bgmClearSpecial
-    };
+    import { bgmMountSettingsUI, bgmPlaySpecial, bgmClearSpecial } from "./BGM.js";
+    bgmMountSettingsUI({ position: "top-right", title: "BGM" });
+    window.BGM = { playSpecial: bgmPlaySpecial, clearSpecial: bgmClearSpecial };
   </script>
 
-  <!-- ================= 既存JS（順序厳守） ================= -->
+  <!-- ===== 既存ロジック ===== -->
   <script src="./app.js"></script>
+
+  <!-- ===== スロット拡張（クリックで表示にする） ===== -->
   <script src="./slot.js"></script>
 
-  <!-- ================= Service Worker ================= -->
+  <!-- ===== Service Worker ===== -->
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
   </script>
-
 </body>
 </html>
