@@ -1,5 +1,5 @@
 // tabidati.js
-// 「旅立ちボタン → 次にクリックしたウサギを旅立たせる」版
+// 「旅立ちON中は、クリックしたウサギを何匹でも旅立たせ続ける」版
 // app.js が window.WB を公開している前提
 
 (() => {
@@ -31,16 +31,16 @@
     }
 
     // ===== 内部状態 =====
-    let selecting = false;
+    let departMode = false;
 
     const normalText = btn.textContent || "旅立ち";
-    const selectText = "旅立ち：ウサギを選んでね";
+    const onText = "旅立ちON：クリックで旅立つ";
 
-    function setSelecting(on) {
-      selecting = !!on;
-      if (selecting) {
+    function setMode(on) {
+      departMode = !!on;
+      if (departMode) {
         btn.classList.add("active");
-        btn.textContent = selectText;
+        btn.textContent = onText;
       } else {
         btn.classList.remove("active");
         btn.textContent = normalText;
@@ -49,7 +49,6 @@
 
     function findBunnyByWrap(wrapEl) {
       if (!wrapEl || !WB.bunnies) return null;
-      // bunnies の中から wrap が一致する子を探す
       for (const b of WB.bunnies) {
         if (b && b.wrap === wrapEl) return b;
       }
@@ -57,13 +56,13 @@
     }
 
     function departBunny(bunny) {
-      if (!bunny) return;
+      if (!bunny) return false;
 
       // うさぎ1匹以下なら不可
-      if (!WB.bunnies || WB.bunnies.length <= 1) return;
+      if (!WB.bunnies || WB.bunnies.length <= 1) return false;
 
       // コイン不足なら不可
-      if (WB.coins < WB.DEPART_COST) return;
+      if (WB.coins < WB.DEPART_COST) return false;
 
       // 支払い
       WB.coins -= WB.DEPART_COST;
@@ -74,7 +73,7 @@
       // SE
       WB.playSE?.(WB.seTabidati);
 
-      // bunnies配列から除去（popではなく対象削除）
+      // bunnies配列から除去
       const idx = WB.bunnies.indexOf(bunny);
       if (idx >= 0) WB.bunnies.splice(idx, 1);
 
@@ -90,56 +89,60 @@
       // 保存 & unlock check
       WB.saveBunnyMeta?.();
       WB.checkUnlocks?.();
+
+      return true;
     }
 
-    // ===== 旅立ちボタン =====
+    // ===== 旅立ちボタン：ON/OFF =====
     btn.addEventListener("click", () => {
       WB.unlockAudioOnce?.();
 
-      // 1匹以下なら選択モードに入らない
-      if (!WB.bunnies || WB.bunnies.length <= 1) return;
+      // 1匹以下ならONにしない
+      if (!WB.bunnies || WB.bunnies.length <= 1) {
+        setMode(false);
+        return;
+      }
 
-      // トグル（もう一回押すとキャンセル）
-      setSelecting(!selecting);
+      setMode(!departMode);
     });
 
-    // ===== 「次にクリックしたウサギ」を奪って旅立たせる =====
-    // capture で先に拾って、Bunny.wrap の pointerdown を発動させない
+    // ===== departMode中のクリックを奪って旅立たせる（連続） =====
     layer.addEventListener(
       "pointerdown",
       (e) => {
-        if (!selecting) return;
+        if (!departMode) return;
 
-        // 旅立ち選択中だけクリックを奪う
         const wrap = e.target?.closest?.(".bunnyWrap");
         if (!wrap) return;
 
-        // クリックによる通常処理（コイン雨/ぽよ等）を止める
+        // 通常クリック（コイン雨/ぽよ）を止める
         try { e.preventDefault(); } catch {}
         try { e.stopPropagation(); } catch {}
         try { e.stopImmediatePropagation(); } catch {}
 
-        // ここで選択モード解除（成功/失敗に関わらず解除した方が事故らない）
-        setSelecting(false);
-
         const bunny = findBunnyByWrap(wrap);
         if (!bunny) return;
 
-        // 旅立ち実行
-        departBunny(bunny);
+        const ok = departBunny(bunny);
+
+        // 条件で自動OFF
+        // - 残り1匹になった
+        // - コインが足りなくなった
+        if (!ok || !WB.bunnies || WB.bunnies.length <= 1 || WB.coins < WB.DEPART_COST) {
+          setMode(false);
+        }
       },
-      true // ★capture
+      true // capture
     );
 
-    // 画面のどこかをクリックしてキャンセル（任意）
+    // ===== 背景クリックでOFF（任意：邪魔なら消してOK） =====
     document.addEventListener(
       "pointerdown",
       (e) => {
-        if (!selecting) return;
-        // ボタン押下と、うさぎクリックは除外
+        if (!departMode) return;
         if (e.target === btn || btn.contains(e.target)) return;
         if (e.target?.closest?.(".bunnyWrap")) return;
-        setSelecting(false);
+        setMode(false);
       },
       true
     );
