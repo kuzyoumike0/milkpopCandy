@@ -1,7 +1,7 @@
-// hanabi.js
-// HUD内（#hudButtons）に「🎆 花火」ボタンを追加
-// 1クリック = 花火GIF 1発 + SE1回 / コイン -2000
-// うさぎ・コインは邪魔しない（pointer-events:none / 低z-index）
+// hanabi.js（即表示版）
+// - GIFを事前プリロード（初回クリックでもすぐ動く）
+// - 1クリック=1発 / コイン-2000 / SE1回
+// - うさぎ・コインは邪魔しない（pointer-events:none / 低z-index）
 
 (() => {
   const COST = 2000;
@@ -36,7 +36,6 @@
    * ========================= */
   const hanabiSE = new Audio(HANABI_SE_SRC);
   hanabiSE.volume = 0.8;
-
   function playHanabiSE() {
     try {
       hanabiSE.currentTime = 0;
@@ -48,20 +47,21 @@
    * Style
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("hanabiGifStyle")) return;
+    if (document.getElementById("hanabiGifStyleV2")) return;
     const s = document.createElement("style");
-    s.id = "hanabiGifStyle";
+    s.id = "hanabiGifStyleV2";
     s.textContent = `
-/* 花火GIF（背景） */
 .hanabi-gif{
-  position: absolute;
-  pointer-events: none; /* ★邪魔しない */
-  z-index: 1;           /* ★うさぎ/コインより下に */
+  position:absolute;
+  pointer-events:none; /* ★邪魔しない */
+  z-index:1;           /* ★うさぎ/コインより下 */
+  opacity:1;
   animation: hanabiFade 2.6s ease-out forwards;
+  will-change: transform, opacity;
 }
 @keyframes hanabiFade{
   0%{ opacity:0; transform: scale(.6); }
-  10%{ opacity:1; }
+  8%{ opacity:1; }
   80%{ opacity:1; }
   100%{ opacity:0; transform: scale(1.15); }
 }
@@ -70,11 +70,10 @@
   }
 
   /* =========================
-   * Field & z-index整備（邪魔しない）
+   * Field & z-index整備
    * ========================= */
   function getField() {
     const field = document.getElementById("field") || document.body;
-
     const cs = getComputedStyle(field);
     if (cs.position === "static") field.style.position = "relative";
 
@@ -87,17 +86,71 @@
   }
 
   /* =========================
+   * GIF preload（初回遅延対策）
+   * ========================= */
+  const preloadImgs = new Map(); // src -> HTMLImageElement
+
+  async function preloadOne(src) {
+    if (preloadImgs.has(src)) return preloadImgs.get(src);
+
+    const img = new Image();
+    img.decoding = "async";
+    img.loading = "eager";
+
+    const p = new Promise((resolve) => {
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(img); // 失敗しても進める
+    });
+
+    img.src = src;
+    preloadImgs.set(src, img);
+
+    await p;
+
+    // decodeできるならしておく（表示の「一瞬遅れ」を減らす）
+    try {
+      if (img.decode) await img.decode();
+    } catch {}
+
+    return img;
+  }
+
+  async function preloadAll() {
+    await Promise.all(FIREWORKS.map(preloadOne));
+  }
+
+  /* =========================
    * 花火生成（1発）
    * ========================= */
+  function getRectSafe(el) {
+    const r = el.getBoundingClientRect();
+    // もし0に近いなら、viewportで代用（稀な初期化ズレ対策）
+    if (r.width < 50 || r.height < 50) {
+      return { width: window.innerWidth, height: window.innerHeight, left: 0, top: 0 };
+    }
+    return r;
+  }
+
+  function pickSrc() {
+    return FIREWORKS[(Math.random() * FIREWORKS.length) | 0];
+  }
+
   function spawnFirework(field) {
+    const src = pickSrc();
+
+    // ★「すぐ動かない」最大原因：初回未キャッシュ
+    // ここで確実に preload 済みを優先
+    const cached = preloadImgs.get(src);
+
     const img = document.createElement("img");
     img.className = "hanabi-gif";
-    img.src = FIREWORKS[Math.floor(Math.random() * FIREWORKS.length)];
     img.alt = "firework";
 
-    const rect = field.getBoundingClientRect();
+    // キャッシュがあるなら即セット（無くても普通にセット）
+    img.src = cached ? cached.src : src;
 
-    // 画面の上側に出る（背景っぽく）
+    const rect = getRectSafe(field);
+
     const x = rect.width * (0.15 + Math.random() * 0.7);
     const y = rect.height * (0.08 + Math.random() * 0.35);
     const size = 180 + Math.random() * 180;
@@ -108,40 +161,38 @@
     img.style.height = "auto";
 
     field.appendChild(img);
+
+    // 「描画されない/遅れる」対策：次フレームでopacityを確定（保険）
+    requestAnimationFrame(() => {
+      img.style.opacity = "1";
+    });
+
     playHanabiSE();
 
     setTimeout(() => {
       try { img.remove(); } catch {}
     }, 2800);
+
+    // 次に備えて別のgifも温める（キャッシュ偏り対策）
+    preloadOne(pickSrc()).catch(() => {});
   }
 
   /* =========================
-   * Button mount（HUDに入れる）
+   * Button mount（HUD）
    * ========================= */
   function findMount() {
-    // まず HUD のボタン列へ
-    const hudButtons = document.getElementById("hudButtons");
-    if (hudButtons) return hudButtons;
-
-    // 次点：HUDそのもの
-    const hud = document.getElementById("hud");
-    if (hud) return hud;
-
-    // 最後：body
-    return document.body;
+    return document.getElementById("hudButtons")
+      || document.getElementById("hud")
+      || document.body;
   }
 
   function ensureButton() {
-    // 既存ボタンがあればそれを使う（IDに揃える）
     let btn = document.getElementById(BTN_ID);
-
-    // もし「花火」という既存ボタンがあるなら拾う
     if (!btn) {
       btn = [...document.querySelectorAll("button")].find(b =>
         (b.textContent || "").includes("花火")
       ) || null;
     }
-
     if (!btn) {
       btn = document.createElement("button");
       btn.type = "button";
@@ -150,7 +201,6 @@
     btn.id = BTN_ID;
     btn.textContent = `🎆 花火（-${COST}）`;
 
-    // HUDの並びに入れる（左側ボタン群と同じ列）
     const mount = findMount();
     if (btn.parentElement !== mount) mount.appendChild(btn);
 
@@ -170,5 +220,8 @@
   window.addEventListener("load", () => {
     injectStyles();
     ensureButton();
+
+    // ★ページ読み込み時にプリロード開始（初回クリックでも即）
+    preloadAll().catch(() => {});
   });
 })();
