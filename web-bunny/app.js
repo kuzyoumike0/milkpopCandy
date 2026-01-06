@@ -1,15 +1,15 @@
 (() => {
   /* =========================
-   * Bunny牧場 app.js（統合完全版）
+   * Bunny牧場 app.js（統合完全版 / 称号は syougou.js に移動済み）
    * - うさぎ種別: bunny1 / bunny3 / bunny4 / bunny5 / reabunny
    * - お迎え: モーダル＋サムネ＋不足は赤＋箱パカ/虹キラ演出
    * - baby: 3分、ハート（チャージ）なし、遅い、クリックでcoin1を1枚、他のうさぎの後ろを追従
    * - 成体: ゲージ（非表示）チャージ→ハート出しっぱなし、クリックで混合コイン雨（種類で増える）
    * - 画面端で折り返し、画面外に出ない
-   * - 図鑑: うさぎ一覧 + 称号ページ（黄金うんち回数／残り回数／進捗バー／装備切替）
-   * - 低確率で黄金うんち(assets/ougonunchi.png)出現、クリックで+10000
-   * - 黄金うんち称号: 10/20/50 で解放、一覧から装備切替
+   * - 図鑑: うさぎ一覧 + 称号ページ（syougou.js から取得）
+   * - 低確率で黄金うんち(assets/ougonunchi.png)出現、クリックで+10000（称号進行も syougou.js）
    * - 旅立ち回数: 種類ごとに記録、10/20/50で段階フレーバー（reabunnyは重い）＋到達通知
+   * - iPad/スマホ: タップ＆スライドでコイン/黄金うんち回収できる（指の下の要素を回収）
    * ========================= */
 
   /* ===== Assets ===== */
@@ -37,35 +37,35 @@
     bunny1: {
       label: "bunny1",
       img: "./assets/bunny1.png",
-      price: 300, // ★高額化
+      price: 300,
       coinMul: 0.55,
       desc: "基本のうさぎ。コインは控えめ。",
     },
     bunny3: {
       label: "bunny3",
       img: "./assets/bunny3.png",
-      price: 1800, // ★高額化
+      price: 1800,
       coinMul: 1.0,
       desc: "安定してコインを稼ぐ中級うさぎ。",
     },
     bunny4: {
       label: "bunny4",
       img: "./assets/bunny4.png",
-      price: 6000, // ★高額化
+      price: 6000,
       coinMul: 1.8,
       desc: "大量のコインを生み出す上級うさぎ。",
     },
     bunny5: {
       label: "bunny5",
       img: "./assets/bunny5.png",
-      price: 20000, // ★高額化
+      price: 20000,
       coinMul: 2.8,
       desc: "牧場最上級クラス。圧倒的生産力。",
     },
     reabunny: {
       label: "reabunny",
       img: "./assets/reabunny.png",
-      price: 0, // ショップに出さない（突然変異のみ）
+      price: 0,
       coinMul: 4.0,
       desc: "突然変異でのみ現れる幻のうさぎ。",
     },
@@ -75,29 +75,20 @@
   const BABY_DURATION_MS = 3 * 60 * 1000;
   const BABY_SPEED_MUL = 0.65;
 
-  // baby->成体に成長した瞬間の突然変異率（reabunny）
   const REA_EVOLVE_RATE = 0.01;
-
-  // 実績（同時うさぎ数 >= 10 で shop 拡張：bunny4/bunny5解禁）
   const UNLOCK_BUNNY4_NEED = 10;
 
-  // 黄金うんち（コインを「生成するたび」に抽選）
   const OUGON_UNCHI_RATE_PER_DROP = 0.0015; // 0.15%
   const OUGON_UNCHI_VALUE = 10000;
 
-  // baby 追従（行列）
   const BABY_FOLLOW_GAP = 46;
   const BABY_FOLLOW_FORCE = 6.0;
   const BABY_FOLLOW_MAX_SPEED = 180;
 
-  // コイン雨（ベース枚数）
-  // tier=1..4（ゲージに応じて tier 上限が上がる）
   const BASE_RAIN_COUNT_BY_TIER = [0, 14, 26, 42, 68];
-
-  // ゲージチャージ（秒）
   const GAUGE_PERIOD_RANGE = [7, 14];
 
-  // 旅立ち（ボタンがある場合）
+  // 旅立ち（tabidati.js で使用）
   const DEPART_COST = 10;
 
   /* ===== 段階：旅立ちフレーバー（10/20/50） ===== */
@@ -123,24 +114,17 @@
     return "";
   }
 
-  /* ===== 称号（黄金うんち 10/20/50） ===== */
-  const GOLDEN_UNCHI_TITLES = [
-    { at: 10, title: "黄金を踏みし者" },
-    { at: 20, title: "黄金に選ばれし者" },
-    { at: 50, title: "黄金の王" },
-  ];
-
   /* ===== Storage keys ===== */
   const LS = {
     coins: "wb_coins_v6",
-    bunnies: "wb_bunnies_v6", // [{bornAt, kind}]
+    bunnies: "wb_bunnies_v6",
     ach: "wb_ach_v2",
     dex: "wb_dex_v1",
 
-    // 黄金うんち＆称号
+    // reset時に一緒に消す（称号は syougou.js が保持）
     unchi: "wb_unchi_v1",
-    title: "wb_title_v1",          // 装備中
-    titleList: "wb_title_list_v1", // 所持称号配列
+    title: "wb_title_v1",
+    titleList: "wb_title_list_v1",
   };
 
   /* =========================
@@ -150,7 +134,7 @@
   const bunnyLayer = document.getElementById("bunnyLayer");
   const coinLayer = document.getElementById("coinLayer");
   const coinValueEl = document.getElementById("coinValue");
-  const titleEl = document.getElementById("title"); // index.htmlにあると表示（無くてもOK）
+  const titleEl = document.getElementById("title");
 
   const shopBtn = document.getElementById("shopBtn");
   const departBtn = document.getElementById("departBtn");
@@ -267,34 +251,6 @@
     );
   }
 
-  /* ===== 黄金うんち回数＆称号 ===== */
-  function loadGoldenUnchiCount() {
-    const n = parseInt(localStorage.getItem(LS.unchi) || "0", 10);
-    return Number.isFinite(n) ? n : 0;
-  }
-  function saveGoldenUnchiCount() {
-    localStorage.setItem(LS.unchi, String(goldenUnchiCount));
-  }
-
-  function loadOwnedTitles() {
-    try {
-      const arr = JSON.parse(localStorage.getItem(LS.titleList) || "[]");
-      return Array.isArray(arr) ? arr : [];
-    } catch {
-      return [];
-    }
-  }
-  function saveOwnedTitles() {
-    localStorage.setItem(LS.titleList, JSON.stringify(ownedTitles));
-  }
-
-  function loadEquippedTitle() {
-    return String(localStorage.getItem(LS.title) || "");
-  }
-  function saveEquippedTitle() {
-    localStorage.setItem(LS.title, String(currentTitle || ""));
-  }
-
   /* =========================
    * Utils
    * ========================= */
@@ -312,8 +268,11 @@
 
   function updateHud() {
     coinValueEl.textContent = String(coins);
+
+    // ★称号表示は syougou.js から取得
+    const ct = window.SYOUGOU?.getCurrentTitle?.() || "";
     if (titleEl) {
-      titleEl.textContent = currentTitle ? `称号：${currentTitle}` : "";
+      titleEl.textContent = ct ? `称号：${ct}` : "";
     }
   }
 
@@ -324,18 +283,65 @@
   let ach = loadAch();
   let dex = loadDex();
 
-  let goldenUnchiCount = loadGoldenUnchiCount();
-  let ownedTitles = loadOwnedTitles();
-  let currentTitle = loadEquippedTitle();
-
   const bunnies = [];
   const dropsOnField = []; // Coin / OugonUnchi をまとめて管理
 
   let lastFrame = performance.now();
 
   /* =========================
+   * iPad/スマホ：タップ&スライド回収
+   * ========================= */
+  let touchDragging = false;
+  let touchPointerId = null;
+
+  function tryCollectAtClientXY(clientX, clientY) {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return;
+
+    // coin / ougonunchi の要素に __collect を仕込む
+    if (typeof el.__collect === "function") {
+      el.__collect();
+      return;
+    }
+
+    // 親に __collect がある場合（画像の上に何か被った場合の保険）
+    const p = el.parentElement;
+    if (p && typeof p.__collect === "function") {
+      p.__collect();
+      return;
+    }
+  }
+
+  field.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    touchDragging = true;
+    touchPointerId = e.pointerId;
+    tryCollectAtClientXY(e.clientX, e.clientY);
+  });
+
+  field.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (!touchDragging) return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    tryCollectAtClientXY(e.clientX, e.clientY);
+  });
+
+  window.addEventListener("pointerup", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    touchDragging = false;
+    touchPointerId = null;
+  });
+
+  window.addEventListener("pointercancel", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    touchDragging = false;
+    touchPointerId = null;
+  });
+
+  /* =========================
    * UI FX（ふわっと通知）
-   * ※CSS: .farewellMsg / .farewellMilestone がある前提（無くても動作はする）
    * ========================= */
   function showFarewellMessage(kind) {
     const texts = [
@@ -379,35 +385,6 @@
     }, 3200);
   }
 
-  function showTitleMilestone(title) {
-    const el = document.createElement("div");
-    el.className = "farewellMilestone";
-    el.textContent = `🏅 称号解放：${title}`;
-    document.body.appendChild(el);
-    setTimeout(() => {
-      try { el.remove(); } catch {}
-    }, 3200);
-  }
-
-  /* =========================
-   * 称号：装備＆解放
-   * ========================= */
-  function equipTitle(name) {
-    currentTitle = String(name || "");
-    saveEquippedTitle();
-    updateHud();
-  }
-
-  function unlockTitle(name) {
-    if (!ownedTitles.includes(name)) {
-      ownedTitles.push(name);
-      saveOwnedTitles();
-    }
-    // 新称号は自動装備
-    equipTitle(name);
-    showTitleMilestone(name);
-  }
-
   /* =========================
    * Achievements (unlock shop)
    * ========================= */
@@ -439,12 +416,9 @@
     dex[kind].farewell = (dex[kind].farewell || 0) + 1;
 
     const c = dex[kind].farewell;
-
-    // ★節目到達通知（10/20/50）
     if (c === 10 || c === 20 || c === 50) {
       showFarewellMilestone(kind, c);
     }
-
     saveDex();
   }
 
@@ -463,7 +437,6 @@
       this.x = x;
       this.y = y;
 
-      // ちょい弾み
       this.vx = (Math.random() * 2 - 1) * 110;
       this.vy = -(420 + Math.random() * 240);
       this.gravity = 2200;
@@ -511,9 +484,13 @@
       this.el.src = ASSETS.coins[tier - 1];
       this.el.draggable = false;
 
-      // hover or click で回収
+      // hover/click/tap で回収
       this.el.addEventListener("pointerenter", () => this.collect());
       this.el.addEventListener("click", () => this.collect());
+      this.el.addEventListener("pointerdown", () => this.collect());
+
+      // ★タップ&スライド用：指の下で拾える
+      this.el.__collect = () => this.collect();
 
       coinLayer.appendChild(this.el);
       this.render();
@@ -538,12 +515,19 @@
       this.el.src = ASSETS.ougonUnchi;
       this.el.draggable = false;
 
-      // クリックのみ
       this.el.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
         this.collect();
       });
+      this.el.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.collect();
+      });
+
+      // ★タップ&スライド用
+      this.el.__collect = () => this.collect();
 
       coinLayer.appendChild(this.el);
       this.render();
@@ -552,17 +536,8 @@
     collect() {
       coins += this.value;
 
-      // ★黄金うんち回数
-      goldenUnchiCount += 1;
-      saveGoldenUnchiCount();
-
-      // ★称号（10/20/50到達“瞬間”だけ解放）
-      for (const t of GOLDEN_UNCHI_TITLES) {
-        if (goldenUnchiCount === t.at) {
-          unlockTitle(t.title);
-          break;
-        }
-      }
+      // ★称号進行は syougou.js に委譲
+      window.SYOUGOU?.onGoldenUnchiCollected?.();
 
       saveCoins();
       updateHud();
@@ -584,7 +559,6 @@
     return clamp(Math.ceil(clamp(g01, 0, 1) * 4), 1, 4);
   }
 
-  // 「混合で雨みたいに」：上tierほど出やすい（maxTierに応じた重み）
   function pickTierMixed(maxTier) {
     const wTable = {
       1: [0, 1],
@@ -607,7 +581,6 @@
     const maxTier = gaugeToTier(gauge01);
     const mul = BUNNY_DEFS[bunny.kind]?.coinMul ?? 1;
 
-    // ハートMAXならさらにちょい増し
     const chargedBonus = bunny.charged ? 1.15 : 1.0;
 
     const baseCount = BASE_RAIN_COUNT_BY_TIER[maxTier];
@@ -626,7 +599,6 @@
         const x = baseX + (Math.random() * 2 - 1) * spreadX;
         const y = baseY + (Math.random() * 2 - 1) * 10;
 
-        // ★低確率で黄金うんち
         if (maybeSpawnOugonUnchi(x, y)) return;
 
         const tier = pickTierMixed(maxTier);
@@ -654,7 +626,6 @@
       this.kind = safeKind(kind);
       this.isBaby = (Date.now() - bornAt) < BABY_DURATION_MS;
 
-      // 図鑑登録（seen）
       if (!dex[this.kind]) dex[this.kind] = { seen: true, farewell: 0 };
       else dex[this.kind].seen = true;
       saveDex();
@@ -681,7 +652,6 @@
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
 
-      // ゲージ（非表示）
       this.gauge = 0;
       this.gaugePeriod = rand(GAUGE_PERIOD_RANGE[0], GAUGE_PERIOD_RANGE[1]);
       this.charged = false;
@@ -708,7 +678,6 @@
 
       this.isBaby = false;
 
-      // 成長時突然変異
       if (Math.random() < REA_EVOLVE_RATE) {
         this.kind = "reabunny";
         if (!dex.reabunny) dex.reabunny = { seen: true, farewell: 0 };
@@ -727,7 +696,6 @@
     }
 
     updateGauge(dt) {
-      // babyはチャージ無し＆ハート無し
       if (this.isBaby) {
         this.gauge = 0;
         this.charged = false;
@@ -743,7 +711,6 @@
         }
       }
 
-      // MAXならハート出しっぱなし
       if (this.charged) this.heart.classList.add("show");
       else this.heart.classList.remove("show");
     }
@@ -758,22 +725,18 @@
 
       spawnRainFromBunny(this, this.gauge);
 
-      // クリックでゲージ消費
       this.gauge = 0;
       this.charged = false;
       this.gaugePeriod = rand(GAUGE_PERIOD_RANGE[0], GAUGE_PERIOD_RANGE[1]);
       this.heart.classList.remove("show");
     }
 
-    // babyが追従する相手を探す（近い成体優先）
     findLeaderForBaby() {
       let best = null;
       let bestD = Infinity;
 
       for (const b of bunnies) {
         if (b === this) continue;
-
-        // 成体を優先、いなければ先に生まれたbabyもリーダー可（行列感）
         const canLead = (!b.isBaby) || (b.isBaby && b.bornAt < this.bornAt);
         if (!canLead) continue;
 
@@ -817,7 +780,6 @@
         this.x += this.dir * this.baseSpeed * dt;
       }
 
-      // 画面端で折り返し
       if (this.x <= minX) {
         this.x = minX;
         this.dir = 1;
@@ -909,9 +871,13 @@
     };
 
     const renderTitleDex = () => {
-      const count = Number(goldenUnchiCount || 0);
+      const S = window.SYOUGOU;
+      const count = Number(S?.getCount?.() || 0);
+      const ownedTitles = S?.getOwnedTitles?.() || [];
+      const currentTitle = S?.getCurrentTitle?.() || "";
+      const TITLES = S?.getTitlesMaster?.() || [];
 
-      const next = (GOLDEN_UNCHI_TITLES || [])
+      const next = (TITLES || [])
         .slice()
         .sort((a, b) => a.at - b.at)
         .find(t => count < t.at);
@@ -946,7 +912,7 @@
         </div>
       `;
 
-      const list = (GOLDEN_UNCHI_TITLES || []).map(t => {
+      const list = (TITLES || []).map(t => {
         const owned = (ownedTitles || []).includes(t.title);
         const equipped = currentTitle === t.title;
 
@@ -1001,13 +967,14 @@
       modal.querySelector("#tabBunny").onclick = () => { tab = "bunny"; paint(); };
       modal.querySelector("#tabTitle").onclick = () => { tab = "title"; paint(); };
 
-      // 称号：装備
+      // 称号：装備（syougou.js に委譲）
       modal.querySelectorAll("[data-equip]").forEach(btn => {
         btn.onclick = () => {
           const name = btn.getAttribute("data-equip");
-          equipTitle(name);
+          window.SYOUGOU?.equipTitle?.(name);
           tab = "title";
           paint();
+          updateHud();
         };
       });
     };
@@ -1203,9 +1170,8 @@
   }
 
   /* =========================
-   * Depart / Reset
+   * Reset
    * ========================= */
-  
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       unlockAudioOnce();
@@ -1216,6 +1182,7 @@
       localStorage.removeItem(LS.ach);
       localStorage.removeItem(LS.dex);
 
+      // syougou.js のキーも消す
       localStorage.removeItem(LS.unchi);
       localStorage.removeItem(LS.title);
       localStorage.removeItem(LS.titleList);
@@ -1247,7 +1214,6 @@
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
-    // 地面補正
     const gy = groundY();
     for (const d of dropsOnField) d.floor = gy;
 
@@ -1270,8 +1236,9 @@
       refreshShopUI();
     });
   }
+
   /* =========================
-   * External API (tabidati.js 用)
+   * External API (tabidati.js / syougou.js 用)
    * ========================= */
   window.WB = {
     // state / const
@@ -1296,6 +1263,9 @@
     saveBunnyMeta,
     checkUnlocks,
   };
+
+  // ★syougou.js に WB を渡して同期（HUD更新など）
+  window.SYOUGOU?.attach?.(window.WB);
 
   init();
 })();
