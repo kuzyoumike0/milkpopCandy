@@ -4,46 +4,56 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#ffd6e7" />
-
-  <title>milkpop牧場</title>
-
-  <!-- PWA -->
   <link rel="manifest" href="./manifest.webmanifest" />
-
-  <!-- Style -->
   <link rel="stylesheet" href="./style.css" />
+  <title>Bunny牧場</title>
 </head>
 
 <body>
-
-  <!-- 🌸 左右に1つずつの柵（装飾） -->
-  <img src="./assets/saku.png" class="saku-single left" alt="">
-  <img src="./assets/saku.png" class="saku-single right" alt="">
-
   <div id="app">
 
-    <!-- HUD -->
     <header id="hud">
       <div id="coin">🪙 <span id="coinValue">0</span></div>
-      <button id="shopBtn">お迎え</button>
-      <button id="rankBtn">図鑑</button>
-      <button id="departBtn">旅立ち</button>
+
+      <button id="petBtn">なでる</button>
+      <button id="shopBtn">ショップ</button>
+
+      <!-- 旅立ちボタン（既にあるならIDだけ合わせてください） -->
+      <button id="departBtn" title="旅立ち（演出中は特別BGM）">旅立ち</button>
+
       <button id="resetBtn">リセット</button>
     </header>
 
-    <!-- FIELD -->
     <main id="field">
       <div id="bunnyLayer"></div>
       <div id="coinLayer"></div>
+
+      <!-- メッセージ表示（あれば） -->
+      <div id="toastLayer"></div>
     </main>
 
   </div>
 
-  <!-- Script -->
-  <script src="./app.js"></script>
-　<script src="./slot.js"></script>
+  <!-- ES Modules -->
+  <script type="module">
+    // BGM（朝/昼/夜 + 設定UI + 旅立ち特別BGM連携）
+    import {
+      bgmMountSettingsUI,
+      bgmPlaySpecial,
+      bgmClearSpecial
+    } from "./BGM.js";
 
-  
+    // 設定UIを表示（不要ならこの行を消す）
+    bgmMountSettingsUI({ position: "top-right", title: "BGM" });
 
+    // app.js 側から呼べるようにグローバル公開（importしなくてもOKにする）
+    window.BGM = {
+      playSpecial: bgmPlaySpecial,
+      clearSpecial: bgmClearSpecial
+    };
+
+    // ゲーム本体
+    import "./app.js";
+  </script>
 </body>
 </html>
