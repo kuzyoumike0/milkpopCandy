@@ -59,10 +59,10 @@
     reelLoop = null;
   }
 
-  function coinBurst(n = 14, i = 65) {
+  function coinBurst(n = 14, i = 65, vol = 0.85) {
     let c = 0;
     const id = setInterval(() => {
-      oneShot(COIN_SE, 0.85);
+      oneShot(COIN_SE, vol);
       if (++c >= n) clearInterval(id);
     }, i);
   }
@@ -112,12 +112,15 @@
     }
 
     resultLock = true;
-    el.classList.remove("fadeOut", "popNum", "popBig");
+    el.classList.remove("fadeOut", "popNum", "popBig", "popMega");
     el.textContent = text;
 
     const coins = parseCoins(text);
     if (coins !== null && coins > 0) {
-      requestAnimationFrame(() => el.classList.add(coins >= 500 ? "popBig" : "popNum"));
+      requestAnimationFrame(() => {
+        if (coins >= 1500) el.classList.add("popMega");
+        else el.classList.add(coins >= 500 ? "popBig" : "popNum");
+      });
     }
 
     const fadeMs = 650;
@@ -129,42 +132,48 @@
   }
 
   /* =========================
-   * 豪華演出
+   * 豪華演出（強化版）
    * ========================= */
   let fxTimer = null;
+  let auraTimer = null;
+  let spotTimer = null;
 
   function clearWinHighlights(panel) {
-    panel.querySelectorAll(".cell").forEach((c) => c.classList.remove("winCell"));
+    panel.querySelectorAll(".cell").forEach((c) => c.classList.remove("winCell", "winCellBig", "winCellMega"));
     const lines = $(".paylines", panel);
     if (lines) lines.innerHTML = "";
+    const aura = $(".aura", panel);
+    if (aura) aura.innerHTML = "";
+    const spot = $(".spotlights", panel);
+    if (spot) spot.innerHTML = "";
   }
 
   function vibrate(pattern) {
     try { if (navigator.vibrate) navigator.vibrate(pattern); } catch {}
   }
 
-  function spawnConfetti(panel, amount = 28) {
+  function spawnConfetti(panel, amount = 28, mega = false) {
     const box = $(".confetti", panel);
     if (!box) return;
     box.innerHTML = "";
     const w = box.getBoundingClientRect().width || 300;
     for (let i = 0; i < amount; i++) {
       const p = document.createElement("i");
-      p.className = "confettiPiece";
+      p.className = "confettiPiece" + (mega ? " mega" : "");
       const x = Math.random() * w;
-      const d = 700 + Math.random() * 800;
-      const s = 0.8 + Math.random() * 0.9;
+      const d = (mega ? 900 : 700) + Math.random() * (mega ? 1200 : 800);
+      const s = (mega ? 1.0 : 0.8) + Math.random() * 1.0;
       const r = (Math.random() * 360) | 0;
       p.style.left = `${x}px`;
       p.style.animationDuration = `${d}ms`;
       p.style.transform = `scale(${s}) rotate(${r}deg)`;
-      p.style.opacity = `${0.7 + Math.random() * 0.3}`;
+      p.style.opacity = `${0.72 + Math.random() * 0.28}`;
       box.appendChild(p);
     }
-    setTimeout(() => (box.innerHTML = ""), 1800);
+    setTimeout(() => (box.innerHTML = ""), mega ? 2600 : 1800);
   }
 
-  function drawPaylines(panel, winLines, intensity = 1) {
+  function drawPaylines(panel, winLines, intensity = 1, mega = false) {
     const layer = $(".paylines", panel);
     if (!layer) return;
     layer.innerHTML = "";
@@ -183,7 +192,7 @@
       if (!a || !b || !c) return;
 
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("class", "lineSvg");
+      svg.setAttribute("class", "lineSvg" + (mega ? " mega" : ""));
       svg.setAttribute("viewBox", `0 0 ${layer.clientWidth} ${layer.clientHeight}`);
 
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -191,8 +200,8 @@
       path.setAttribute("fill", "none");
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
-      path.setAttribute("class", "paylinePath");
-      path.style.strokeWidth = `${Math.max(4, 5 + intensity * 1.5)}px`;
+      path.setAttribute("class", "paylinePath" + (mega ? " mega" : ""));
+      path.style.strokeWidth = `${Math.max(5, 6 + intensity * (mega ? 3.0 : 1.8))}px`;
       path.style.animationDelay = `${idx * 90}ms`;
 
       svg.appendChild(path);
@@ -200,38 +209,83 @@
     });
   }
 
-  // ★修正版：winFx / winBig は panel ではなく .machine に付ける。解除も .machine
-  function triggerWinFx(panel, winLines, totalPay, totalLines) {
-    if (fxTimer) {
-      clearTimeout(fxTimer);
-      fxTimer = null;
+  function spawnAura(panel, mega = false) {
+    const aura = $(".aura", panel);
+    if (!aura) return;
+    aura.innerHTML = `
+      <i class="auraRing ${mega ? "mega" : ""}"></i>
+      <i class="auraRing2 ${mega ? "mega" : ""}"></i>
+      <i class="auraSpark ${mega ? "mega" : ""}"></i>
+    `;
+  }
+
+  function spawnSpotlights(panel, mega = false) {
+    const spot = $(".spotlights", panel);
+    if (!spot) return;
+    spot.innerHTML = "";
+    for (let i = 0; i < (mega ? 5 : 3); i++) {
+      const s = document.createElement("i");
+      s.className = "spot" + (mega ? " mega" : "");
+      s.style.left = `${10 + i * (mega ? 18 : 26)}%`;
+      s.style.animationDelay = `${i * 120}ms`;
+      spot.appendChild(s);
     }
+  }
+
+  function triggerWinFx(panel, winLines, totalPay, totalLines) {
+    if (fxTimer) { clearTimeout(fxTimer); fxTimer = null; }
+    if (auraTimer) { clearTimeout(auraTimer); auraTimer = null; }
+    if (spotTimer) { clearTimeout(spotTimer); spotTimer = null; }
 
     const big = totalPay >= 1000 || totalLines >= 3;
-    const intensity = Math.min(3, 1 + (big ? 1.5 : 0) + totalLines * 0.25);
+    const mega = totalPay >= 1500 || totalLines >= 5; // ★最上位演出
+    const intensity = Math.min(3.5, 1 + (big ? 1.6 : 0) + totalLines * 0.35);
 
     const machine = panel.querySelector(".machine") || panel;
-
     machine.classList.add("winFx");
-    if (big) machine.classList.add("winBig");
-    else machine.classList.remove("winBig");
+    if (big) machine.classList.add("winBig"); else machine.classList.remove("winBig");
+    if (mega) machine.classList.add("winMega"); else machine.classList.remove("winMega");
 
+    // 画面フラッシュ（2段）
     panel.classList.add("flashOn");
     setTimeout(() => panel.classList.remove("flashOn"), 420);
+    if (mega) {
+      setTimeout(() => { panel.classList.add("flashOn"); setTimeout(() => panel.classList.remove("flashOn"), 420); }, 520);
+    }
 
-    vibrate(big ? [80, 60, 120] : [50, 40, 60]);
-    coinBurst(big ? 22 : 14, big ? 55 : 65);
-    spawnConfetti(panel, big ? 48 : 30);
+    // 振動
+    vibrate(mega ? [90, 70, 130, 70, 170] : (big ? [80, 60, 120] : [50, 40, 60]));
 
+    // コインSE（豪華）
+    if (mega) coinBurst(30, 48, 0.9);
+    else coinBurst(big ? 22 : 14, big ? 55 : 65, 0.85);
+
+    // 紙吹雪
+    spawnConfetti(panel, mega ? 70 : (big ? 48 : 30), mega);
+
+    // オーラ・スポットライト
+    spawnAura(panel, mega);
+    spawnSpotlights(panel, mega);
+
+    // 勝ちセル（強弱）
     const cells = Array.from(panel.querySelectorAll(".cell"));
-    winLines.flat().forEach((i) => cells[i]?.classList.add("winCell"));
+    winLines.flat().forEach((i) => {
+      const c = cells[i];
+      if (!c) return;
+      c.classList.add("winCell");
+      if (big) c.classList.add("winCellBig");
+      if (mega) c.classList.add("winCellMega");
+    });
 
-    drawPaylines(panel, winLines, intensity);
+    // 当たりライン
+    drawPaylines(panel, winLines, intensity, mega);
 
+    // 解除時間
+    const dur = mega ? 3200 : (big ? 2400 : 1700);
     fxTimer = setTimeout(() => {
-      machine.classList.remove("winFx", "winBig");
+      machine.classList.remove("winFx", "winBig", "winMega");
       clearWinHighlights(panel);
-    }, big ? 2400 : 1700);
+    }, dur);
   }
 
   /* =========================
@@ -253,12 +307,12 @@
   }
 
   /* =========================
-   * CSS（スクロール無し・ズレ/巨大化防止・ボタンは下パネル基準）
+   * CSS（スクロール無し・ズレ/巨大化防止・当たり豪華）
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("slotStyleFullFxV3")) return;
+    if (document.getElementById("slotStyleFullFxV4")) return;
     const s = document.createElement("style");
-    s.id = "slotStyleFullFxV3";
+    s.id = "slotStyleFullFxV4";
     s.textContent = `
 #${PANEL_ID}{
   --winTop: 38%;
@@ -318,6 +372,87 @@
   z-index:2147483647;
 }
 
+/* ===== 追加レイヤ：オーラ/スポット ===== */
+#${PANEL_ID} .aura, #${PANEL_ID} .spotlights{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:2147483644;
+  overflow:hidden;
+}
+#${PANEL_ID} .auraRing, #${PANEL_ID} .auraRing2{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:84%;
+  height:84%;
+  transform:translate(-50%,-50%);
+  border-radius:999px;
+  background: radial-gradient(circle, rgba(255,230,120,.0) 45%, rgba(255,220,120,.22) 55%, rgba(255,190,40,.0) 70%);
+  filter: blur(0.2px) drop-shadow(0 0 22px rgba(255,210,90,.35));
+  animation: auraPulse 980ms ease-in-out infinite;
+}
+#${PANEL_ID} .auraRing2{
+  width:92%;
+  height:92%;
+  opacity:.75;
+  animation-duration: 1240ms;
+}
+#${PANEL_ID} .auraRing.mega, #${PANEL_ID} .auraRing2.mega{
+  filter: drop-shadow(0 0 34px rgba(255,240,150,.55));
+  animation-duration: 720ms;
+}
+@keyframes auraPulse{
+  0%{ transform:translate(-50%,-50%) scale(0.98); opacity:0.75; }
+  50%{ transform:translate(-50%,-50%) scale(1.02); opacity:1; }
+  100%{ transform:translate(-50%,-50%) scale(0.98); opacity:0.75; }
+}
+#${PANEL_ID} .auraSpark{
+  position:absolute;
+  left:50%;
+  top:50%;
+  width:90%;
+  height:90%;
+  transform:translate(-50%,-50%);
+  background:
+    radial-gradient(circle at 20% 30%, rgba(255,255,255,.9), rgba(255,255,255,0) 35%),
+    radial-gradient(circle at 80% 40%, rgba(255,255,255,.75), rgba(255,255,255,0) 32%),
+    radial-gradient(circle at 60% 80%, rgba(255,255,255,.6), rgba(255,255,255,0) 28%);
+  mix-blend-mode: screen;
+  opacity:0.0;
+  animation: spark 980ms ease-in-out infinite;
+}
+#${PANEL_ID} .auraSpark.mega{ animation-duration: 680ms; }
+@keyframes spark{
+  0%{ opacity:0.0; }
+  30%{ opacity:0.55; }
+  60%{ opacity:0.18; }
+  100%{ opacity:0.0; }
+}
+
+#${PANEL_ID} .spot{
+  position:absolute;
+  top:-10%;
+  width:22%;
+  height:140%;
+  background: linear-gradient(to bottom, rgba(255,245,180,.0), rgba(255,245,180,.22), rgba(255,245,180,.0));
+  transform: skewX(-10deg) rotate(8deg);
+  filter: blur(0.3px);
+  opacity:0;
+  animation: spotSweep 980ms ease-in-out infinite;
+}
+#${PANEL_ID} .spot.mega{
+  width:18%;
+  background: linear-gradient(to bottom, rgba(255,255,220,.0), rgba(255,255,220,.28), rgba(255,255,220,.0));
+  animation-duration: 760ms;
+}
+@keyframes spotSweep{
+  0%{ opacity:0; transform: skewX(-10deg) rotate(8deg) translateY(-10px); }
+  25%{ opacity:0.55; }
+  55%{ opacity:0.18; }
+  100%{ opacity:0; transform: skewX(-10deg) rotate(8deg) translateY(10px); }
+}
+
 /* ===== スロット窓 ===== */
 #${PANEL_ID} .grid{
   position:absolute;
@@ -369,16 +504,28 @@
   filter: drop-shadow(0 8px 10px rgba(0,0,0,0.18));
 }
 
-/* ===== 当たり豪華：セル発光 ===== */
+/* ===== 当たり豪華：セル発光（段階） ===== */
 #${PANEL_ID} .cell.winCell{
   box-shadow:
     0 0 0 2px rgba(255,220,120,.55) inset,
     0 0 18px rgba(255,200,0,.55);
   animation: winPulse 680ms ease-in-out infinite;
 }
+#${PANEL_ID} .cell.winCell.winCellBig{
+  box-shadow:
+    0 0 0 2px rgba(255,235,150,.7) inset,
+    0 0 26px rgba(255,220,120,.75);
+  animation-duration: 560ms;
+}
+#${PANEL_ID} .cell.winCell.winCellMega{
+  box-shadow:
+    0 0 0 3px rgba(255,255,220,.85) inset,
+    0 0 34px rgba(255,245,170,.95);
+  animation-duration: 420ms;
+}
 @keyframes winPulse{
   0%{ transform: translateZ(0) scale(1); }
-  50%{ transform: translateZ(0) scale(1.02); }
+  50%{ transform: translateZ(0) scale(1.03); }
   100%{ transform: translateZ(0) scale(1); }
 }
 
@@ -399,21 +546,28 @@
 }
 #${PANEL_ID} .paylinePath{
   stroke: rgba(255,210,90,.92);
-  filter: drop-shadow(0 4px 8px rgba(255,200,0,.35));
+  filter: drop-shadow(0 6px 12px rgba(255,200,0,.35));
   stroke-dasharray: 999;
   stroke-dashoffset: 999;
   animation: lineDraw 520ms ease forwards;
+}
+#${PANEL_ID} .paylinePath.mega{
+  stroke: rgba(255,250,200,.95);
+  filter: drop-shadow(0 8px 18px rgba(255,240,150,.55));
 }
 @keyframes lineDraw{
   to { stroke-dashoffset: 0; }
 }
 
-/* ===== さらに豪華：筐体を軽く揺らす（★machineに付与） ===== */
+/* ===== さらに豪華：筐体を揺らす（段階） ===== */
 #${PANEL_ID} .machine.winFx{
   animation: machineShake 520ms ease-in-out 1;
 }
 #${PANEL_ID} .machine.winBig{
   animation: machineShakeBig 720ms ease-in-out 1;
+}
+#${PANEL_ID} .machine.winMega{
+  animation: machineShakeMega 900ms ease-in-out 1;
 }
 @keyframes machineShake{
   0%{ transform: translate(-50%,-50%); }
@@ -432,6 +586,16 @@
   75%{ transform: translate(calc(-50% - 2px), calc(-50% + 2px)); }
   100%{ transform: translate(-50%,-50%); }
 }
+@keyframes machineShakeMega{
+  0%{ transform: translate(-50%,-50%) scale(1); }
+  12%{ transform: translate(calc(-50% - 6px), calc(-50% + 3px)) scale(1.01); }
+  24%{ transform: translate(calc(-50% + 6px), calc(-50% - 3px)) scale(1.01); }
+  36%{ transform: translate(calc(-50% - 5px), calc(-50% - 6px)) scale(1.02); }
+  48%{ transform: translate(calc(-50% + 5px), calc(-50% + 6px)) scale(1.02); }
+  60%{ transform: translate(calc(-50% - 4px), calc(-50% + 3px)) scale(1.01); }
+  72%{ transform: translate(calc(-50% + 4px), calc(-50% - 3px)) scale(1.01); }
+  100%{ transform: translate(-50%,-50%) scale(1); }
+}
 
 /* フラッシュ */
 #${PANEL_ID} .flash{
@@ -440,7 +604,7 @@
   background:rgba(255,255,255,.68);
   opacity:0;
   pointer-events:none;
-  z-index:2147483646;
+  z-index: 2147483646;
 }
 #${PANEL_ID}.flashOn .flash{
   animation:flash .38s ease-out;
@@ -471,9 +635,14 @@
 }
 #${PANEL_ID} .confettiPiece:nth-child(3n){ background: rgba(255, 140, 200, .92); }
 #${PANEL_ID} .confettiPiece:nth-child(3n+1){ background: rgba(120, 210, 255, .92); }
+#${PANEL_ID} .confettiPiece.mega{
+  width:12px;
+  height:20px;
+  box-shadow: 0 14px 22px rgba(0,0,0,.14);
+}
 @keyframes confettiFall{
   0%{ transform: translateY(0) rotate(0deg); opacity:1; }
-  100%{ transform: translateY(700px) rotate(520deg); opacity:0; }
+  100%{ transform: translateY(760px) rotate(620deg); opacity:0; }
 }
 
 /* ===== UIバー（下パネル基準で固定） ===== */
@@ -516,7 +685,7 @@
 }
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
 
-/* 結果演出 */
+/* 結果演出（段階） */
 #${PANEL_ID} .result{
   display:inline-block;
   will-change: transform, opacity, filter;
@@ -534,6 +703,10 @@
   animation: popBig 520ms cubic-bezier(.15,1.6,.15,1) 1;
   filter: drop-shadow(0 10px 14px rgba(255,200,0,.45));
 }
+#${PANEL_ID} .result.popMega{
+  animation: popMega 720ms cubic-bezier(.12,1.9,.12,1) 1;
+  filter: drop-shadow(0 14px 18px rgba(255,240,150,.65));
+}
 @keyframes popNum{
   0%{ transform: translateY(0) scale(1); }
   35%{ transform: translateY(-6px) scale(1.12); }
@@ -543,6 +716,13 @@
   0%{ transform: translateY(0) scale(1); }
   30%{ transform: translateY(-10px) scale(1.20); }
   60%{ transform: translateY(2px) scale(1.08); }
+  100%{ transform: translateY(0) scale(1); }
+}
+@keyframes popMega{
+  0%{ transform: translateY(0) scale(1); }
+  22%{ transform: translateY(-14px) scale(1.28); }
+  45%{ transform: translateY(3px) scale(1.10); }
+  70%{ transform: translateY(-4px) scale(1.18); }
   100%{ transform: translateY(0) scale(1); }
 }
 `;
@@ -571,13 +751,82 @@
     body.style.overflow = prevOverflowBody || "";
   }
 
+  function buildPanel() {
+    if (document.getElementById(PANEL_ID)) {
+      panelRef = document.getElementById(PANEL_ID);
+      return panelRef;
+    }
+
+    const p = document.createElement("div");
+    p.id = PANEL_ID;
+    p.innerHTML = `
+<div class="backdrop"></div>
+<div class="machine">
+  <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
+  <div class="flash"></div>
+
+  <!-- ★追加：スポットライト/オーラ -->
+  <div class="spotlights"></div>
+  <div class="aura"></div>
+
+  <div class="paylines"></div>
+  <div class="confetti"></div>
+
+  <div class="grid">
+    ${Array.from({ length: 9 }).map((_, i) => `
+      <div class="cell" data-i="${i}" data-sym=""><div class="strip"></div></div>
+    `).join("")}
+  </div>
+
+  <div class="controlBar results">
+    <div class="chip result">回してみよう！</div>
+  </div>
+
+  <div class="controlBar controls">
+    <div class="chip">所持：<b class="have">0</b> 🪙</div>
+    <button class="btn primary spin">回す（-${SLOT_COST}）</button>
+    <button class="btn spin10">10連</button>
+  </div>
+</div>
+<button class="closeBtn" aria-label="close">×</button>
+`;
+    document.body.appendChild(p);
+    panelRef = p;
+
+    // 初期絵柄
+    p.querySelectorAll(".cell").forEach((c) => {
+      const s = pickSymbol();
+      c.dataset.sym = s.name;
+      setStrip(c.querySelector(".strip"), [s], c);
+    });
+
+    $(".spin", p).onclick = () => spin(p, 1);
+    $(".spin10", p).onclick = () => spin(p, 10);
+
+    $(".closeBtn", p).onclick = closePanel;
+    $(".backdrop", p).onclick = closePanel;
+
+    const img = $(".machineImg", p);
+    if (img) {
+      const onReady = () => requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(p)));
+      img.addEventListener("load", onReady, { once: true });
+      if (img.complete) onReady();
+    }
+
+    return p;
+  }
+
+  function syncHave(p) {
+    const haveEl = $(".have", p);
+    if (haveEl) haveEl.textContent = String(getCoin());
+  }
+
   /* =========================
    * Strip
    * ========================= */
   function cellH(cell) {
     const r = cell.getBoundingClientRect();
     if (r.height && r.height > 10) return (r.height | 0);
-
     const grid = cell.closest(".grid");
     if (grid) {
       const gr = grid.getBoundingClientRect();
@@ -644,84 +893,12 @@
         strip.style.transition = "none";
         setStrip(strip, [finalSym], cell);
         strip.style.transform = "translateY(0)";
-
         cell.dataset.sym = finalSym.name;
+
         resolve(finalSym);
       };
       strip.addEventListener("transitionend", onEnd);
     });
-  }
-
-  /* =========================
-   * DOM build
-   * ========================= */
-  function buildPanel() {
-    if (document.getElementById(PANEL_ID)) {
-      panelRef = document.getElementById(PANEL_ID);
-      return panelRef;
-    }
-
-    const p = document.createElement("div");
-    p.id = PANEL_ID;
-    p.innerHTML = `
-<div class="backdrop"></div>
-<div class="machine">
-  <img class="machineImg" src="${MACHINE_SRC}" alt="slot">
-  <div class="flash"></div>
-
-  <div class="paylines"></div>
-  <div class="confetti"></div>
-
-  <div class="grid">
-    ${Array.from({ length: 9 }).map((_, i) => `
-      <div class="cell" data-i="${i}" data-sym=""><div class="strip"></div></div>
-    `).join("")}
-  </div>
-
-  <div class="controlBar results">
-    <div class="chip result">回してみよう！</div>
-  </div>
-
-  <div class="controlBar controls">
-    <div class="chip">所持：<b class="have">0</b> 🪙</div>
-    <button class="btn primary spin">回す（-${SLOT_COST}）</button>
-    <button class="btn spin10">10連</button>
-  </div>
-</div>
-<button class="closeBtn" aria-label="close">×</button>
-`;
-    document.body.appendChild(p);
-    panelRef = p;
-
-    // 初期絵柄
-    p.querySelectorAll(".cell").forEach((c) => {
-      const s = pickSymbol();
-      c.dataset.sym = s.name;
-      setStrip(c.querySelector(".strip"), [s], c);
-    });
-
-    $(".spin", p).onclick = () => spin(p, 1);
-    $(".spin10", p).onclick = () => spin(p, 10);
-
-    $(".closeBtn", p).onclick = closePanel;
-    $(".backdrop", p).onclick = closePanel;
-
-    // 画像読み込み後に再計算（ズレ予防）
-    const img = $(".machineImg", p);
-    if (img) {
-      const onReady = () => {
-        requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(p)));
-      };
-      img.addEventListener("load", onReady, { once: true });
-      if (img.complete) onReady();
-    }
-
-    return p;
-  }
-
-  function syncHave(p) {
-    const haveEl = $(".have", p);
-    if (haveEl) haveEl.textContent = String(getCoin());
   }
 
   /* =========================
@@ -780,7 +957,7 @@
       totalPay += payThis;
       lastWinLines = w;
 
-      // 10連中の途中当たりも軽く演出
+      // 10連中の途中当たりも軽く演出（豪華版）
       if (w.length > 0 && count > 1) {
         triggerWinFx(panel, w, payThis, w.length);
       }
@@ -796,7 +973,7 @@
     }
 
     if (totalLines > 0) {
-      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, totalPay >= 1000 ? 4600 : 3600);
+      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, totalPay >= 1500 ? 5200 : (totalPay >= 1000 ? 4600 : 3600));
     } else {
       showResult(panel, "はずれ！", 2400);
     }
@@ -849,7 +1026,6 @@
       mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
 
-    // リサイズ時もセル高さ再計算（ズレ予防）
     window.addEventListener("resize", () => {
       if (panelRef && panelRef.style.display !== "none") {
         requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(panelRef)));
