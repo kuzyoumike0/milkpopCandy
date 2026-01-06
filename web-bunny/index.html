@@ -12,48 +12,106 @@
 <body>
   <div id="app">
 
+    <!-- ====== HUD（上部UI）====== -->
     <header id="hud">
       <div id="coin">🪙 <span id="coinValue">0</span></div>
 
-      <button id="petBtn">なでる</button>
-      <button id="shopBtn">ショップ</button>
+      <div id="hudBtns">
+        <button id="petBtn" type="button">なでる</button>
+        <button id="shopBtn" type="button">ショップ</button>
 
-      <!-- 旅立ちボタン（既にあるならIDだけ合わせてください） -->
-      <button id="departBtn" title="旅立ち（演出中は特別BGM）">旅立ち</button>
+        <!-- 旅立ち（演出中は特別BGMに切り替える想定） -->
+        <button id="departBtn" type="button" title="旅立ち（演出中は特別BGM）">旅立ち</button>
 
-      <button id="resetBtn">リセット</button>
+        <!-- スロット（開く/閉じる） -->
+        <button id="slotBtn" type="button" title="スロットを開く">スロット</button>
+
+        <button id="resetBtn" type="button">リセット</button>
+      </div>
     </header>
 
+    <!-- ====== フィールド（兎・コイン・演出）====== -->
     <main id="field">
+      <!-- 兎表示レイヤー -->
       <div id="bunnyLayer"></div>
+
+      <!-- コイン表示レイヤー -->
       <div id="coinLayer"></div>
 
-      <!-- メッセージ表示（あれば） -->
-      <div id="toastLayer"></div>
+      <!-- ふわっと通知や旅立ちメッセなど（既存実装がある想定） -->
+      <div id="toastLayer" aria-live="polite"></div>
     </main>
+
+    <!-- ====== スロット（モーダル/パネル）====== -->
+    <!-- 既存JSが「slotStarMachinePanel3x3」を探してるのでID固定 -->
+    <section id="slotStarMachinePanel3x3" class="slotPanel" aria-hidden="true">
+      <div class="slotPanelInner">
+
+        <div class="slotHeader">
+          <div class="slotTitle">🐰 うさぎスロット</div>
+          <button id="slotCloseBtn" type="button" class="slotClose" aria-label="閉じる">✕</button>
+        </div>
+
+        <!-- マシン表示エリア（背景画像などはJS/CSS側で） -->
+        <div id="slotMachineArea" class="slotMachineArea">
+          <!-- Canvas/DOMどちらでも使えるようにコンテナを用意 -->
+          <canvas id="slotCanvas" width="420" height="520"></canvas>
+
+          <!-- 当たり演出テキスト（「被ってる」対策で上寄せできるよう別枠） -->
+          <div id="slotMessage" class="slotMessage" aria-live="polite"></div>
+        </div>
+
+        <div class="slotFooter">
+          <div class="slotCost">
+            1回 <span id="slotCostValue">50</span> 🪙
+          </div>
+
+          <div class="slotBtns">
+            <button id="slotSpinBtn" type="button">回す</button>
+            <button id="slotStopBtn" type="button" disabled>止める</button>
+          </div>
+        </div>
+
+        <!-- 役/払い出しなど表示したい場合の枠（任意） -->
+        <div id="slotResult" class="slotResult"></div>
+      </div>
+    </section>
 
   </div>
 
-  <!-- ES Modules -->
+  <!-- ====== Scripts ====== -->
   <script type="module">
-    // BGM（朝/昼/夜 + 設定UI + 旅立ち特別BGM連携）
+    /**
+     * BGM（朝昼夜＋設定＋旅立ち専用）
+     * - index.html 側から window.BGM に生やして app.js から呼べるようにする
+     */
     import {
       bgmMountSettingsUI,
       bgmPlaySpecial,
       bgmClearSpecial
     } from "./BGM.js";
 
-    // 設定UIを表示（不要ならこの行を消す）
+    // 設定UI（不要ならコメントアウトOK）
     bgmMountSettingsUI({ position: "top-right", title: "BGM" });
 
-    // app.js 側から呼べるようにグローバル公開（importしなくてもOKにする）
+    // app.js / add.js 等から使えるように公開
     window.BGM = {
       playSpecial: bgmPlaySpecial,
       clearSpecial: bgmClearSpecial
     };
 
-    // ゲーム本体
+    /**
+     * メインゲーム（兎出現・コイン・旅立ち等）
+     * 既存が app.js ならこれだけでOK
+     */
     import "./app.js";
+
+    /**
+     * スロットが別ファイルなら読み込み
+     * （既に app.js 内に統合済みなら不要）
+     * 例：以前のスロットコードが別ファイルだった場合用
+     */
+    // import "./slot.js";
   </script>
 </body>
 </html>
