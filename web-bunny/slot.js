@@ -1,22 +1,20 @@
 (() => {
   const SLOT_COST = 50;
 
+  // coin1 を reabunny.png に変更したい件
+  // → coin1枠の画像だけ reabunny に差し替え（名前は coin1 のまま）
   const SYMBOLS = [
-    { name: "coin2", src: "./web-bunny/assets/slot/coin2.png", w: 22, pay: 120 },
-    { name: "coin3", src: "./web-bunny/assets/slot/coin3.png", w: 14, pay: 200 },
-    { name: "coin4", src: "./web-bunny/assets/slot/coin4.png", w: 6,  pay: 500 },
+    { name: "reabunny", src: "./web-bunny/assets/reabunny.png", w: 30, pay: 80 }, // ★ここ
+    { name: "coin2", src: "./web-bunny/assets/coin2.png",    w: 22, pay: 120 },
+    { name: "coin3", src: "./web-bunny/assets/coin3.png",    w: 14, pay: 200 },
+    { name: "coin4", src: "./web-bunny/assets/coin4.png",    w: 6,  pay: 500 },
 
-    { name: "babybunny", src: "./web-bunny/assets/slot/babybunny.png", w: 18, pay: 0,  special: "BUNNY" },
-    { name: "bunny1",    src: "./web-bunny/assets/slot/bunny1.png",    w: 12, pay: 0,  special: "BUNNY" },
-    { name: "bunny3",    src: "./web-bunny/assets/slot/bunny3.png",    w: 10, pay: 0,  special: "BUNNY" },
-    { name: "bunny4",    src: "./web-bunny/assets/slot/bunny4.png",    w: 8,  pay: 0,  special: "BUNNY" },
-    { name: "bunny5",    src: "./web-bunny/assets/slot/bunny5.png",    w: 6,  pay: 0,  special: "BUNNY" },
-    { name: "reabunny",    src: "./web-bunny/assets/slot/reabunny.png",    w: 6,  pay: 0,  special: "BUNNY" },
+    { name: "babybunny", src: "./web-bunny/assets/babybunny.png", w: 18, pay: 0, special: "BUNNY" },
 
-    { name: "ougon",     src: "./web-bunny/assets/slot/ougonunchi.png", w: 2,  pay: 1500 },
+    { name: "ougon", src: "./web-bunny/assets/ougonunchi.png", w: 2, pay: 1500 },
   ];
 
-  // --- DOM coin (表示値ベース) ---
+  // ---- coin read/write (DOMベース) ----
   const coinValueEl = () => document.getElementById("coinValue");
   const getCoins = () => {
     const el = coinValueEl();
@@ -31,6 +29,7 @@
   };
   const addCoins = (d) => setCoins(getCoins() + d);
 
+  // うさぎ当たりは app.js の内部に触れないため shopBtn 流用
   const tryAddBunnyByShopClick = () => {
     const shopBtn = document.getElementById("shopBtn");
     if (!shopBtn) return false;
@@ -38,50 +37,29 @@
     return true;
   };
 
-  const OVERLAY_ID = "slotOverlayAddonPro";
-  const FLOAT_BTN_ID = "slotFloatingBtn";
-
+  const OVERLAY_ID = "slotOverlayAlways";
   const CELL_H = 96;
 
   function injectStyles() {
     const css = `
-      #${FLOAT_BTN_ID}{
-        position: fixed;
-        right: 14px;
-        bottom: 14px;
-        z-index: 10000;
-        width: 56px;
-        height: 56px;
-        border-radius: 999px;
-        border: 1px solid rgba(0,0,0,0.12);
-        background: rgba(255,255,255,0.92);
-        backdrop-filter: blur(6px);
-        box-shadow: 0 16px 40px rgba(0,0,0,0.20);
-        cursor: pointer;
-        font-size: 22px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        user-select:none;
-      }
-      #${FLOAT_BTN_ID}:active{ transform: translateY(1px); }
-
+      /* ===== Always-on slot panel ===== */
       #${OVERLAY_ID}{
-        position:fixed; inset:0;
-        display:flex; align-items:center; justify-content:center;
-        background: rgba(0,0,0,0.34);
-        backdrop-filter: blur(5px);
-        z-index: 9999;
-      }
-      #${OVERLAY_ID}.hidden{ display:none; }
+        position: fixed;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
 
-      #${OVERLAY_ID} .modal{
         width: min(620px, calc(100% - 24px));
         border-radius: 18px;
         border: 1px solid rgba(255,255,255,0.30);
         background: rgba(255,255,255,0.94);
         box-shadow: 0 22px 70px rgba(0,0,0,0.28);
         padding: 14px 14px 16px;
+
+        /* ★ 常に最前面 */
+        z-index: 2147483647;
+        isolation: isolate;
+
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
       }
 
@@ -90,12 +68,10 @@
         padding-bottom: 8px;
       }
       #${OVERLAY_ID} .title{ font-size: 18px; font-weight: 900; }
-      #${OVERLAY_ID} .close{
-        border: 1px solid rgba(0,0,0,0.10);
-        background: #fff;
-        border-radius: 12px;
-        padding: 6px 10px;
-        cursor:pointer;
+      #${OVERLAY_ID} .mini{
+        font-size: 12px;
+        opacity: 0.8;
+        font-weight: 700;
       }
 
       #${OVERLAY_ID} .info{
@@ -172,13 +148,20 @@
         opacity: 0.55;
         cursor: not-allowed;
       }
+
+      /* 画面が狭い時、少し上に寄せる */
+      @media (max-height: 640px){
+        #${OVERLAY_ID}{
+          top: 56%;
+        }
+      }
     `;
     const style = document.createElement("style");
     style.textContent = css;
     document.head.appendChild(style);
   }
 
-  function preloadImages() {
+  function preload() {
     for (const s of SYMBOLS) {
       const img = new Image();
       img.src = s.src;
@@ -233,6 +216,7 @@
         if (e.propertyName !== "transform") return;
         strip.removeEventListener("transitionend", onEnd);
 
+        // 最終1枚にして軽量化
         strip.style.transition = "none";
         setStripContent(strip, [finalSym]);
         strip.style.transform = `translateY(0px)`;
@@ -258,62 +242,11 @@
     return "当たり！";
   }
 
-  function buildOverlay() {
-    let overlay = document.getElementById(OVERLAY_ID);
-    if (overlay) return overlay;
-
-    overlay = document.createElement("div");
-    overlay.id = OVERLAY_ID;
-    overlay.className = "hidden";
-    overlay.innerHTML = `
-      <div class="modal" role="dialog" aria-modal="true">
-        <div class="header">
-          <div class="title">🎰 うさぎスロット（縦リール）</div>
-          <button class="close">✕</button>
-        </div>
-        <div class="info">
-          <div>コスト：<b>${SLOT_COST}</b> 🪙　所持：<b class="have">0</b> 🪙</div>
-          <div class="hint">Sキーでも開けます。3つ揃うと当たり！</div>
-        </div>
-
-        <div class="reels">
-          <div class="reelWindow"><div class="reelStrip" data-reel="0"></div></div>
-          <div class="reelWindow"><div class="reelStrip" data-reel="1"></div></div>
-          <div class="reelWindow"><div class="reelStrip" data-reel="2"></div></div>
-        </div>
-
-        <div class="result">コインをためて回そう！</div>
-
-        <div class="actions">
-          <button class="primary spin">回す</button>
-          <button class="spin10">10連</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-
-    // 初期絵柄
-    const strips = [...overlay.querySelectorAll(".reelStrip")];
-    for (const s of strips) setStripContent(s, [pickSymbol()]);
-
-    return overlay;
-  }
-
-  function syncHave(overlay) {
-    const haveEl = overlay.querySelector(".have");
-    if (haveEl) haveEl.textContent = String(getCoins());
-  }
-
-  function setOpen(overlay, open) {
-    overlay.classList.toggle("hidden", !open);
-    if (open) syncHave(overlay);
-  }
-
-  async function spinOnce(overlay) {
-    const resultEl = overlay.querySelector(".result");
-    const spinBtn = overlay.querySelector(".spin");
-    const spin10Btn = overlay.querySelector(".spin10");
-    const strips = [...overlay.querySelectorAll(".reelStrip")];
+  async function spinOnce(panel) {
+    const resultEl = panel.querySelector(".result");
+    const spinBtn = panel.querySelector(".spin");
+    const spin10Btn = panel.querySelector(".spin10");
+    const strips = [...panel.querySelectorAll(".reelStrip")];
 
     const have = getCoins();
     if (have < SLOT_COST) {
@@ -322,7 +255,7 @@
     }
 
     setCoins(have - SLOT_COST);
-    syncHave(overlay);
+    syncHave(panel);
 
     spinBtn.disabled = true;
     spin10Btn.disabled = true;
@@ -344,15 +277,15 @@
       resultEl.textContent = "はずれ！";
     }
 
-    syncHave(overlay);
+    syncHave(panel);
     spinBtn.disabled = false;
     spin10Btn.disabled = false;
   }
 
-  async function spinTen(overlay) {
-    const resultEl = overlay.querySelector(".result");
-    const spinBtn = overlay.querySelector(".spin");
-    const spin10Btn = overlay.querySelector(".spin10");
+  async function spinTen(panel) {
+    const resultEl = panel.querySelector(".result");
+    const spinBtn = panel.querySelector(".spin");
+    const spin10Btn = panel.querySelector(".spin10");
 
     const totalCost = SLOT_COST * 10;
     const have = getCoins();
@@ -362,7 +295,7 @@
     }
 
     setCoins(have - totalCost);
-    syncHave(overlay);
+    syncHave(panel);
 
     spinBtn.disabled = true;
     spin10Btn.disabled = true;
@@ -374,7 +307,7 @@
     for (let i = 0; i < 10; i++) {
       resultEl.textContent = `10連中… ${i + 1}/10`;
 
-      const strips = [...overlay.querySelectorAll(".reelStrip")];
+      const strips = [...panel.querySelectorAll(".reelStrip")];
       const f0 = pickSymbol();
       const f1 = pickSymbol();
       const f2 = pickSymbol();
@@ -390,7 +323,7 @@
         if (f0.pay && f0.pay > 0) { addCoins(f0.pay); winCoins += f0.pay; }
         else if (f0.special === "BUNNY") { if (tryAddBunnyByShopClick()) winBunny++; }
       }
-      syncHave(overlay);
+      syncHave(panel);
     }
 
     resultEl.textContent = `10連結果：当たり ${winCount}回 / 🪙 +${winCoins} / 🐰 +${winBunny}`;
@@ -398,52 +331,78 @@
     spin10Btn.disabled = false;
   }
 
-  function ensureFloatingButton(openFn) {
-    let btn = document.getElementById(FLOAT_BTN_ID);
-    if (btn) return btn;
+  function syncHave(panel) {
+    const haveEl = panel.querySelector(".have");
+    if (haveEl) haveEl.textContent = String(getCoins());
+  }
 
-    btn = document.createElement("button");
-    btn.id = FLOAT_BTN_ID;
-    btn.type = "button";
-    btn.textContent = "🎰";
-    btn.title = "スロット";
-    btn.addEventListener("click", openFn);
-    document.body.appendChild(btn);
-    return btn;
+  function buildPanel() {
+    let panel = document.getElementById(OVERLAY_ID);
+    if (panel) return panel;
+
+    panel = document.createElement("div");
+    panel.id = OVERLAY_ID;
+    panel.style.zIndex = "2147483647";
+
+    panel.innerHTML = `
+      <div class="header">
+        <div>
+          <div class="title">🎰 うさぎスロット</div>
+          <div class="mini">（常時表示・最前面）</div>
+        </div>
+        <div class="mini">コスト：<b>${SLOT_COST}</b> 🪙</div>
+      </div>
+
+      <div class="info">
+        <div>所持：<b class="have">0</b> 🪙</div>
+        <div class="hint">縦に流れるリール。本格停止。3つ揃うと当たり！</div>
+      </div>
+
+      <div class="reels">
+        <div class="reelWindow"><div class="reelStrip" data-reel="0"></div></div>
+        <div class="reelWindow"><div class="reelStrip" data-reel="1"></div></div>
+        <div class="reelWindow"><div class="reelStrip" data-reel="2"></div></div>
+      </div>
+
+      <div class="result">回してみよう！</div>
+
+      <div class="actions">
+        <button class="primary spin">回す</button>
+        <button class="spin10">10連</button>
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    // 初期絵柄
+    const strips = [...panel.querySelectorAll(".reelStrip")];
+    for (const s of strips) setStripContent(s, [pickSymbol()]);
+
+    return panel;
   }
 
   function boot() {
     injectStyles();
-    preloadImages();
+    preload();
 
-    const overlay = buildOverlay();
-    const open = () => setOpen(overlay, true);
+    const panel = buildPanel();
+    syncHave(panel);
 
-    // 必ず見える右下ボタンを作る（HUDに入らなくてもOK）
-    ensureFloatingButton(open);
+    panel.querySelector(".spin")?.addEventListener("click", () => spinOnce(panel));
+    panel.querySelector(".spin10")?.addEventListener("click", () => spinTen(panel));
 
-    // close actions
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) setOpen(overlay, false); });
-    overlay.querySelector(".close")?.addEventListener("click", () => setOpen(overlay, false));
-
-    overlay.querySelector(".spin")?.addEventListener("click", () => spinOnce(overlay));
-    overlay.querySelector(".spin10")?.addEventListener("click", () => spinTen(overlay));
-
-    // Sキーで開く（デバッグ用の保険）
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "s" || e.key === "S") open();
-    });
-
-    // coinValue監視（あれば）
+    // coinValue変化に追従（HUDコインが更新されてもスロット側所持が追従）
     const el = coinValueEl();
     if (el) {
-      const mo = new MutationObserver(() => {
-        if (!overlay.classList.contains("hidden")) syncHave(overlay);
-      });
+      const mo = new MutationObserver(() => syncHave(panel));
       mo.observe(el, { childList: true, characterData: true, subtree: true });
     }
+
+    // もし誰かにz-indexで負けた時の保険：定期的に最前面を再適用
+    setInterval(() => {
+      panel.style.zIndex = "2147483647";
+    }, 1000);
   }
 
-  // app.js後に確実に動かす（loadで起動）
   window.addEventListener("load", boot);
 })();
