@@ -673,6 +673,39 @@ html,body{
   z-index: 9999;      /* 何より前に出す */
   pointer-events: none;
 }
+/* =========================
+ * saku.png（左右に小さく表示）
+ * ========================= */
+.saku {
+  position: fixed;
+  bottom: 6px;
+
+  width: 96px;        /* ← サイズ調整はここ */
+  height: auto;
+
+  opacity: 0.9;
+  pointer-events: none; /* クリックを邪魔しない */
+  z-index: 4;           /* 花火より下 / UIより下なら 3〜5 */
+}
+
+/* 左 */
+.saku.left {
+  left: 6px;
+}
+
+/* 右（左右反転させると綺麗） */
+.saku.right {
+  right: 6px;
+  transform: scaleX(-1);
+}
+
+/* スマホではさらに小さく */
+@media (max-width: 600px) {
+  .saku {
+    width: 64px;
+    bottom: 4px;
+  }
+}
 
 /* ===== ゲームレイヤー ===== */
 #bunnyLayer { position: relative; z-index: 3; }
