@@ -842,6 +842,33 @@
 
   document.body.appendChild(img);
 })();
+// ===== saku.png を左右に小さく表示 =====
+(function mountSakuSides() {
+  const SRC = "./assets/saku.png";
+
+  if (document.getElementById("sakuLeft")) return;
+
+  const make = (id, side) => {
+    const img = document.createElement("img");
+    img.id = id;
+    img.src = SRC;
+    img.alt = "saku";
+    img.draggable = false;
+    img.decoding = "async";
+    img.loading = "eager";
+
+    img.className = `saku ${side}`;
+
+    img.addEventListener("error", () => {
+      console.error("[saku] load failed:", img.src);
+    });
+
+    document.body.appendChild(img);
+  };
+
+  make("sakuLeft", "left");
+  make("sakuRight", "right");
+})();
 
   init();
 })();
