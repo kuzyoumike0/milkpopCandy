@@ -270,7 +270,7 @@
   function setHatStyleFor(bunny) {
   // ★かなり下：耳の下〜頭の中央
   const base = {
-    x: "52%",
+    x: "48%",
     y: "36px",   // ← 大幅に下
     w: "100px",   // ← 帽子をしっかり主張
     r: "-5deg",
