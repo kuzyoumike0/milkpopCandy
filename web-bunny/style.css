@@ -52,16 +52,13 @@ html,body{
   background:#000; /* 背景ロード前の保険 */
 }
 
-#bunnyLayer,
 #coinLayer{
-  position:absolute;
-  inset:0;
+  pointer-events:none;   /* ← 透明の板がクリックを吸わないようにする */
+}
+.coin, .ougonunchi{
+  pointer-events:auto;   /* ← コイン自身だけ拾う */
 }
 
-/* ✅ coin の click/hover を確実に拾う */
-#coinLayer{
-  pointer-events:auto;
-}
 
 /* =========================
    COIN
