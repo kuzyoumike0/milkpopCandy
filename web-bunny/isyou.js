@@ -1,4 +1,4 @@
-// isyou.js — お洒落（ショップ＋複数装着＋flip補正＋称号連動＋赤枠）完全版（WB待機つき）
+  // isyou.js — お洒落（ショップ＋複数装着＋flip補正＋称号連動＋赤枠）完全版（WB待機つき）
 // ★partyhat を「耳の間」に自然にかぶせる（anchorY対応）
 
 (() => {
@@ -37,16 +37,16 @@
       title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
     };
 
-   partyhat: {
-  label: "パーティーハット",
-  img: "./assets/isyou/partyhat.png",
-  price: 500,
+       partyhat: {
+      label: "パーティーハット",
+      img: "./assets/isyou/partyhat.png",
+      price: 500,
 
-  anchorY: 0.03,   // 頭頂部
-  offsetX: 14,
-  offsetY: -8,     // 頭に軽く接する
-  scale: 0.75,     // ★ここが決定値（これ以上はデカい）
-  z: 25,
+      anchorY: 0.03,   // 頭頂部
+      offsetX: 14,
+      offsetY: -8,     // 頭に軽く接する
+      scale: 0.75,     // ★ここが決定値（これ以上はデカい）
+      z: 25,
 },
 
       crown: {
