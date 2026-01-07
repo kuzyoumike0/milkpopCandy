@@ -1,8 +1,9 @@
-// isyou.js — お洒落ボタンが出ない対策・完全版（WB待機 + HUD待機）
-// - #hud が出るまで待ってからボタンを追加
-// - 既にあれば再利用
-// - 目立つように最低限のCSSも注入
-// - partyhatは頭上に乗る設定（anchorY/offsetY調整）
+// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版
+// ✅ #hud待機して「お洒落ボタン」が必ず出る
+// ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
+// ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
+// ✅ 赤枠は見えるように選択中だけ z-index を上げる
+// ✅ partyhat は「頭の上」に固定（anchorYマイナス）
 
 (() => {
   "use strict";
@@ -10,12 +11,12 @@
   const WAIT_MS = 12000;
   const TICK_MS = 50;
 
-  function waitFor(fn, timeoutMs = WAIT_MS) {
+  function waitFor(getter, timeoutMs = WAIT_MS) {
     const start = Date.now();
     return new Promise((resolve, reject) => {
       const t = setInterval(() => {
         try {
-          const v = fn();
+          const v = getter();
           if (v) {
             clearInterval(t);
             resolve(v);
@@ -33,7 +34,6 @@
   function waitForWB() {
     return waitFor(() => (window.WB && typeof window.WB.on === "function" ? window.WB : null));
   }
-
   function waitForHUD() {
     return waitFor(() => document.getElementById("hud"));
   }
@@ -47,10 +47,57 @@
       window.__ISYOU_INITED__ = true;
       console.log("[isyou] init");
 
-      // CSS（ボタンが確実に見える）
-      if (!document.getElementById("isyouBtnCssV1")) {
+      /* =========================
+       * Config
+       * ========================= */
+      const LS = {
+        owned: "wb_isyou_owned_v2",          // { itemKey: number }
+        equipped: "wb_isyou_equipped_v2",    // { bornAt: { itemKey:true } }
+        title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
+      };
+
+      const ITEMS = {
+        partyhat: {
+          label: "パーティーハット",
+          img: "/assets/isyou/partyhat.png",
+          price: 500,
+
+          // ★頭の上（耳の間）に乗せる確定値
+          anchorY: -0.12,
+          offsetX: 0,
+          offsetY: -10,
+          scale: 0.40,
+          z: 30,
+        },
+        crown: {
+          label: "王冠",
+          img: "/assets/isyou/crown.png",
+          price: 3500,
+          anchorY: -0.08,
+          offsetX: 0,
+          offsetY: -12,
+          scale: 0.55,
+          z: 35,
+        },
+        ribbon: {
+          label: "リボン",
+          img: "/assets/isyou/ribbon.png",
+          price: 1200,
+          anchorY: 0.62,
+          offsetX: 0,
+          offsetY: 4,
+          scale: 0.60,
+          z: 20,
+        },
+      };
+
+      /* =========================
+       * CSS
+       * ========================= */
+      (function injectCSS() {
+        if (document.getElementById("isyouStyleFinalV1")) return;
         const s = document.createElement("style");
-        s.id = "isyouBtnCssV1";
+        s.id = "isyouStyleFinalV1";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -66,48 +113,93 @@
   margin-left:8px;
 }
 #isyouBtn:hover{ filter:brightness(1.03); }
+
+/* 装着モード：ホバー赤枠 */
+body.isyouEquipMode .bunnyWrap:hover{
+  outline:4px solid rgba(255,64,64,.60);
+  outline-offset:3px;
+  border-radius:18px;
+}
+
+/* 選択中：赤枠 + 最前面 */
+.bunnyWrap.isyouSelectedTarget{
+  outline:4px solid rgba(255,64,64,.92);
+  outline-offset:3px;
+  border-radius:18px;
+  box-shadow:0 0 0 2px rgba(255,255,255,.65) inset;
+  position:relative;
+  z-index:2147483590 !important;
+}
+
+/* 装着演出（軽くポン） */
+.bunnyWrap.isyouPopHat .isyouItem[data-item-key="partyhat"]{
+  animation:isyouPop 220ms ease-out;
+}
+@keyframes isyouPop{
+  0%{ transform: var(--isyouT) scale(0.1); }
+  70%{ transform: var(--isyouT) scale(1.15); }
+  100%{ transform: var(--isyouT) scale(1.0); }
+}
+
+/* アクセサリレイヤ */
+.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
+.isyouItem{
+  position:absolute;
+  left:50%;
+  transform-origin:50% 50%;
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+}
+
+/* モーダル */
+.isyouBackdrop{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.45);
+  display:grid; place-items:center;
+  z-index:2147483600;
+}
+.isyouModal{
+  width:min(92vw,560px);
+  max-height:86vh;
+  background:#fff;
+  border-radius:18px;
+  padding:14px;
+  box-shadow:0 20px 60px rgba(0,0,0,.30);
+  overflow:auto;
+  pointer-events:auto;
+}
+
+/* ★装着モード中：背景はクリックを通す / モーダルは触れる */
+body.isyouEquipMode .isyouBackdrop{ pointer-events:none; background:rgba(0,0,0,.25); }
+body.isyouEquipMode .isyouModal{ pointer-events:auto; }
+
+.isyouHeader{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.isyouTitle{ font-weight:900; }
+.isyouClose{ border:none; background:#eee; border-radius:12px; padding:6px 10px; cursor:pointer; }
+.isyouTabs{ display:flex; gap:8px; margin-top:10px; }
+.isyouTab{ border:none; padding:8px 10px; border-radius:12px; cursor:pointer; background:#f3f3f3; font-weight:800; }
+.isyouTab.on{ background:#ffe6f2; }
+.isyouGrid{ margin-top:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
+.isyouCard{ background:#fff; border-radius:14px; padding:10px; box-shadow:0 6px 18px rgba(0,0,0,.12); }
+.isyouCardHead{ display:flex; align-items:center; gap:10px; }
+.isyouThumb{ width:54px; height:54px; object-fit:contain; }
+.isyouName{ font-weight:900; }
+.isyouRow{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.isyouBtn{
+  border:none; padding:7px 10px; border-radius:12px; cursor:pointer;
+  background:#fff; box-shadow:0 4px 12px rgba(0,0,0,.12);
+  font-weight:800;
+}
+.isyouBtn.primary{ background:#ffe6f2; }
+.isyouSmall{ font-size:12px; opacity:.85; }
         `;
         document.head.appendChild(s);
-      }
+      })();
 
-      // ボタン作成（左のボタン群に混ぜる）
-      let btn = document.getElementById("isyouBtn");
-      if (!btn) {
-        btn = document.createElement("button");
-        btn.id = "isyouBtn";
-        btn.textContent = "お洒落";
-
-        // shopBtn があるならその左に入れる（ボタン群に揃える）
-        const shopBtn = document.getElementById("shopBtn");
-        if (shopBtn && shopBtn.parentElement === hud) {
-          hud.insertBefore(btn, shopBtn);
-        } else {
-          hud.appendChild(btn);
-        }
-      }
-
-      // ここまでで「お洒落ボタンが出ない」は解消するはず
-      // ↓以降：最低限の装着機能（partyhatのみ）も付けておく
-
-      const LS = {
-        owned: "wb_isyou_owned_v2",
-        equipped: "wb_isyou_equipped_v2",
-      };
-
-      const ITEMS = {
-       partyhat: {
-  label: "パーティーハット",
-  img: "/assets/isyou/partyhat.png",
-  price: 500,
-
-  anchorY: -0.12,   // ★耳を含めた頭の一番上を基準にする
-  offsetX: 0,       // ★耳の間の中央
-  offsetY: -10,     // ★頭に軽く乗せる
-  scale: 0.40,      // ★小物サイズ（これ以上大きいと主張しすぎる）
-  z: 30,
-},
-
-
+      /* =========================
+       * Storage
+       * ========================= */
       function loadJSON(key, fallback) {
         try {
           const v = JSON.parse(localStorage.getItem(key) || "null");
@@ -123,10 +215,279 @@
         localStorage.setItem(LS.equipped, JSON.stringify(equipped));
       }
 
+      /* =========================
+       * Coins
+       * ========================= */
+      function getCoins() {
+        if (typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0;
+        if (typeof WB.coins === "number") return WB.coins;
+        return 0;
+      }
+      function spendCoins(amount) {
+        amount = Math.max(0, Math.floor(Number(amount) || 0));
+        if (amount <= 0) return true;
+        if (typeof WB.spendCoin === "function") return !!WB.spendCoin(amount);
+        if (typeof WB.coins === "number") {
+          if (WB.coins < amount) return false;
+          WB.coins -= amount;
+          WB.updateHud?.();
+          WB.saveCoins?.();
+          return true;
+        }
+        return false;
+      }
+
+      /* =========================
+       * HUD Button（必ず作る）
+       * ========================= */
+      let btn = document.getElementById("isyouBtn");
+      if (!btn) {
+        btn = document.createElement("button");
+        btn.id = "isyouBtn";
+        btn.textContent = "お洒落";
+        const shopBtn = document.getElementById("shopBtn");
+        if (shopBtn && shopBtn.parentElement === hud) hud.insertBefore(btn, shopBtn);
+        else hud.appendChild(btn);
+      }
+
+      /* =========================
+       * Modal
+       * ========================= */
+      let backdrop = null;
+      let tab = "shop"; // shop | equip
+      let equipMode = false;
+
+      const selectedItems = new Set();
+      let selectedBornAt = null;
+
       function getBunnyList() {
         return Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
       }
 
+      function clearSelectedTargetVisual() {
+        (getBunnyList() || []).forEach((b) => b?.wrap?.classList?.remove("isyouSelectedTarget"));
+      }
+      function setSelectedTarget(bunnyOrNull) {
+        clearSelectedTargetVisual();
+        if (!bunnyOrNull) { selectedBornAt = null; return; }
+        selectedBornAt = bunnyOrNull.bornAt;
+        bunnyOrNull.wrap?.classList?.add("isyouSelectedTarget");
+      }
+      function getSelectedBunny() {
+        if (selectedBornAt == null) return null;
+        return (getBunnyList() || []).find((b) => b && b.bornAt === selectedBornAt) || null;
+      }
+
+      function closeModal() {
+        equipMode = false;
+        document.body.classList.remove("isyouEquipMode");
+        selectedItems.clear();
+        setSelectedTarget(null);
+        try { backdrop?.remove(); } catch {}
+        backdrop = null;
+      }
+
+      function openModal() {
+        if (backdrop) return;
+
+        backdrop = document.createElement("div");
+        backdrop.className = "isyouBackdrop";
+
+        const modal = document.createElement("div");
+        modal.className = "isyouModal";
+        modal.addEventListener("click", (e) => e.stopPropagation());
+
+        const head = document.createElement("div");
+        head.className = "isyouHeader";
+
+        const title = document.createElement("div");
+        title.className = "isyouTitle";
+        title.textContent = "🎀 お洒落";
+
+        const close = document.createElement("button");
+        close.className = "isyouClose";
+        close.textContent = "×";
+        close.addEventListener("click", closeModal);
+
+        head.appendChild(title);
+        head.appendChild(close);
+
+        const tabs = document.createElement("div");
+        tabs.className = "isyouTabs";
+
+        const tabShop = document.createElement("button");
+        tabShop.className = "isyouTab";
+        tabShop.textContent = "ショップ";
+
+        const tabEquip = document.createElement("button");
+        tabEquip.className = "isyouTab";
+        tabEquip.textContent = "装着";
+
+        tabs.appendChild(tabShop);
+        tabs.appendChild(tabEquip);
+
+        const body = document.createElement("div");
+
+        function render() {
+          tabShop.classList.toggle("on", tab === "shop");
+          tabEquip.classList.toggle("on", tab === "equip");
+          body.innerHTML = "";
+
+          const coinLine = document.createElement("div");
+          coinLine.className = "isyouSmall";
+          coinLine.textContent = `所持コイン：${getCoins()} 🪙`;
+          body.appendChild(coinLine);
+
+          if (tab === "shop") {
+            const grid = document.createElement("div");
+            grid.className = "isyouGrid";
+
+            Object.entries(ITEMS).forEach(([key, it]) => {
+              const card = document.createElement("div");
+              card.className = "isyouCard";
+
+              const top = document.createElement("div");
+              top.className = "isyouCardHead";
+
+              const img = document.createElement("img");
+              img.className = "isyouThumb";
+              img.src = it.img;
+
+              const name = document.createElement("div");
+              name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${owned[key] || 0}</div>`;
+
+              top.appendChild(img);
+              top.appendChild(name);
+
+              const row = document.createElement("div");
+              row.className = "isyouRow";
+
+              const buy = document.createElement("button");
+              buy.className = "isyouBtn primary";
+              buy.textContent = `購入（${it.price}🪙）`;
+              buy.addEventListener("click", () => {
+                const ok = spendCoins(it.price);
+                if (!ok) {
+                  buy.textContent = "コイン不足";
+                  setTimeout(() => (buy.textContent = `購入（${it.price}🪙）`), 700);
+                  return;
+                }
+                owned[key] = (owned[key] || 0) + 1;
+                saveAll();
+                WB.updateHud?.();
+                render();
+              });
+
+              row.appendChild(buy);
+              card.appendChild(top);
+              card.appendChild(row);
+              grid.appendChild(card);
+            });
+
+            body.appendChild(grid);
+          }
+
+          if (tab === "equip") {
+            const rowTop = document.createElement("div");
+            rowTop.className = "isyouRow";
+
+            const toggle = document.createElement("button");
+            toggle.className = "isyouBtn primary";
+            toggle.textContent = equipMode ? "装着モード：ON" : "装着モード：OFF";
+            toggle.addEventListener("click", () => {
+              equipMode = !equipMode;
+              document.body.classList.toggle("isyouEquipMode", equipMode);
+              if (!equipMode) setSelectedTarget(null);
+              render();
+            });
+
+            const hint = document.createElement("div");
+            hint.className = "isyouSmall";
+            hint.textContent = "①アイテム選択 ②うさぎをクリックで赤枠 ③同じうさぎを再クリックで装着";
+
+            rowTop.appendChild(toggle);
+            rowTop.appendChild(hint);
+            body.appendChild(rowTop);
+
+            const sel = getSelectedBunny();
+            const targetLine = document.createElement("div");
+            targetLine.className = "isyouSmall";
+            targetLine.style.marginTop = "6px";
+            targetLine.textContent = sel
+              ? `装着対象：${sel.kind || "bunny"}（ID: ${sel.bornAt}）`
+              : "装着対象：未選択（うさぎをクリックして赤枠で選択）";
+            body.appendChild(targetLine);
+
+            const grid = document.createElement("div");
+            grid.className = "isyouGrid";
+
+            Object.entries(ITEMS).forEach(([key, it]) => {
+              const count = owned[key] || 0;
+
+              const card = document.createElement("div");
+              card.className = "isyouCard";
+
+              const top = document.createElement("div");
+              top.className = "isyouCardHead";
+
+              const img = document.createElement("img");
+              img.className = "isyouThumb";
+              img.src = it.img;
+
+              const name = document.createElement("div");
+              name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${count}</div>`;
+
+              top.appendChild(img);
+              top.appendChild(name);
+
+              const row = document.createElement("div");
+              row.className = "isyouRow";
+
+              const pick = document.createElement("button");
+              pick.className = "isyouBtn";
+              const on = selectedItems.has(key);
+              pick.textContent = on ? "選択中" : "選択";
+              pick.style.background = on ? "#ffe6f2" : "#fff";
+              pick.disabled = count <= 0;
+              pick.addEventListener("click", () => {
+                if (count <= 0) return;
+                if (selectedItems.has(key)) selectedItems.delete(key);
+                else selectedItems.add(key);
+                render();
+              });
+
+              row.appendChild(pick);
+              card.appendChild(top);
+              card.appendChild(row);
+              grid.appendChild(card);
+            });
+
+            body.appendChild(grid);
+          }
+        }
+
+        tabShop.addEventListener("click", () => { tab = "shop"; render(); });
+        tabEquip.addEventListener("click", () => { tab = "equip"; render(); });
+
+        modal.appendChild(head);
+        modal.appendChild(tabs);
+        modal.appendChild(body);
+
+        backdrop.appendChild(modal);
+        backdrop.addEventListener("click", closeModal);
+
+        document.body.appendChild(backdrop);
+        render();
+      }
+
+      btn.addEventListener("click", () => {
+        WB.unlockAudioOnce?.();
+        openModal();
+      });
+
+      /* =========================
+       * Accessory draw
+       * ========================= */
       function ensureLayer(bunny) {
         if (!bunny?.wrap) return null;
         let layer = bunny.wrap.querySelector(".isyouLayer");
@@ -138,47 +499,24 @@
         return layer;
       }
 
-      // レイヤCSS
-      if (!document.getElementById("isyouLayerCssV1")) {
-        const s = document.createElement("style");
-        s.id = "isyouLayerCssV1";
-        s.textContent = `
-.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
-.isyouItem{
-  position:absolute;
-  left:50%;
-  transform-origin:50% 50%;
-  pointer-events:none;
-  user-select:none;
-  -webkit-user-drag:none;
-}
-.bunnyWrap.isyouSelectedTarget{
-  outline:4px solid rgba(255,64,64,.92);
-  outline-offset:3px;
-  border-radius:18px;
-  position:relative;
-  z-index:2147483590;
-}
-        `;
-        document.head.appendChild(s);
-      }
-
       function applyTransform(imgEl, bunny, it) {
         const flip = !!bunny?.wrap?.classList?.contains("flip");
         const fx = flip ? -1 : 1;
         const ox = (Number(it.offsetX) || 0) * (flip ? -1 : 1);
         const oy = (Number(it.offsetY) || 0);
         const sc = (Number(it.scale) || 1);
-
         imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
-        imgEl.style.transform = `translate(calc(-50% + ${ox}px), ${oy}px) scale(${sc}) scaleX(${fx})`;
+        const baseT = `translate(calc(-50% + ${ox}px), ${oy}px) scale(${sc}) scaleX(${fx})`;
+        imgEl.style.setProperty("--isyouT", baseT);
+        imgEl.style.transform = baseT;
         imgEl.style.zIndex = String(it.z || 10);
       }
 
       function drawAllForBunny(bunny) {
         if (!bunny?.wrap || bunny.isBaby) return;
-        const k = String(bunny.bornAt);
-        const eq = equipped[k] || {};
+
+        const key = String(bunny.bornAt);
+        const eq = equipped[key] || {};
         const layer = ensureLayer(bunny);
         if (!layer) return;
 
@@ -200,66 +538,60 @@
         (getBunnyList() || []).forEach(drawAllForBunny);
       }
 
-      // 赤枠選択→その子にだけ付ける（partyhatのみ）
-      let equipMode = false;
-      let selectedBornAt = null;
-
-      function clearSelect() {
-        (getBunnyList() || []).forEach((b) => b?.wrap?.classList?.remove("isyouSelectedTarget"));
-        selectedBornAt = null;
-      }
-      function selectBunny(bunny) {
-        clearSelect();
-        if (!bunny) return;
-        selectedBornAt = bunny.bornAt;
-        bunny.wrap?.classList?.add("isyouSelectedTarget");
-      }
-
-      function toggleHat(bunny) {
+      function toggleEquip(bunny, itemKey) {
         if (!bunny || bunny.isBaby) return;
-        if ((owned.partyhat || 0) <= 0) {
-          // 未所持なら1個だけ配る（動作確認用。不要なら消してOK）
-          owned.partyhat = 1;
-        }
-        const k = String(bunny.bornAt);
-        equipped[k] = equipped[k] || {};
-        equipped[k].partyhat = !equipped[k].partyhat;
+        if ((owned[itemKey] || 0) <= 0) return;
+
+        const key = String(bunny.bornAt);
+        equipped[key] = equipped[key] || {};
+        equipped[key][itemKey] = !equipped[key][itemKey];
         saveAll();
         drawAllForBunny(bunny);
+
+        // 「ポンッ」演出（partyhatのときだけ）
+        if (itemKey === "partyhat") {
+          bunny.wrap.classList.add("isyouPopHat");
+          setTimeout(() => bunny.wrap?.classList?.remove("isyouPopHat"), 260);
+        }
       }
 
-      // クリック判定
+      /* =========================
+       * Equip mode click (赤枠選択→同じ子再クリックで装着)
+       * ========================= */
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
+
+        // モーダル内クリックは無視（帽子選択を邪魔しない）
+        if (e.target?.closest?.(".isyouModal")) return;
+
         const wrap = e.target?.closest?.(".bunnyWrap");
         if (!wrap) return;
+
         const bunny = (getBunnyList() || []).find((b) => b && b.wrap === wrap) || null;
-        if (!bunny) return;
+        if (!bunny || bunny.isBaby) return;
 
         if (selectedBornAt == null) {
-          selectBunny(bunny);
+          setSelectedTarget(bunny);
           return;
         }
+
         if (bunny.bornAt === selectedBornAt) {
-          toggleHat(bunny);
+          if (selectedItems.size === 0) return;
+          selectedItems.forEach((k) => toggleEquip(bunny, k));
           return;
         }
-        selectBunny(bunny);
+
+        setSelectedTarget(bunny);
       }, { capture: true });
 
-      // ボタンでモード切替（簡易）
-      btn.addEventListener("click", () => {
-        WB.unlockAudioOnce?.();
-        equipMode = !equipMode;
-        if (!equipMode) clearSelect();
-        btn.textContent = equipMode ? "お洒落(装着ON)" : "お洒落";
-      });
-
+      /* =========================
+       * Hooks
+       * ========================= */
       WB.on?.("bunnyCountChanged", redrawAll);
       WB.on?.("resize", redrawAll);
 
       redrawAll();
-      console.log("[isyou] ready + button ok");
+      console.log("[isyou] ready");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
