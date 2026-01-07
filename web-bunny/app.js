@@ -1,12 +1,12 @@
-/* app.js — Milkpop牧場（コア）
+/* app.js — Milkpop牧場（クリックドロップ専用 + ゲージ内部 + MAXハート）
+ * - ゲージUIは表示しない（内部で増える）
+ * - 放置でコインは落とさない（クリック時のみ）
+ * - ゲージMAX(100)の時だけ hart.png をうさぎ上に表示
+ * - コイン画像は assets/coin1.png〜coin4.png を使用
+ * - うさぎクリックでコインを落とす（1秒クール） + poyo.mp3
+ * - コイン回収は hover / click + coin.mp3
+ * - お迎え（shopBtn）：コイン消費で baby 追加→3分で成長
  * - window.WB を提供（拡張JSが参照）
- * - うさぎ2匹で開始 / 左右うろうろ（画面外に出ない）
- * - 放置でコインを落とす
- * - うさぎクリックでもコイン（1秒クール） + poyo.mp3
- * - コインは床に重なって溜まる / クリック or ホバーで回収 + coin.mp3
- * - お迎え（shopBtn）：コイン消費で babybunny 追加→3分で成長
- * - 💗ゲージ：溜まるほどコイン増 / MAXで hart.png をうさぎ上に表示
- * - resetBtn：ローカルデータ初期化（確認あり）
  */
 
 (() => {
@@ -43,13 +43,19 @@
    * ========================= */
   const LS = {
     coin: "wb_coin_v1",
-    bunnies: "wb_bunnies_v3", // bornAtベース + gauge
+    bunnies: "wb_bunnies_v4_clickOnlyGauge", // bornAt + gauge
   };
 
   const ASSET = {
     bunny: "./assets/bunny.png",
     baby: "./assets/babybunny.png",
     hart: "./assets/hart.png",
+    coins: [
+      "./assets/coin1.png",
+      "./assets/coin2.png",
+      "./assets/coin3.png",
+      "./assets/coin4.png",
+    ],
     sePoyo: "./assets/poyo.mp3",
     seCoin: "./assets/coin.mp3",
   };
@@ -58,24 +64,20 @@
 
   const CLICK_COIN_COOLDOWN_MS = 1000;
 
-  // 放置ドロップ間隔（各うさぎ個別にゆらぐ）
-  const IDLE_DROP_MIN_MS = 5000;
-  const IDLE_DROP_MAX_MS = 9500;
-
   // baby→adult 進化
   const BABY_GROW_MS = 3 * 60 * 1000; // 3分
 
   // コイン表示位置（うさぎの足元）
   const COIN_FOOT_Y_OFFSET = 6;
 
-  // お迎えコスト（必要なら変えてOK）
+  // お迎えコスト
   const SHOP_COST = 200;
 
-  // うさぎの基本サイズ（CSSが無くても崩れないようJSでも持つ）
+  // サイズ
   const SIZE = {
     adultW: 96,
     adultH: 96,
-    babyScale: 0.72, // babyを小さく
+    babyScale: 0.72,
     coinW: 28,
     coinH: 28,
     hartW: 36,
@@ -83,16 +85,13 @@
   };
 
   /* =========================
-   * Gauge (per bunny)
+   * Gauge (internal)
    * ========================= */
   const GAUGE = {
     max: 100,
-    // 1秒あたりの増加（放置でじわじわ貯まる）
-    perSec: 4, // 好みに合わせて調整OK（例: 2〜6）
-    // コインを落としたらゲージを減らす（完全リセットにしたいなら max に）
-    drainOnDrop: 35,
-    // ハート表示はMAX時
-    showHartAt: 100,
+    perSec: 4,        // 1秒あたりの増加（UI無しで内部だけ貯める）
+    drainOnDrop: 35,  // クリックで落としたら減る
+    showHartAt: 100,  // MAXの時だけハート表示
   };
 
   /* =========================
@@ -153,7 +152,6 @@
           dir: Number(x?.dir),
           isBaby: !!x?.isBaby,
           growAt: Number(x?.growAt || 0),
-          idleNextDropAt: Number(x?.idleNextDropAt || 0),
           gauge: Number(x?.gauge || 0),
         }))
         .filter((x) => Number.isFinite(x.bornAt));
@@ -170,7 +168,6 @@
       dir: b.dir,
       isBaby: b.isBaby,
       growAt: b.growAt,
-      idleNextDropAt: b.idleNextDropAt,
       gauge: Math.round(b.gauge),
     }));
     localStorage.setItem(LS.bunnies, JSON.stringify(data));
@@ -202,15 +199,22 @@
     return Math.max(0, field.clientHeight - 74);
   }
 
+  function pickCoinSrc() {
+    // coin1〜4 をランダム
+    const i = Math.floor(Math.random() * ASSET.coins.length);
+    return ASSET.coins[i];
+  }
+
   function spawnCoinAt(x, y) {
     const id = now() + Math.floor(Math.random() * 9999);
 
     const el = document.createElement("img");
     el.className = "coin";
-    el.src = "./assets/coin.png"; // coin.png が無い場合も回収は動く
+    el.src = pickCoinSrc();
     el.alt = "coin";
     el.draggable = false;
 
+    // 画像が無い等でも回収処理は動くフォールバック
     el.onerror = () => {
       el.removeAttribute("src");
       el.style.width = `${SIZE.coinW}px`;
@@ -231,6 +235,7 @@
     el.style.width = `${SIZE.coinW}px`;
     el.style.height = `${SIZE.coinH}px`;
     el.style.pointerEvents = "auto";
+    el.style.userSelect = "none";
 
     const collect = () => {
       if (!coins.has(id)) return;
@@ -261,7 +266,6 @@
    * @property {boolean} isBaby
    * @property {number} growAt
    * @property {number} lastClickAt
-   * @property {number} idleNextDropAt
    * @property {number} gauge
    * @property {HTMLImageElement} el
    * @property {HTMLImageElement} hartEl
@@ -275,10 +279,8 @@
   }
 
   function applyBunnySize(b) {
-    const w = bunnyW(b);
-    const h = bunnyH(b);
-    b.el.style.width = `${w}px`;
-    b.el.style.height = `${h}px`;
+    b.el.style.width = `${bunnyW(b)}px`;
+    b.el.style.height = `${bunnyH(b)}px`;
   }
 
   function applyBunnyTransform(b) {
@@ -310,8 +312,8 @@
     h.style.height = `${SIZE.hartH}px`;
     h.style.pointerEvents = "none";
     h.style.userSelect = "none";
-    h.style.opacity = "0"; // まず非表示
-    h.style.transform = "translate(-50%, -100%)"; // 中心&上へ
+    h.style.opacity = "0";
+    h.style.transform = "translate(-50%, -100%)";
 
     bunnyLayer.appendChild(h);
     b.hartEl = h;
@@ -321,20 +323,17 @@
     ensureHart(b);
 
     const w = bunnyW(b);
-    const h = bunnyH(b);
-
-    // うさぎの“頭上”へ
     const cx = b.x + w * 0.5;
     const topY = b.y - 6;
 
     b.hartEl.style.left = `${cx}px`;
     b.hartEl.style.top = `${topY}px`;
 
-    // MAXで表示
+    // ✅ MAXの時だけハート
     b.hartEl.style.opacity = (b.gauge >= GAUGE.showHartAt) ? "1" : "0";
   }
 
-  function createBunny({ isBaby, x, dir, bornAt, growAt, idleNextDropAt, gauge } = {}) {
+  function createBunny({ isBaby, x, dir, bornAt, growAt, gauge } = {}) {
     const el = document.createElement("img");
     el.className = "bunny";
     el.draggable = false;
@@ -350,9 +349,6 @@
       isBaby: !!isBaby,
       growAt: Number.isFinite(growAt) && growAt > 0 ? growAt : (isBaby ? now() + BABY_GROW_MS : 0),
       lastClickAt: 0,
-      idleNextDropAt: Number.isFinite(idleNextDropAt) && idleNextDropAt > 0
-        ? idleNextDropAt
-        : now() + rand(IDLE_DROP_MIN_MS, IDLE_DROP_MAX_MS),
       gauge: Number.isFinite(gauge) ? clamp(gauge, 0, GAUGE.max) : 0,
       el,
       hartEl: null,
@@ -374,11 +370,10 @@
     el.style.left = `${b.x}px`;
     el.style.top = `${b.y}px`;
 
-    // ハート用要素を用意して追従させる
     ensureHart(b);
     updateHart(b);
 
-    // ✅ うさぎクリックでコインを落とす
+    // ✅ クリック時のみコインを落とす
     el.addEventListener("click", () => {
       const t = now();
       if (t - b.lastClickAt < CLICK_COIN_COOLDOWN_MS) return;
@@ -395,29 +390,27 @@
     return b;
   }
 
-  // ゲージ量によってコイン量を増やす（adultのみ）
+  // ゲージ量でコイン枚数を増やす（adultのみ）
   function calcDropCount(b) {
     if (b.isBaby) return 1;
 
-    // gauge: 0..100
-    // 0-24: +0 / 25-49:+1 / 50-74:+2 / 75-99:+3 / 100:+4
+    // 0-24:+0 / 25-49:+1 / 50-74:+2 / 75-99:+3 / 100:+4
     const bonus = Math.floor(clamp(b.gauge, 0, GAUGE.max) / 25);
 
     // ベース 1〜2
     const base = (Math.random() < 0.55) ? 1 : 2;
 
-    // MAX時は“気持ち多め”に
+    // MAX時はさらに+1（気持ちよく）
     const maxExtra = (b.gauge >= GAUGE.max) ? 1 : 0;
 
-    return clamp(base + bonus + maxExtra, 1, 10);
+    return clamp(base + bonus + maxExtra, 1, 12);
   }
 
   function drainGaugeOnDrop(b) {
-    // コインを落としたらゲージ減（完全リセットにしたいなら b.gauge=0 に）
     b.gauge = clamp(b.gauge - GAUGE.drainOnDrop, 0, GAUGE.max);
   }
 
-  function dropCoinsFromBunny(b, reason = "idle") {
+  function dropCoinsFromBunny(b, reason = "click") {
     const w = bunnyW(b);
     const h = bunnyH(b);
     const footX = b.x + w * 0.5;
@@ -431,7 +424,7 @@
       spawnCoinAt(cx, cy);
     }
 
-    // ゲージ減＆ハート更新
+    // ゲージ減＆ハート更新（adultのみ）
     if (!b.isBaby) {
       drainGaugeOnDrop(b);
       updateHart(b);
@@ -458,11 +451,11 @@
    * ========================= */
   function step() {
     const t = now();
-    const dtSec = Math.max(0, Math.min(0.2, (t - lastTickAt) / 1000)); // 安全に上限
+    const dtSec = Math.max(0, Math.min(0.2, (t - lastTickAt) / 1000));
     lastTickAt = t;
 
     for (const b of bunnies) {
-      // 成長チェック
+      // 成長
       if (b.isBaby && b.growAt && t >= b.growAt) {
         b.isBaby = false;
         b.growAt = 0;
@@ -473,14 +466,14 @@
         saveBunnies();
       }
 
-      // ゲージ増加（adultのみ）
+      // ゲージ増加（adultのみ / UIは出さない）
       if (!b.isBaby) {
         b.gauge = clamp(b.gauge + GAUGE.perSec * dtSec, 0, GAUGE.max);
       } else {
-        b.gauge = 0; // babyはゲージ無し
+        b.gauge = 0;
       }
 
-      // 移動
+      // 移動（画面外に出ない）
       b.x += b.vx * b.dir;
 
       const w = bunnyW(b);
@@ -495,19 +488,13 @@
       }
 
       clampBunnyInField(b);
+
       b.el.style.left = `${b.x}px`;
       b.el.style.top = `${b.y}px`;
       applyBunnyTransform(b);
 
-      // ハート追従＆表示判定
+      // ハートはMAXの時だけ表示 & 追従
       updateHart(b);
-
-      // 放置ドロップ
-      if (t >= b.idleNextDropAt) {
-        dropCoinsFromBunny(b, "idle");
-        b.idleNextDropAt = t + rand(IDLE_DROP_MIN_MS, IDLE_DROP_MAX_MS);
-        saveBunnies();
-      }
     }
 
     rafId = requestAnimationFrame(step);
@@ -557,14 +544,15 @@
   WB.addCoin = addCoin;
   WB.spendCoin = spendCoin;
 
-  WB.getBunnies = () => bunnies.map((b) => ({
-    bornAt: b.bornAt,
-    x: b.x,
-    y: b.y,
-    dir: b.dir,
-    isBaby: b.isBaby,
-    gauge: b.gauge,
-  }));
+  WB.getBunnies = () =>
+    bunnies.map((b) => ({
+      bornAt: b.bornAt,
+      x: b.x,
+      y: b.y,
+      dir: b.dir,
+      isBaby: b.isBaby,
+      gauge: b.gauge,
+    }));
 
   WB.createBunny = (opts = {}) => createBunny(opts);
   WB.removeBunny = (bornAt) => removeBunnyByBornAt(bornAt);
@@ -580,7 +568,9 @@
     const set = listeners.get(name);
     if (!set) return;
     for (const fn of set) {
-      try { fn(payload); } catch (_) {}
+      try {
+        fn(payload);
+      } catch (_) {}
     }
   };
 
@@ -598,7 +588,6 @@
         dir: Number.isFinite(s.dir) ? s.dir : undefined,
         isBaby: !!s.isBaby,
         growAt: Number.isFinite(s.growAt) ? s.growAt : 0,
-        idleNextDropAt: Number.isFinite(s.idleNextDropAt) ? s.idleNextDropAt : 0,
         gauge: Number.isFinite(s.gauge) ? s.gauge : 0,
       });
     }
@@ -612,7 +601,7 @@
   rafId = requestAnimationFrame(step);
 
   WB.emit("core:ready", {
-    version: "app.js-core-v2-gauge-hart",
+    version: "app.js-core-v4-clickOnlyGauge-coin1to4",
     startBunnies: bunnies.length,
   });
 })();
