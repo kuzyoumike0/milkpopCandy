@@ -54,15 +54,34 @@
 
       // slot（今回は hat を「うさぎ画像と完全一致で重ねる」）
       const SLOTS = {
-        hat: {
-          // ※fitToBunnyの時は anchor は使わない（互換のため残してOK）
-          anchorX: 0.59,
-          anchorY: 0.18,
-          offsetX: 0,
-          offsetY: 0,
-          z: 9999,
-        },
-      };
+  hat: {
+    // ※fitToBunnyの時は anchor は使わない（互換のため残してOK）
+    anchorX: 0.59,
+    anchorY: 0.18,
+    offsetX: 0,
+    offsetY: 0,
+    z: 9999,
+  },
+
+  // ✅ 追加：顔（アイマスク用）
+  face: {
+    anchorX: 0.55,
+    anchorY: 0.34,
+    offsetX: 0,
+    offsetY: 0,
+    z: 9998,
+  },
+
+  // ✅ 追加：手元（アヒル用：抱えてる位置）
+  hand: {
+    anchorX: 0.62,
+    anchorY: 0.66,
+    offsetX: 0,
+    offsetY: 0,
+    z: 9997,
+  },
+};
+
 
       const ITEMS = {
         partyhat: {
