@@ -11,12 +11,95 @@
   let shopModal = null;
 
   /* =========================
+   * CSS（サムネ化：小さく見やすく）
+   * ========================= */
+  function injectShopThumbCssOnce() {
+    if (document.getElementById("wbShopThumbCss")) return;
+    const st = document.createElement("style");
+    st.id = "wbShopThumbCss";
+    st.textContent = `
+      /* グリッドをカードっぽく */
+      .shopGrid{
+        display:grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap:10px;
+      }
+      .shopCard{
+        display:flex;
+        gap:10px;
+        align-items:flex-start;
+        padding:10px;
+        border-radius:12px;
+        background: rgba(255,255,255,.65);
+        border: 1px solid rgba(0,0,0,.08);
+        box-shadow: 0 6px 18px rgba(0,0,0,.06);
+      }
+      .shopCard.disabled{ opacity:.55; filter:saturate(.7); }
+
+      /* ✅ サムネ：小さく固定 */
+      .shopThumb{
+        width:64px;
+        height:64px;
+        object-fit:contain;
+        flex:0 0 64px;
+        border-radius:12px;
+        background: rgba(255,255,255,.7);
+        border:1px solid rgba(0,0,0,.08);
+        padding:6px;
+      }
+
+      /* 右側の情報 */
+      .shopInfo{
+        flex:1;
+        min-width:0;
+        display:flex;
+        flex-direction:column;
+        gap:4px;
+      }
+      .shopName{
+        font-weight:700;
+        font-size:14px;
+        line-height:1.2;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+      .shopDesc{
+        font-size:12px;
+        opacity:.85;
+        line-height:1.35;
+        display:-webkit-box;
+        -webkit-line-clamp:2;      /* 2行で省略 */
+        -webkit-box-orient:vertical;
+        overflow:hidden;
+      }
+      .shopPrice{
+        font-weight:700;
+        margin-top:4px;
+      }
+      .shopPrice.bad{ color:#b00020; }
+
+      .shopCard button{
+        margin-top:6px;
+        align-self:flex-start;
+        padding:6px 10px;
+        border-radius:10px;
+        border:0;
+        cursor:pointer;
+      }
+      .shopCard button:disabled{
+        cursor:not-allowed;
+        opacity:.6;
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  /* =========================
    * WB互換ヘルパ
    * ========================= */
   function getBunnyCount() {
-    // 新API
     if (typeof WB.getBunnies === "function") return WB.getBunnies().length;
-    // 旧API
     if (Array.isArray(WB.bunnies)) return WB.bunnies.length;
     return 0;
   }
@@ -28,10 +111,8 @@
   }
 
   function spendCoins(amount) {
-    // 新APIがあるならそれを使う（内部でHUD更新・保存される想定）
     if (typeof WB.spendCoin === "function") return WB.spendCoin(amount);
 
-    // 旧API互換
     if (typeof WB.coins === "number" && WB.coins >= amount) {
       WB.coins -= amount;
       if (typeof WB.saveCoins === "function") WB.saveCoins();
@@ -41,10 +122,7 @@
     return false;
   }
 
-  // omukae商品定義（WB側にあればそれを優先）
   function getDefs() {
-    // 優先：app.js が提供するカタログ（src/cost）
-    // 期待フォーマット: [{key,name,src,cost}, ...]
     if (Array.isArray(WB.omukaeCatalog) && WB.omukaeCatalog.length) {
       const map = {};
       for (const it of WB.omukaeCatalog) {
@@ -52,18 +130,16 @@
         map[it.key] = {
           label: it.name || it.key,
           desc: it.desc || "お迎えした子は baby で来て、3分で成長します。",
-          img: it.src,              // 表示サムネ
-          adultSrc: it.src,         // 成長先（指定進化）
+          img: it.src,
+          adultSrc: it.src,
           price: Number(it.cost || it.price || 0),
         };
       }
       return map;
     }
 
-    // 従来：WB.BUNNY_DEFS があるならそれを使う
     if (WB.BUNNY_DEFS) return WB.BUNNY_DEFS;
 
-    // どちらも無い場合の最小フォールバック
     const a = WB.assets || {};
     return {
       bunny1: { label: "bunny1", desc: "", img: a.bunny1 || "", adultSrc: a.bunny1 || "", price: 200 },
@@ -162,16 +238,12 @@
     const waitMs = showAdoptEffect(kind);
 
     setTimeout(() => {
-      // ✅ 重要：購入は babyで生成して、成長先を固定する
-      // 新app.js: WB.createBunny({isBaby:true,targetAdultSrc:"./assets/bunny3.png"})
       if (typeof WB.createBunny === "function") {
         WB.createBunny({
           isBaby: true,
-          targetAdultSrc: def.adultSrc || def.img, // 成長先＝購入した種類
+          targetAdultSrc: def.adultSrc || def.img,
         });
       } else if (typeof WB.spawnBunny === "function") {
-        // 旧ロジック互換：spawnBunny(kind, bornAt) が「baby→kindへ成長」前提ならこれ
-        // ただし「確実に指定進化」させたいので、spawnBunnyが target を受けるなら優先
         try {
           WB.spawnBunny(kind, Date.now(), { targetAdultSrc: def.adultSrc || def.img });
         } catch {
@@ -179,7 +251,6 @@
         }
       }
 
-      // 実績チェックは zisseki.js 側が監視している想定
       refreshShopUI();
     }, waitMs);
 
@@ -187,6 +258,8 @@
   }
 
   function buildShopModal() {
+    injectShopThumbCssOnce(); // ✅ ここでサムネCSS注入
+
     if (!shopBackdrop) {
       shopBackdrop = document.createElement("div");
       shopBackdrop.id = "shopBackdrop";
@@ -211,10 +284,12 @@
       return `
         <div class="shopCard ${canBuy ? "" : "disabled"}">
           <img src="${def.img}" class="shopThumb" alt="${def.label}">
-          <div class="shopName">${def.label}</div>
-          <div class="shopDesc">${def.desc || ""}</div>
-          <div class="shopPrice ${canBuy ? "" : "bad"}">${priceNow} 🪙</div>
-          <button data-buy="${kind}" ${canBuy ? "" : "disabled"}>お迎え</button>
+          <div class="shopInfo">
+            <div class="shopName">${def.label}</div>
+            <div class="shopDesc">${def.desc || ""}</div>
+            <div class="shopPrice ${canBuy ? "" : "bad"}">${priceNow} 🪙</div>
+            <button data-buy="${kind}" ${canBuy ? "" : "disabled"}>お迎え</button>
+          </div>
         </div>
       `;
     }).join("");
@@ -254,7 +329,7 @@
       btn.onclick = () => {
         const kind = btn.getAttribute("data-buy");
         buyBunny(kind);
-        refreshShopUI(); // 価格/所持/disabled即反映
+        refreshShopUI();
       };
     });
   }
@@ -271,7 +346,6 @@
   /* =========================
    * 起動：omukae:open を優先して受ける
    * ========================= */
-  // app.jsがWB.emit("omukae:open") する方式に対応
   if (typeof WB.on === "function") {
     WB.on("omukae:open", () => {
       WB.unlockAudioOnce?.();
@@ -279,7 +353,6 @@
     });
   }
 
-  // 従来互換：WB.shopBtn を直接監視
   if (WB.shopBtn) {
     WB.shopBtn.addEventListener("click", () => {
       WB.unlockAudioOnce?.();
@@ -287,7 +360,6 @@
     });
   }
 
-  // 実績が解放されたらショップUIを更新
   if (typeof WB.on === "function") {
     WB.on("achievementUnlocked", () => refreshShopUI());
     WB.on("bunnyCountChanged", () => refreshShopUI());
