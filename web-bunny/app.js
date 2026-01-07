@@ -1,19 +1,20 @@
-/* app.js — Milkpop牧場（安定版 v12.2）
- * ✅ babybunny 絶対に出さない版（保存/お迎え/リセット全てでadult固定）
- * - 初期：bunny.png（大人）2匹（保存があってもbabyは復元しない）
- * - お迎え：WB.emit("omukae:open") + 可能ならWB.omukae.openShopModal()も直呼び
+/* app.js — Milkpop牧場（安定版 v12.3 FIX）
+ * ✅ coinが小さい→大きく
+ * ✅ coinが浮く→床に着地を保証（top/leftアニメ）
+ * ✅ babybunnyが出る→強制排除（毎フレーム＋DOM監視）
+ *
+ * - 初期：bunny.png（大人）2匹
+ * - お迎え：WB.emit("omukae:open") + 可能ならWB.omukae.openShopModal()
  * - クリック時のみコインドロップ（放置なし）
  * - coin価値: 1/5/10/100（coin1..4）
  * - ゲージ量でティア(1..4)
  * - MAX到達「瞬間だけ」ハートふわ（MAX中は表示だけ）
- * - ★コイン演出：足元から雨みたいに「ぶわッ」
- * - ★回収しやすい：当たり判定拡張＋マグネット吸着
  * - reset：うさぎ+所持コイン+落ちコインのみ初期化（他LS保持）
  */
 
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v12.2 NO-BABY", Date.now());
+  console.log("[app.js] LOADED v12.3 FIX", Date.now());
 
   /* ===== helpers ===== */
   const $ = (q, p = document) => p.querySelector(q);
@@ -46,8 +47,8 @@
     bunny5: "./assets/bunny5.png",
     reabunny: "./assets/reabunny.png",
 
-    // ★ babyは一切使わない（絶対出さない）
-    // baby: "./assets/babybunny.png",
+    // baby画像は持っていても、表示はさせない（排除対象）
+    baby: "./assets/babybunny.png",
 
     hart: "./assets/hart.png",
 
@@ -77,7 +78,6 @@
   const LS = {
     coin: "wb_coin_v1",
     bunnies: "wb_bunnies_v12_wrapStable",
-    // ★旧キー（過去の残骸でbaby復活を防ぐ）
     legacyBunnyKeys: [
       "wb_bunnies_v10_omukaeDepends",
       "wb_bunnies_v11_wrapCss",
@@ -89,13 +89,10 @@
   const START_BUNNIES = 2;
   const CLICK_COOLDOWN_MS = 1000;
 
-  // ★ゲージは大人だけ増える（baby無し運用でもそのまま）
   const GAUGE = { max: 100, perSec: 4, drainOnDrop: 35 };
 
-  // (baby進化は使わないが、将来復活させる場合に備えて残す)
-  const REA_RULE = { fromBunny1ToReaChance: 0.005 };
-
-  const COIN_W = 32, COIN_H = 32;
+  // ★ coinサイズ：大きくする（ここで調整）
+  const COIN_W = 48, COIN_H = 48;
 
   /* ===== Audio ===== */
   const SE = {
@@ -106,7 +103,7 @@
   SE.coin.preload = "auto";
   const playSE = (aud) => { try { aud.currentTime = 0; aud.play(); } catch {} };
 
-  /* ===== WB event bus (先に作る：ボタンが必ず動く) ===== */
+  /* ===== WB event bus ===== */
   const WB = (window.WB = window.WB || {});
   const listeners = new Map();
   WB.on = (name, fn) => {
@@ -148,7 +145,7 @@
     return true;
   }
 
-  // ★保存復元でbabyが絶対に出ない：isBaby/growAt/gaugeは無視して adult で復元
+  // ★ baby復元を絶対させない：isBaby/growAtは無視
   function loadBunnies() {
     try {
       const raw = localStorage.getItem(LS.bunnies);
@@ -159,21 +156,18 @@
         bornAt: Number(x?.bornAt),
         x: Number(x?.x),
         dir: Number(x?.dir),
-        // ★強制adult
+        // 強制adult
         isBaby: false,
         growAt: 0,
-        gauge: 0,
-        maxAnimArmed: true,
+        gauge: Number(x?.gauge || 0), // ゲージは残してOK（嫌なら0固定で）
+        maxAnimArmed: x?.maxAnimArmed !== false,
         adultSrc: typeof x?.adultSrc === "string" ? x.adultSrc : "",
         targetAdultSrc: typeof x?.targetAdultSrc === "string" ? x.targetAdultSrc : "",
       })).filter(x => Number.isFinite(x.bornAt));
-    } catch {
-      return [];
-    }
+    } catch { return []; }
   }
 
   function saveBunnies() {
-    // ★保存時も isBaby は常に false にして固定
     const data = bunnies.map(b => ({
       bornAt: b.bornAt,
       x: Math.round(b.x),
@@ -188,8 +182,7 @@
     localStorage.setItem(LS.bunnies, JSON.stringify(data));
   }
 
-  /* ===== Coin spawn/collect ===== */
-
+  /* ===== util ===== */
   function getFloorY() { return Math.max(0, field.clientHeight - 74); }
 
   function tierFromGauge(g) {
@@ -200,7 +193,7 @@
     return 4;
   }
 
-  // ★回収しやすい：マウス座標（マグネット用）
+  /* ===== Coin: 回収しやすい(当たり拡張+マグネット) ===== */
   let mouseX = -9999, mouseY = -9999;
   window.addEventListener("mousemove", (e) => {
     mouseX = e.clientX;
@@ -217,31 +210,48 @@
     el.alt = `coin-tier-${tier}`;
     el.draggable = false;
 
+    // サイズ固定（CSSより強い）
+    el.style.width = `${COIN_W}px`;
+    el.style.height = `${COIN_H}px`;
+    el.style.position = "absolute";
+    el.style.pointerEvents = "auto";
+    el.style.userSelect = "none";
+
     const floorY = getFloorY();
-    const px = clamp(x, 0, field.clientWidth - COIN_W);
-    const py = clamp(y, 0, floorY);
+    // 出現点（足元付近）
+    const startX = clamp(x, 0, field.clientWidth - COIN_W);
+    const startY = clamp(y, 0, floorY - COIN_H);
 
-    el.style.left = `${px}px`;
-    el.style.top  = `${py}px`;
+    // ★着地点（必ず床に置く＝浮かない）
+    const landY = clamp(floorY - COIN_H + 2, 0, floorY - COIN_H + 2);
 
-    // ★当たり判定拡張（見た目そのまま）
-    el.style.padding = "14px";
-    el.style.margin  = "-14px";
+    // 「雨みたいにぶわッ」：上に持ち上がって散って落ちる
+    const dx = rand(-120, 120);
+    const up = rand(90, 170);
+    const landX = clamp(startX + dx, 0, field.clientWidth - COIN_W);
 
-    // ★雨みたいに「ぶわッ」：足元から散って落ちる
-    const dx = rand(-90, 90);
-    const up = rand(70, 140);
-    const fall = rand(120, 210);
+    el.style.left = `${startX}px`;
+    el.style.top  = `${landY}px`; // ★最終は必ず床（浮きを根絶）
+
+    // ★top/leftでアニメ（transform浮き問題を根絶）
+    const midX = clamp(startX + dx * 0.25, 0, field.clientWidth - COIN_W);
+    const midY = clamp(landY - up, 0, landY);
+
     const dur = rand(520, 820);
-    const rot = rand(-220, 220);
+
     el.animate(
       [
-        { transform: "translate(0px,0px) scale(0.65)", opacity: 0 },
-        { transform: `translate(${dx * 0.15}px, ${-up}px) scale(1.08)`, opacity: 1, offset: 0.35 },
-        { transform: `translate(${dx}px, ${fall}px) scale(1) rotate(${rot}deg)`, opacity: 1 },
+        { left: `${startX}px`, top: `${landY}px`, opacity: 0, transform: "scale(0.7)" },
+        { left: `${midX}px`,   top: `${midY}px`,  opacity: 1, transform: "scale(1.08)", offset: 0.35 },
+        { left: `${landX}px`,  top: `${landY + 10}px`, opacity: 1, transform: "scale(1)", offset: 0.85 },
+        { left: `${landX}px`,  top: `${landY}px`, opacity: 1, transform: "scale(1)" },
       ],
       { duration: dur, easing: "cubic-bezier(.15,.9,.2,1)", fill: "forwards" }
     );
+
+    // 当たり判定拡張（見た目はそのまま）
+    el.style.padding = "16px";
+    el.style.margin  = "-16px";
 
     const collect = () => {
       if (!spawnedCoins.has(id)) return;
@@ -250,13 +260,12 @@
       playSE(SE.coin);
       addCoin(def.value);
     };
-
     el.addEventListener("mouseenter", collect, { passive: true });
     el.addEventListener("click", collect);
 
-    // ★マグネット吸着（近づけるだけで寄ってくる）
-    const MAGNET_RADIUS = 160;
-    const MAGNET_SPEED = 0.25;
+    // マグネット吸着
+    const MAGNET_RADIUS = 190;
+    const MAGNET_SPEED = 0.30;
     const magnetStep = () => {
       if (!spawnedCoins.has(id)) return;
       const r = el.getBoundingClientRect();
@@ -283,7 +292,7 @@
     spawnedCoins.clear();
   }
 
-  /* ===== Bunny (CSS: bunnyWrap/bunny/bunnyHeart) ===== */
+  /* ===== Bunny ===== */
   function placeWrap(b) {
     const maxX = Math.max(0, field.clientWidth - 140);
     b.x = clamp(b.x, 0, maxX);
@@ -295,20 +304,14 @@
     b.wrap.style.top  = `${b.y}px`;
 
     b.wrap.classList.toggle("flip", b.dir < 0);
+    b.wrap.classList.remove("baby"); // ★常にbabyクラス排除
   }
 
   function setHeartState(b, state) {
-    // state: "hide" | "visible" | "show"
     b.heart.classList.remove("visible", "show");
     b.heart.style.opacity = "0";
-    if (state === "visible") {
-      b.heart.classList.add("visible");
-      b.heart.style.opacity = "1";
-    }
-    if (state === "show") {
-      b.heart.classList.add("show");
-      b.heart.style.opacity = "1";
-    }
+    if (state === "visible") { b.heart.classList.add("visible"); b.heart.style.opacity = "1"; }
+    if (state === "show")    { b.heart.classList.add("show");    b.heart.style.opacity = "1"; }
   }
 
   function updateHeart(b) {
@@ -329,7 +332,6 @@
   }
 
   function calcDropCount(b) {
-    // ★baby無し運用：常に大人扱い
     const step = Math.floor(clamp(b.gauge, 0, GAUGE.max) / 25);
     return clamp(1 + step + (b.gauge >= GAUGE.max ? 1 : 0), 1, 8);
   }
@@ -338,24 +340,20 @@
     const tier = tierFromGauge(b.gauge);
     const count = calcDropCount(b);
 
-    // ★足元（湧き出し感）
+    // 足元（湧き出し）
     const footX = b.x + 70;
     const footY = b.y + 140 - 22;
 
     for (let i = 0; i < count; i++) {
-      const cx = footX + rand(-10, 10) - COIN_W / 2;
-      const cy = footY + rand(-4, 2) - COIN_H / 2;
+      const cx = footX + rand(-12, 12) - COIN_W / 2;
+      const cy = footY + rand(-6, 2) - COIN_H / 2;
       spawnCoinAtTier(tier, cx, cy);
     }
 
-    // ドロップしたらゲージ減る
     b.gauge = clamp(b.gauge - GAUGE.drainOnDrop, 0, GAUGE.max);
     updateHeart(b);
     saveBunnies();
   }
-
-  // ★baby進化ロジックは無効化（呼ばれない）
-  function evolveBaby(_) {}
 
   function createBunny(opts = {}) {
     const wrap = document.createElement("div");
@@ -376,8 +374,11 @@
     wrap.appendChild(heart);
     bunnyLayer.appendChild(wrap);
 
-    // ★isBabyは強制false（お迎え/保存/外部から来ても絶対に大人）
-    const forcedAdultSrc = (typeof opts.adultSrc === "string" && opts.adultSrc) ? opts.adultSrc : ASSET.bunny;
+    // ★isBabyは絶対無視＆baby画像も禁止
+    const adultSrc =
+      (typeof opts.adultSrc === "string" && opts.adultSrc && !opts.adultSrc.includes("babybunny"))
+        ? opts.adultSrc
+        : ASSET.bunny;
 
     const b = {
       bornAt: Number.isFinite(opts.bornAt) ? opts.bornAt : now(),
@@ -385,17 +386,16 @@
       y: 0,
       vx: rand(0.25, 0.6),
       dir: Number.isFinite(opts.dir) ? Math.sign(opts.dir) || 1 : (Math.random() < 0.5 ? -1 : 1),
-      isBaby: false,              // ★固定
-      growAt: 0,                  // ★固定
+      isBaby: false,
+      growAt: 0,
       lastClickAt: 0,
       gauge: Number.isFinite(opts.gauge) ? clamp(opts.gauge, 0, GAUGE.max) : 0,
       maxAnimArmed: (opts.maxAnimArmed !== false),
-      adultSrc: forcedAdultSrc,
+      adultSrc,
       targetAdultSrc: (typeof opts.targetAdultSrc === "string" ? opts.targetAdultSrc : ""),
       wrap, img, heart,
     };
 
-    // ★クラス同期（babyは絶対つけない）
     wrap.classList.remove("baby");
     wrap.classList.toggle("flip", b.dir < 0);
 
@@ -428,6 +428,24 @@
     bunnies.length = 0;
   }
 
+  /* ===== baby強制排除（混入しても即矯正） ===== */
+  function sanitizeBabyBunnyDOM() {
+    const imgs = bunnyLayer.querySelectorAll("img.bunny");
+    imgs.forEach((img) => {
+      const src = (img.getAttribute("src") || "");
+      if (src.includes("babybunny")) {
+        // 親のwrapからadultSrcを推測できないので、まずbunnyに戻す
+        img.setAttribute("src", ASSET.bunny);
+      }
+      const wrap = img.closest(".bunnyWrap");
+      if (wrap) wrap.classList.remove("baby");
+    });
+  }
+
+  // DOM監視（omukae.js等が直接DOM入れても即直す）
+  const mo = new MutationObserver(() => sanitizeBabyBunnyDOM());
+  mo.observe(bunnyLayer, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "class"] });
+
   /* ===== Loop ===== */
   function step() {
     const t = now();
@@ -435,9 +453,6 @@
     lastTickAt = t;
 
     for (const b of bunnies) {
-      // ★baby無しなので進化判定なし
-      // if (b.isBaby && b.growAt && t >= b.growAt) evolveBaby(b);
-
       b.gauge = clamp(b.gauge + GAUGE.perSec * dtSec, 0, GAUGE.max);
 
       b.x += b.vx * b.dir;
@@ -448,6 +463,9 @@
       placeWrap(b);
       updateHeart(b);
     }
+
+    // 念のため：毎フレーム矯正（負荷軽い）
+    sanitizeBabyBunnyDOM();
 
     rafId = requestAnimationFrame(step);
   }
@@ -468,6 +486,7 @@
   WB.addCoin = addCoin;
   WB.spendCoin = spendCoin;
 
+  // ★外部から isBaby:true で呼ばれても、createBunny側で無視される
   WB.createBunny = (opts = {}) => createBunny(opts);
   WB.getBunnies = () => bunnies;
 
@@ -488,7 +507,6 @@
 
     lastTickAt = now();
 
-    // ★必ず大人2匹
     for (let i = 0; i < START_BUNNIES; i++) {
       createBunny({ adultSrc: ASSET.bunny });
     }
@@ -496,7 +514,7 @@
     rafId = requestAnimationFrame(step);
   };
 
-  /* ===== Buttons（確実に動かす） ===== */
+  /* ===== Buttons ===== */
   if (shopBtn) {
     shopBtn.addEventListener("click", () => {
       console.log("[ui] shop click");
@@ -522,7 +540,6 @@
   departBtn?.addEventListener("click", () => WB.emit("ui:depart", {}));
 
   /* ===== Boot ===== */
-  // ★旧キー掃除（起動時にも消す）
   for (const k of LS.legacyBunnyKeys) {
     try { localStorage.removeItem(k); } catch {}
   }
@@ -531,7 +548,6 @@
 
   const saved = loadBunnies();
 
-  // ★保存があっても baby は復元しない＆初期表示も adult
   if (saved.length > 0) {
     for (const s of saved) {
       createBunny({
@@ -540,6 +556,7 @@
         dir: Number.isFinite(s.dir) ? s.dir : undefined,
         adultSrc: (s.adultSrc || ASSET.bunny),
         targetAdultSrc: s.targetAdultSrc || "",
+        gauge: 0, // 初期にゲージを残したくないなら0固定
       });
     }
   } else {
@@ -548,8 +565,10 @@
     }
   }
 
+  sanitizeBabyBunnyDOM();
+
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(step);
 
-  WB.emit("core:ready", { version: "app.js-core-v12.2-no-baby", startBunnies: bunnies.length });
+  WB.emit("core:ready", { version: "app.js-core-v12.3-fix", startBunnies: bunnies.length });
 })();
