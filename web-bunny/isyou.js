@@ -4,10 +4,13 @@
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
 // ✅ FIX：親(bunnyWrap.flip)が反転してるのでアクセ側で scaleX しない（二重反転回避）
-// ✅ slot（部類）導入：hat に partyhat/crown/ribbon を入れて同一位置
+// ✅ slot（部類）導入：hat に partyhat/crown/ribbon/aimasuku/ahiru を入れて同一位置
 // ✅ FIX：アンカー座標を getBoundingClientRect ではなく offset 系（レイアウト座標）で取る
 //     → flip（transform）しても帽子がズレない
 // ✅ NEW：帽子を「うさぎ画像と同じサイズ・同じ位置」に完全一致で重ねる（fitToBunny）
+// ✅ FIX：ITEMSの構文崩れ修正（aimasuku/ahiru 追加）
+// ✅ NOTE：ahiru は「hatと同じ部類」= slot:"hat"（fitToBunnyは true/false どちらでも可）
+//          今回はユーザー要望どおり fitToBunny:true で統一
 
 (() => {
   "use strict";
@@ -54,34 +57,15 @@
 
       // slot（今回は hat を「うさぎ画像と完全一致で重ねる」）
       const SLOTS = {
-  hat: {
-    // ※fitToBunnyの時は anchor は使わない（互換のため残してOK）
-    anchorX: 0.59,
-    anchorY: 0.18,
-    offsetX: 0,
-    offsetY: 0,
-    z: 9999,
-  },
-
-  // ✅ 追加：顔（アイマスク用）
-  face: {
-    anchorX: 0.55,
-    anchorY: 0.34,
-    offsetX: 0,
-    offsetY: 0,
-    z: 9998,
-  },
-
-  // ✅ 追加：手元（アヒル用：抱えてる位置）
-  hand: {
-    anchorX: 0.62,
-    anchorY: 0.66,
-    offsetX: 0,
-    offsetY: 0,
-    z: 9997,
-  },
-};
-
+        hat: {
+          // ※fitToBunnyの時は anchor は使わない（互換のため残してOK）
+          anchorX: 0.59,
+          anchorY: 0.18,
+          offsetX: 0,
+          offsetY: 0,
+          z: 9999,
+        },
+      };
 
       const ITEMS = {
         partyhat: {
@@ -89,11 +73,9 @@
           img: "/assets/isyou/partyhat.png",
           price: 500,
           slot: "hat",
-          // ✅ うさぎ画像と同サイズ・同位置
           fitToBunny: true,
           offsetX: 0,
           offsetY: 0,
-          // fitToBunny時は scale は使わない（残しても無視される）
           scale: 1,
           z: 9999,
         },
@@ -119,9 +101,11 @@
           scale: 1,
           z: 9999,
         },
+
+        // ✅ 追加：アイマスク（hat扱い）
         aimasuku: {
-  label: "アイマスク",
-  img: "/assets/isyou/aimasuku.png",
+          label: "アイマスク",
+          img: "/assets/isyou/aimasuku.png",
           price: 1200,
           slot: "hat",
           fitToBunny: true,
@@ -129,28 +113,22 @@
           offsetY: 0,
           scale: 1,
           z: 9999,
+          keepUpright: true,
         },
 
-  // 反転時も顔向きはそのままにしたいなら true（好み）
-  keepUpright: true,
-},
-
-ahiru: {
-  label: "ぷかアヒル",
-  img: "/assets/isyou/ahiru.png",
-  price: 600,
-  slot: "hat",
-
-  fitToBunny: false,
-  scale: 0.60,     // ←大きさ
-  offsetX: 0,
-  offsetY: 0,
-  z: 9997,
-
-  // 反転に合わせて左右も反転してほしいなら keepUpright は false のまま（指定しない）
-  keepUpright: false,
-},
-
+        // ✅ 追加：アヒル（要望どおり hat と同じ部類）
+        ahiru: {
+          label: "ぷかアヒル",
+          img: "/assets/isyou/ahiru.png",
+          price: 600,
+          slot: "hat",
+          fitToBunny: true,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+          z: 9999,
+          keepUpright: false,
+        },
       };
 
       /* =========================
@@ -502,9 +480,9 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
               const pick = document.createElement("button");
               pick.className = "isyouBtn";
-              const on = selectedItems.has(key);
-              pick.textContent = on ? "選択中" : "選択";
-              pick.style.background = on ? "#ffe6f2" : "#fff";
+              const onSel = selectedItems.has(key);
+              pick.textContent = onSel ? "選択中" : "選択";
+              pick.style.background = onSel ? "#ffe6f2" : "#fff";
               pick.disabled = count <= 0;
               pick.addEventListener("click", () => {
                 if (count <= 0) return;
@@ -610,38 +588,34 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const ox = (Number(it.offsetX) || 0) + sox;
         const oy = (Number(it.offsetY) || 0) + soy;
 
-        // ✅ NEW：うさぎ画像と同サイズ・同位置に重ねる
-        // ✅ NEW：うさぎ画像と同サイズ・同位置に重ねる（反転でもズレない版）
-if (it.fitToBunny) {
-  const wrap = bunny?.wrap;
-  const bimg = wrap ? getBunnyImgEl(wrap) : null;
-  if (!wrap || !bimg) return;
+        // ✅ fitToBunny：うさぎ画像と同サイズ・同位置に重ねる（反転でもズレない版）
+        if (it.fitToBunny) {
+          const wrap = bunny?.wrap;
+          const bimg = wrap ? getBunnyImgEl(wrap) : null;
+          if (!wrap || !bimg) return;
 
-  const cs = getComputedStyle(bimg);
+          const cs = getComputedStyle(bimg);
 
-  // bunnyImg の位置決めを完全コピー（transformも含む）
-  imgEl.style.left = cs.left;
-  imgEl.style.top = cs.top;
-  imgEl.style.width = cs.width;
-  imgEl.style.height = cs.height;
+          imgEl.style.left = cs.left;
+          imgEl.style.top = cs.top;
+          imgEl.style.width = cs.width;
+          imgEl.style.height = cs.height;
 
-  imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
+          imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
 
-  // 元の transform をベースに、微調整 ox/oy を末尾に足す
-  const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
-  const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
-  const extraFlip = keepUpright ? " scaleX(-1)" : "";
+          const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
+          const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
+          const extraFlip = keepUpright ? " scaleX(-1)" : "";
 
-  const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
+          const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
 
-  imgEl.style.setProperty("--isyouT", t);
-  imgEl.style.transform = t;
+          imgEl.style.setProperty("--isyouT", t);
+          imgEl.style.transform = t;
 
-  const finalZ = (sz || 0) || (Number(it.z) || 10);
-  imgEl.style.zIndex = String(finalZ);
-  return;
-}
-
+          const finalZ = (sz || 0) || (Number(it.z) || 10);
+          imgEl.style.zIndex = String(finalZ);
+          return;
+        }
 
         // 旧：アンカー比率で置く（互換）
         const sc = Number(it.scale) || 1;
@@ -753,7 +727,7 @@ if (it.fitToBunny) {
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (hat fitToBunny)");
+      console.log("[isyou] ready (hat fitToBunny + aimasuku + ahiru)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
