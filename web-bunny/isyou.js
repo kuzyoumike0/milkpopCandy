@@ -267,11 +267,29 @@
   }
 
   function setHatStyleFor(bunny) {
-    if (bunny.kind === "reabunny") {
-      return { x:"52%", y:"16px", w:"60px", r:"-8deg", s:"1.0" };
-    }
-    return { x:"52%", y:"18px", w:"56px", r:"-10deg", s:"1.0" };
+  // ★かなり下：耳の下〜頭の中央
+  const base = {
+    x: "52%",
+    y: "36px",   // ← 大幅に下
+    w: "64px",   // ← 帽子をしっかり主張
+    r: "-8deg",
+    s: "1.0"
+  };
+
+  if (bunny.kind === "reabunny") {
+    // レアはさらにどっしり
+    return {
+      x: "52%",
+      y: "34px",
+      w: "68px",
+      r: "-6deg",
+      s: "1.0"
+    };
   }
+
+  return base;
+}
+
 
   function ensureHatOnBunny(bunny) {
     const id = bunnyId(bunny);
