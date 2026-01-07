@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v15.0 (persistent heart while charged)", Date.now());
+  console.log("[app.js] LOADED FIX v15.1 (heart shows when charged; consume only on charged click)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -42,8 +42,9 @@
 
   /* =========================
    * Charge（表示しない）
-   * - クリック時：現在のゲージ量で枚数&ティア決定 → ドロップ → ゲージ消費(0)
+   * - 通常クリック：ゲージが貯まる（消費しない）
    * - ゲージMAX：満タン中ずっと hart.png を表示（上下ゆれ）
+   * - 満タン中のクリック：多め＆高ティアでドロップ → ゲージ消費(0) → ハート消える
    * ========================= */
   const CHARGE_MAX = 100;
   const CHARGE_GAIN_ON_BUNNY_TAP     = 8;
@@ -152,7 +153,7 @@
       }
       .wbChargeHart {
         position:absolute;
-        z-index:9999; /* これで絶対に前面 */
+        z-index:9999;
         pointer-events:none;
         user-select:none;
         -webkit-user-drag:none;
@@ -184,7 +185,6 @@
     el.style.width = "52px";
     el.style.height = "52px";
     el.style.display = "none";
-    // ✅ field直下に置く（coinLayerのoverflow/重なり事故を避ける）
     field.appendChild(el);
     chargeHartEl = el;
     return el;
@@ -204,10 +204,10 @@
   function showChargeHeart(targetBunny) {
     const el = ensureChargeHartEl();
     const b = targetBunny || pickRandomBunny();
-    if (!b) return; // うさぎが0なら出せない
+    if (!b) return;
     chargeHartTargetBornAt = b.bornAt;
     el.style.display = "block";
-    positionChargeHeart(); // 即座に配置
+    positionChargeHeart();
   }
 
   function hideChargeHeart() {
@@ -237,7 +237,7 @@
    * Charge helpers
    * ========================= */
   function addCharge(delta, sourceBunny = null) {
-    // ✅ MAX到達中は増やさない（次クリックで消費するまで待つ）
+    // ✅ MAX到達中は増やさない（次の“満タン消費クリック”待ち）
     if (chargeReady) return;
 
     delta = Math.floor(Number(delta) || 0);
@@ -248,11 +248,9 @@
     if (charge >= CHARGE_MAX) {
       charge = CHARGE_MAX;
       chargeReady = true;
-
-      // ✅ 満タン中はずっと表示
       showChargeHeart(sourceBunny);
-
       emit("chargeReady", {});
+      // console.log("CHARGE READY!"); // デバッグしたい時だけ
     }
   }
 
@@ -267,18 +265,14 @@
     return clamp(charge / CHARGE_MAX, 0, 1);
   }
 
+  // ✅ ゲージ量に応じて「枚数」と「最大ティア」を決める（満タン時が最強）
   function getDropPlanFromCharge() {
     const r = getChargeRatio(); // 0..1
-
-    // 枚数：1〜10
-    const count = 1 + Math.floor(r * 9);
-
-    // 最大ティア：0〜3
-    const maxTier = Math.floor(r * 3 + 1e-9);
+    const count = 1 + Math.floor(r * 9);        // 1..10
+    const maxTier = Math.floor(r * 3 + 1e-9);   // 0..3
 
     const pickTier = () => {
       if (maxTier <= 0) return 0;
-
       // 高ティア優遇：w(t)=(t+1)^2
       let sum = 0;
       const w = [];
@@ -389,6 +383,7 @@
     collect() {
       if (!this.el || !this.el.isConnected) return;
 
+      // coin1=+1, coin2=+2, coin3=+3, coin4=+4
       coins += (this.tier + 1);
       saveCoins();
       updateHud();
@@ -456,13 +451,16 @@
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        const { count, pickTier } = getDropPlanFromCharge();
-        spawnClickCoins(this, count, pickTier);
+        // ✅ 満タン(=ハート表示中)の時だけ「多め＆高ティア」→ 消費
+        if (chargeReady) {
+          const { count, pickTier } = getDropPlanFromCharge(); // r=1で最大
+          spawnClickCoins(this, count, pickTier);
+          consumeCharge(); // ✅ ここでだけ消費（ハートも消える）
+          return;
+        }
 
-        // ✅ クリックで消費（ハートも消える）
-        consumeCharge();
-
-        // ✅ 次周回用にクリックでも少し貯まる
+        // ✅ 通常時：coin1を1枚 + ゲージ加算（消費しない）
+        spawnClickCoins(this, 1, () => 0);
         addCharge(CHARGE_GAIN_ON_BUNNY_TAP, this);
       };
 
@@ -700,7 +698,6 @@
     for (const b of bunnies) b.update(dt);
     for (const d of dropsOnField) d.update(dt);
 
-    // ✅ 満タン中はハートが常にうさぎに追従
     if (chargeReady) positionChargeHeart();
 
     requestAnimationFrame(tick);
