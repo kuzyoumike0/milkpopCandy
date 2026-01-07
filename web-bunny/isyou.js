@@ -1,5 +1,6 @@
 // isyou.js — お洒落（ショップ＋複数装着＋flip補正＋称号連動＋赤枠）完全版（WB待機つき）
 // ★装着は「赤枠で囲った（=選択した）うさぎ」にだけ行う
+// ★装着モード中はモーダル背景をクリック透過
 
 (() => {
   "use strict";
@@ -73,19 +74,24 @@
       },
     };
 
-    const TITLE_LINKS = [
-      { match: /黄金の王/, autoEquip: ["crown"] },
-      { match: /黄金に選ばれし者/, autoEquip: ["crown"] },
-    ];
-
     /* =========================
      * CSS inject
      * ========================= */
-    if (!document.getElementById("isyouStyleV4")) {
+    if (!document.getElementById("isyouStyleV5")) {
       const s = document.createElement("style");
-      s.id = "isyouStyleV4";
+      s.id = "isyouStyleV5";
       s.textContent = `
 #isyouBtn{ z-index:2147483647; }
+
+/* --- 装着モード中は背景クリック透過 --- */
+body.isyouEquipMode .isyouBackdrop{
+  pointer-events:none;
+}
+body.isyouEquipMode .isyouModal{
+  pointer-events:auto;
+}
+
+/* 赤枠 */
 body.isyouEquipMode .bunnyWrap:hover{
   outline:4px solid rgba(255,64,64,.6);
   outline-offset:3px;
@@ -104,8 +110,10 @@ body.isyouEquipMode .bunnyWrap:hover{
   50%{filter:brightness(1.15)}
   100%{filter:brightness(1)}
 }
+
 .isyouLayer{ position:absolute; inset:0; pointer-events:none; }
 .isyouItem{ position:absolute; left:50%; top:0; transform-origin:50% 50%; }
+
 .isyouBackdrop{
   position:fixed; inset:0;
   background:rgba(0,0,0,.45);
@@ -113,9 +121,12 @@ body.isyouEquipMode .bunnyWrap:hover{
   z-index:2147483600;
 }
 .isyouModal{
-  width:min(92vw,560px); max-height:86vh;
-  background:#fff; border-radius:18px;
-  padding:14px; overflow:auto;
+  width:min(92vw,560px);
+  max-height:86vh;
+  background:#fff;
+  border-radius:18px;
+  padding:14px;
+  overflow:auto;
 }
 `;
       document.head.appendChild(s);
@@ -132,6 +143,21 @@ body.isyouEquipMode .bunnyWrap:hover{
     };
 
     /* =========================
+     * Equip SE
+     * ========================= */
+    const equipSe = new Audio("./assets/Onoma-Pop03-1(High).mp3");
+    equipSe.preload = "auto";
+    equipSe.volume = 0.9;
+
+    function playEquipSe() {
+      try {
+        WB.unlockAudioOnce?.();
+        equipSe.currentTime = 0;
+        equipSe.play().catch(() => {});
+      } catch {}
+    }
+
+    /* =========================
      * HUD Button
      * ========================= */
     const hud = document.getElementById("hud");
@@ -146,43 +172,20 @@ body.isyouEquipMode .bunnyWrap:hover{
     }
 
     /* =========================
-     * Modal / State
+     * Bunny helpers
      * ========================= */
-    let backdrop = null;
-    let equipMode = false;
-    let tab = "shop";
-    let selectedBornAt = null;
-    const selectedItems = new Set();
-
     const getBunnies = () =>
-      Array.isArray(WB.bunnies) ? WB.bunnies :
-      (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
+      Array.isArray(WB.bunnies)
+        ? WB.bunnies
+        : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
 
-    function setSelectedTarget(bunny) {
-      getBunnies().forEach(b => b?.wrap?.classList.remove("isyouSelectedTarget"));
-      if (!bunny) {
-        selectedBornAt = null;
-        return;
-      }
-      selectedBornAt = bunny.bornAt;
-      bunny.wrap?.classList.add("isyouSelectedTarget");
-    }
-
-    function getSelectedBunny() {
-      return getBunnies().find(b => b && b.bornAt === selectedBornAt) || null;
-    }
-
-    /* =========================
-     * ★重要修正：wrap判定を包含対応
-     * ========================= */
     function getBunnyFromWrap(wrap) {
-      return getBunnies().find(b => {
-        if (!b || !b.wrap) return false;
-        if (b.wrap === wrap) return true;
-        if (wrap.contains(b.wrap)) return true;
-        if (b.wrap.contains(wrap)) return true;
-        return false;
-      }) || null;
+      return getBunnies().find(b =>
+        b?.wrap &&
+        (b.wrap === wrap ||
+         wrap.contains(b.wrap) ||
+         b.wrap.contains(wrap))
+      ) || null;
     }
 
     /* =========================
@@ -198,12 +201,8 @@ body.isyouEquipMode .bunnyWrap:hover{
       return layer;
     }
 
-    function isFlip(bunny) {
-      return bunny.wrap.classList.contains("flip");
-    }
-
     function applyTransform(img, bunny, it) {
-      const flip = isFlip(bunny);
+      const flip = bunny.wrap.classList.contains("flip");
       const fx = flip ? -1 : 1;
       const ox = it.offsetX * (flip ? -1 : 1);
       img.style.transform =
@@ -214,8 +213,8 @@ body.isyouEquipMode .bunnyWrap:hover{
     function drawAllForBunny(bunny) {
       if (bunny.isBaby) return;
       const layer = ensureLayer(bunny);
-      const eq = equipped[bunny.bornAt] || {};
       layer.innerHTML = "";
+      const eq = equipped[bunny.bornAt] || {};
       Object.keys(eq).forEach(k => {
         if (!eq[k]) return;
         const it = ITEMS[k];
@@ -233,19 +232,33 @@ body.isyouEquipMode .bunnyWrap:hover{
     }
 
     function toggleEquip(bunny, key) {
-      if (!bunny || bunny.isBaby) return;
       if ((owned[key] || 0) <= 0) return;
       equipped[bunny.bornAt] = equipped[bunny.bornAt] || {};
       equipped[bunny.bornAt][key] = !equipped[bunny.bornAt][key];
       saveAll();
       drawAllForBunny(bunny);
+      playEquipSe();
       bunny.wrap.classList.add("isyouJustEquipped");
       setTimeout(() => bunny.wrap.classList.remove("isyouJustEquipped"), 520);
     }
 
     /* =========================
-     * Bunny click handler
+     * Equip mode click
      * ========================= */
+    let equipMode = false;
+    let selectedBornAt = null;
+    const selectedItems = new Set();
+
+    function setSelectedTarget(bunny) {
+      getBunnies().forEach(b => b.wrap.classList.remove("isyouSelectedTarget"));
+      if (!bunny) {
+        selectedBornAt = null;
+        return;
+      }
+      selectedBornAt = bunny.bornAt;
+      bunny.wrap.classList.add("isyouSelectedTarget");
+    }
+
     document.addEventListener("pointerdown", (e) => {
       if (!equipMode) return;
       const wrap = e.target.closest(".bunnyWrap");
@@ -258,17 +271,15 @@ body.isyouEquipMode .bunnyWrap:hover{
         setSelectedTarget(bunny);
         return;
       }
-
       if (bunny.bornAt === selectedBornAt) {
         selectedItems.forEach(k => toggleEquip(bunny, k));
         return;
       }
-
       setSelectedTarget(bunny);
-    }, { capture: true });
+    }, { capture:true });
 
     /* =========================
-     * Modal open
+     * Button toggle
      * ========================= */
     btn.onclick = () => {
       equipMode = !equipMode;
