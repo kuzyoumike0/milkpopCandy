@@ -30,13 +30,16 @@
     <div id="hudButtons">
       <button id="shopBtn" type="button">お迎え</button>
       <button id="slotBtn" type="button">スロット</button>
-      
-      <button id="rankBtn" type="button">図鑑/称号</button>
+
+      <!-- ★ここを「図鑑」ボタンとして使う（zukan.jsの自動追加はオフ運用） -->
+      <button id="rankBtn" type="button">図鑑</button>
+
       <button id="departBtn" type="button">旅立ち</button>
       <button id="resetBtn" type="button">リセット</button>
     </div>
 
-    <div id="title"></div>
+    <!-- ★称号の常時表示枠（syougou.js がここに出す想定） -->
+    <div id="title" aria-label="current-title"></div>
   </header>
 
   <!-- ===== メインフィールド ===== -->
@@ -50,17 +53,11 @@
     <!-- ゲーム要素 -->
     <div id="bunnyLayer"></div>
     <div id="coinLayer"></div>
-
   </main>
 
   <!-- ===== BGM ===== -->
   <script type="module">
-    import {
-      bgmMountSettingsUI,
-      bgmPlaySpecial,
-      bgmClearSpecial
-    } from "./BGM.js";
-
+    import { bgmMountSettingsUI, bgmPlaySpecial, bgmClearSpecial } from "./BGM.js";
     bgmMountSettingsUI({ position: "top-right", title: "BGM" });
 
     window.BGM = {
@@ -78,16 +75,21 @@
   <!-- 花火 -->
   <script src="./hanabi.js"></script>
 
-  <!-- 既存ロジック -->
- <script src="./app.js"></script>
-<script src="./zisseki.js"></script>
-<script src="./syougou.js"></script>
-<script src="./omukae.js"></script>
-<script src="./zukan.js"></script>
-<script src="./tabidati.js"></script>
-<script src="./slot.js"></script>
+  <!-- ===== コア（WBを作る） ===== -->
+  <script src="./app.js"></script>
 
-  
+  <!-- ===== 拡張（WB依存） ===== -->
+  <script src="./zisseki.js"></script>
+  <script src="./syougou.js"></script>
+  <script src="./omukae.js"></script>
+
+  <!-- 図鑑（実績/称号タブ付き） -->
+  <script src="./zukan.js"></script>
+
+  <!-- 旅立ち & スロット（WB依存） -->
+  <script src="./tabidati.js"></script>
+  <script src="./slot.js"></script>
+
   <!-- Service Worker -->
   <script>
     if ('serviceWorker' in navigator) {
