@@ -230,6 +230,31 @@
     return fieldRect().height - 60;
   }
 
+  // ★重要：wrap実寸（帽子など含む）で画面外に出ないようにクランプ
+  function getWrapSize(bunny) {
+    try {
+      const r = bunny?.wrap?.getBoundingClientRect?.();
+      if (r && r.width > 10 && r.height > 10) return { w: r.width, h: r.height };
+    } catch {}
+    // フォールバック（計測前）
+    return { w: 140, h: 140 };
+  }
+
+  function clampBunnyIntoField(bunny) {
+    if (!bunny || !bunny.wrap) return;
+    const fr = fieldRect();
+    const { w, h } = getWrapSize(bunny);
+
+    const maxX = Math.max(0, fr.width - w);
+    const maxY = Math.max(0, fr.height - h);
+
+    bunny.x = clamp(bunny.x, 0, maxX);
+    bunny.y = clamp(bunny.y, 0, maxY);
+
+    bunny.wrap.style.left = `${bunny.x}px`;
+    bunny.wrap.style.top  = `${bunny.y}px`;
+  }
+
   function updateHud() {
     coinValueEl.textContent = String(coins);
     // 称号表示は syougou.js が HUD に直接反映する（WB.emitで通知）
@@ -508,6 +533,9 @@
 
       this.syncSprite();
 
+      // 初回に実寸でクランプ（帽子等の後付けでも次フレームで矯正される）
+      requestAnimationFrame(() => clampBunnyIntoField(this));
+
       this.wrap.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         unlockAudioOnce();
@@ -517,7 +545,9 @@
 
     syncSprite() {
       this.wrap.classList.toggle("baby", this.isBaby);
-      this.el.src = this.isBaby ? ASSETS.babyBunny : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
+      this.el.src = this.isBaby
+        ? ASSETS.babyBunny
+        : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
     }
 
     evolveIfNeeded() {
@@ -541,6 +571,9 @@
       this.heart.classList.remove("show");
 
       saveBunnyMeta();
+
+      // 進化で見た目サイズが変わる → 念のためクランプ
+      requestAnimationFrame(() => clampBunnyIntoField(this));
     }
 
     updateGauge(dt) {
@@ -599,10 +632,11 @@
       this.evolveIfNeeded();
       this.updateGauge(dt);
 
+      // ★実寸で左右移動の壁を決める（固定140を廃止）
       const fr = fieldRect();
-      const wrapWidth = 140;
+      const { w } = getWrapSize(this);
       const minX = 0;
-      const maxX = Math.max(0, fr.width - wrapWidth);
+      const maxX = Math.max(0, fr.width - w);
 
       if (this.isBaby) {
         const leader = this.findLeaderForBaby();
@@ -636,9 +670,10 @@
         this.vx = -Math.abs(this.vx || 0);
       }
 
+      // ★最終安全策：常にフィールド内へ（帽子追加等でサイズが増えても外に出ない）
+      clampBunnyIntoField(this);
+
       this.wrap.classList.toggle("flip", this.dir < 0);
-      this.wrap.style.left = `${this.x}px`;
-      this.wrap.style.top = `${this.y}px`;
     }
   }
 
@@ -772,7 +807,10 @@
 
     window.addEventListener("resize", () => {
       const gy = groundY();
-      for (const b of bunnies) b.y = gy - 120;
+      for (const b of bunnies) {
+        b.y = gy - 120;
+        clampBunnyIntoField(b);
+      }
       emit("resize", {});
     });
   }
@@ -821,70 +859,39 @@
     // bunny ops
     spawnBunny,
     removeBunnyInstance,
+
+    // util（他jsから必要なら）
+    clampBunnyIntoField,
+    getWrapSize,
   };
 
-// ===== saku.png を左右に小さく表示 =====
-(function mountSakuSides() {
-  const SRC = "./assets/saku.png";
+  // ===== saku.png を左右に小さく表示 =====
+  (function mountSakuSides() {
+    const SRC = "./assets/saku.png";
 
-  if (document.getElementById("sakuLeft")) return;
+    if (document.getElementById("sakuLeft")) return;
 
-  const make = (id, side) => {
-    const img = document.createElement("img");
-    img.id = id;
-    img.src = SRC;
-    img.alt = "saku";
-    img.draggable = false;
-    img.decoding = "async";
-    img.loading = "eager";
+    const make = (id, side) => {
+      const img = document.createElement("img");
+      img.id = id;
+      img.src = SRC;
+      img.alt = "saku";
+      img.draggable = false;
+      img.decoding = "async";
+      img.loading = "eager";
 
-    img.className = `saku ${side}`;
+      img.className = `saku ${side}`;
 
-    img.addEventListener("error", () => {
-      console.error("[saku] load failed:", img.src);
-    });
-
-    document.body.appendChild(img);
-  };
-
-  make("sakuLeft", "left");
-  make("sakuRight", "right");
-})();
-  (() => {
-  const slotBtn = document.getElementById("slotBtn");
-  const panel = document.getElementById("slotStarMachinePanel3x3");
-  if (!slotBtn || !panel) return;
-
-  slotBtn.addEventListener("click", () => {
-    panel.classList.add("show");
-    // とりあえず見える確認用（後でスロットUIに置き換え）
-    if (!panel.dataset.booted) {
-      panel.dataset.booted = "1";
-      panel.innerHTML = `
-        <div style="position:absolute;inset:0;background:rgba(0,0,0,.55);"></div>
-        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-                    width:min(520px,92vw);background:#fff;border-radius:16px;padding:16px;
-                    box-shadow:0 20px 60px rgba(0,0,0,.35);">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <b>スロット</b>
-            <button id="slotCloseBtn" style="font-size:16px;">×</button>
-          </div>
-          <div style="margin-top:10px;opacity:.8;font-size:14px;">
-            パネル表示OK。次にスロット本体描画を入れます。
-          </div>
-        </div>
-      `;
-      panel.querySelector("#slotCloseBtn")?.addEventListener("click", () => {
-        panel.classList.remove("show");
+      img.addEventListener("error", () => {
+        console.error("[saku] load failed:", img.src);
       });
-      // 背景クリックで閉じる
-      panel.addEventListener("click", (e) => {
-        if (e.target === panel) panel.classList.remove("show");
-      });
-    }
-  });
-})();
 
+      document.body.appendChild(img);
+    };
+
+    make("sakuLeft", "left");
+    make("sakuRight", "right");
+  })();
 
   init();
 })();
