@@ -600,36 +600,38 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const oy = (Number(it.offsetY) || 0) + soy;
 
         if (it.fitToBunny) {
-          const wrap = bunny?.wrap;
-          const bimg = wrap ? getBunnyImgEl(wrap) : null;
-          if (!wrap || !bimg) return;
+  const wrap = bunny?.wrap;
+  const bimg = wrap ? getBunnyImgEl(wrap) : null;
+  if (!wrap || !bimg) return;
 
-          // ✅ 位置/サイズは offset系で確定（auto問題を完全回避）
-          const p = getLocalPosWithin(bimg, wrap);
-          const w = bimg.offsetWidth  || bimg.clientWidth  || 0;
-          const h = bimg.offsetHeight || bimg.clientHeight || 0;
+  const wrapRect = wrap.getBoundingClientRect();
+  const imgRect  = bimg.getBoundingClientRect();
 
-          imgEl.style.left = `${p.x}px`;
-          imgEl.style.top  = `${p.y}px`;
-          imgEl.style.width  = `${w}px`;
-          imgEl.style.height = `${h}px`;
+  // ✅ wrap内ローカル（見えてる位置の差分なのでズレない）
+  const left = imgRect.left - wrapRect.left;
+  const top  = imgRect.top  - wrapRect.top;
 
-          // ✅ transformは computed をコピー（flipは親にあるので二重反転しない）
-          const cs = getComputedStyle(bimg);
-          imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
+  imgEl.style.left = `${left}px`;
+  imgEl.style.top  = `${top}px`;
+  imgEl.style.width  = `${imgRect.width}px`;
+  imgEl.style.height = `${imgRect.height}px`;
 
-          const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
-          const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
-          const extraFlip = keepUpright ? " scaleX(-1)" : "";
+  const cs = getComputedStyle(bimg);
+  imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
 
-          const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
-          imgEl.style.setProperty("--isyouT", t);
-          imgEl.style.transform = t;
+  const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
+  const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
+  const extraFlip = keepUpright ? " scaleX(-1)" : "";
 
-          const finalZ = (sz || 0) || (Number(it.z) || 10);
-          imgEl.style.zIndex = String(finalZ);
-          return;
-        }
+  const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
+  imgEl.style.setProperty("--isyouT", t);
+  imgEl.style.transform = t;
+
+  const finalZ = (Number(slot?.z) || 0) || (Number(it.z) || 10);
+  imgEl.style.zIndex = String(finalZ);
+  return;
+}
+
 
         // 互換：アンカー比率
         const sc = Number(it.scale) || 1;
