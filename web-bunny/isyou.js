@@ -1,16 +1,12 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋flip補正＋赤枠選択）完全版（FIX：fitToBunnyのtransform同期＋flipズレ解消＋zをうさぎに追従）
+// isyou.js — お洒落（ショップ＋着せ替え＋flip補正＋赤枠選択）完全版
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
-// ✅ hat は「複数装着」ではなく「置き換え」（同時に1つだけ）
-// ✅ FIX：アンカー座標は offset 系（レイアウト座標）
-// ✅ FIX：fitToBunny は bimg の transform を同期（中央寄せ/拡縮等のズレを解消）
-// ✅ FIX：keepUpright=true の時だけ flip を打ち消す（親flipの二重反転回避）
-// ✅ FIX：z-index を “うさぎ画像” に追従（9999固定をやめる）
-// ✅ aimasuku.png はうさぎと同じサイズ＆同じ位置（ぴったり重なる）
-//
-// 使い方：このまま isyou.js に置き換え
+// ✅ FIX：アンカー座標を getBoundingClientRect ではなく offset 系で取る（flipでもズレない）
+// ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる：autoズレ対策）
+// ✅ 重要：hat は「置き換え」（同時に1つだけ）
+// ✅ FIX：他のうさぎより帽子だけ上に出ない（bunnyWrapをスタッキングコンテキスト化＋zを小さく）
 
 (() => {
   "use strict";
@@ -57,17 +53,14 @@
 
       const SLOTS = {
         hat: {
-          // ※fitToBunnyの時は anchor は使わない（互換用に残す）
           anchorX: 0.59,
           anchorY: 0.18,
           offsetX: 0,
           offsetY: 0,
-          // slotの相対z（+）
-          z: 0,
+          z: 2, // ← 巨大にしない
         },
       };
 
-      // ★重要：z は “相対値” として扱う（うさぎ画像のz + it.z + slot.z）
       const ITEMS = {
         partyhat: {
           label: "パーティーハット",
@@ -78,7 +71,7 @@
           offsetX: 0,
           offsetY: 0,
           scale: 1,
-          z: 1,
+          z: 2,
           keepUpright: false,
         },
         crown: {
@@ -90,7 +83,7 @@
           offsetX: 0,
           offsetY: 0,
           scale: 1,
-          z: 1,
+          z: 2,
           keepUpright: false,
         },
         ribbon: {
@@ -102,27 +95,25 @@
           offsetX: 0,
           offsetY: 0,
           scale: 1,
-          z: 1,
+          z: 2,
           keepUpright: false,
         },
 
-        // ✅ aimasuku：うさぎと同じ大きさ＆同じ位置（完全一致）
-        // ✅ aimasuku：うさぎと同じ大きさ＆同じ位置（完全一致）
-aimasuku: {
-  label: "アイマスク",
-  img: "/assets/isyou/aimasuku.png",
-  price: 1200,
-  slot: "hat",
-  fitToBunny: true,
-  offsetX: 0,
-  offsetY: 0,
-  scale: 1,
-  z: 1,
-  keepUpright: false, // ← ★ここを false にする
-},
+        // ✅ aimasuku：うさぎと完全一致（同サイズ・同位置）
+        // ※「完全一致」が最優先なので keepUpright は false 推奨（trueだとズレやすい）
+        aimasuku: {
+          label: "アイマスク",
+          img: "/assets/isyou/aimasuku.png",
+          price: 1200,
+          slot: "hat",
+          fitToBunny: true,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+          z: 2,
+          keepUpright: false,
+        },
 
-
-        // ✅ ahiru：hatと同じ部類（置き換え対象）
         ahiru: {
           label: "ぷかアヒル",
           img: "/assets/isyou/ahiru.png",
@@ -132,7 +123,7 @@ aimasuku: {
           offsetX: 0,
           offsetY: 0,
           scale: 1,
-          z: 1,
+          z: 2,
           keepUpright: false,
         },
       };
@@ -160,6 +151,25 @@ aimasuku: {
 }
 #isyouBtn:hover{ filter:brightness(1.03); }
 
+/* ✅ ここが重要：wrap内で重なりを閉じ込める（他のうさぎより帽子が前に出ない） */
+.bunnyWrap{ isolation:isolate; }
+
+/* うさぎ画像を1、アクセを2にする（同じうさぎの上にだけ乗る） */
+.bunnyWrap .bunny{ position:relative; z-index:1; }
+
+/* レイヤ */
+.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:2; }
+.isyouItem{
+  position:absolute;
+  left:0; top:0;
+  transform-origin:50% 50%;
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+  z-index:2; /* ✅ 巨大にしない */
+}
+
+/* 装着モード赤枠 */
 body.isyouEquipMode .bunnyWrap:hover{
   outline:4px solid rgba(255,64,64,.60);
   outline-offset:3px;
@@ -182,23 +192,6 @@ body.isyouEquipMode .bunnyWrap:hover{
   0%{ transform: var(--isyouT) scale(0.1); }
   70%{ transform: var(--isyouT) scale(1.15); }
   100%{ transform: var(--isyouT) scale(1.0); }
-}
-
-/* レイヤ：うさぎに合わせて低め（zはJSで追従） */
-.isyouLayer{
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  z-index:1;
-}
-.isyouItem{
-  position:absolute;
-  left:0;
-  top:0;
-  transform-origin:50% 50%;
-  pointer-events:none;
-  user-select:none;
-  -webkit-user-drag:none;
 }
 
 /* モーダル */
@@ -304,8 +297,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       let tab = "shop";
       let equipMode = false;
 
-      // 「装着する候補」選択（hatは1つだけ）
-      const selectedItems = new Set();
+      const selectedItems = new Set(); // hatは1つだけ選ぶ
       let selectedBornAt = null;
 
       function getBunnyList() {
@@ -498,12 +490,12 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
               pick.style.background = onSel ? "#ffe6f2" : "#fff";
               pick.disabled = count <= 0;
 
-              // ✅ hat は 1つだけ選択（他のhat候補を解除して置き換え）
               pick.addEventListener("click", () => {
                 if (count <= 0) return;
 
                 const slot = String(it.slot || "");
                 if (slot === "hat") {
+                  // hatは1つだけ：他のhat候補を解除
                   for (const k of Array.from(selectedItems)) {
                     const other = ITEMS[k];
                     if (other && String(other.slot || "") === "hat") selectedItems.delete(k);
@@ -514,7 +506,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
                   if (selectedItems.has(key)) selectedItems.delete(key);
                   else selectedItems.add(key);
                 }
-
                 render();
               });
 
@@ -571,7 +562,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         );
       }
 
-      // ✅ transformの影響を受けない「wrap内ローカル座標（レイアウト座標）」を取る
       function getLocalPosWithin(el, root) {
         let x = 0, y = 0;
         let cur = el;
@@ -601,7 +591,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return { x: p.x + w * ax, y: p.y + h * ay };
       }
 
-      // ✅ fitToBunny：bimgのtransformも同期してズレを消す版
       function applyTransform(imgEl, bunny, it) {
         const keepUpright = !!it.keepUpright;
 
@@ -610,7 +599,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
         const sox = slot ? (Number(slot.offsetX) || 0) : 0;
         const soy = slot ? (Number(slot.offsetY) || 0) : 0;
-        const sz  = slot ? (Number(slot.z) || 0) : 0;
 
         const ox = (Number(it.offsetX) || 0) + sox;
         const oy = (Number(it.offsetY) || 0) + soy;
@@ -620,7 +608,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
           const bimg = wrap ? getBunnyImgEl(wrap) : null;
           if (!wrap || !bimg) return;
 
-          // ✅ 位置/サイズは offset で確定（auto問題回避）
           const p = getLocalPosWithin(bimg, wrap);
           const w = bimg.offsetWidth  || bimg.clientWidth  || 0;
           const h = bimg.offsetHeight || bimg.clientHeight || 0;
@@ -631,34 +618,22 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
           imgEl.style.height = `${h}px`;
 
           const cs = getComputedStyle(bimg);
-
-          // ✅ bimgのtransform（中央寄せ/拡縮など）を同期
-          const baseT = (cs.transform && cs.transform !== "none") ? cs.transform : "";
-
-          // ✅ 親wrapがflipの時だけ、keepUpright=trueなら打ち消す
-          const parentFlipped = !!wrap.classList?.contains("flip");
-          const counterFlip = (keepUpright && parentFlipped) ? " scaleX(-1)" : "";
-
-          const move = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
-          const t = `${baseT}${move}${counterFlip}`.trim() || "none";
-
-          imgEl.style.setProperty("--isyouT", t);
           imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
+
+          const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
+          const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
+          // ※ keepUpright はズレ要因になりやすい。必要な時だけ true にする
+          const extraFlip = keepUpright ? " scaleX(-1)" : "";
+
+          const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
+          imgEl.style.setProperty("--isyouT", t);
           imgEl.style.transform = t;
 
-          // ✅ z-index をうさぎ画像に追従（相対値）
-          let bz = cs.zIndex;
-          let z = Number.isFinite(Number(bz)) ? Number(bz) : 1;
-
-          const itemZ = Number(it.z);
-          if (Number.isFinite(itemZ) && itemZ !== 0) z = z + itemZ;
-          if (sz) z = z + sz;
-
-          imgEl.style.zIndex = String(z);
+          // ✅ zは固定で小さく（同うさぎの上だけ）
+          imgEl.style.zIndex = "2";
           return;
         }
 
-        // 互換：アンカー比率
         const sc = Number(it.scale) || 1;
         const a = getAnchorPoint(bunny, slotKey);
         imgEl.style.left = `${a.x}px`;
@@ -671,9 +646,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
         imgEl.style.setProperty("--isyouT", baseT);
         imgEl.style.transform = baseT;
-
-        const finalZ = (Number(it.z) || 1) + (sz || 0);
-        imgEl.style.zIndex = String(finalZ);
+        imgEl.style.zIndex = "2";
       }
 
       function drawAllForBunny(bunny) {
@@ -704,7 +677,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         (getBunnyList() || []).forEach(drawAllForBunny);
       }
 
-      // ✅ 置き換え（slot内は1つだけON）
       function setEquipExclusiveBySlot(bunny, itemKey) {
         if (!bunny || bunny.isBaby) return;
         if ((owned[itemKey] || 0) <= 0) return;
@@ -718,14 +690,13 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const key = String(bunny.bornAt);
         equipped[key] = equipped[key] || {};
 
-        // slot内を全部OFF
+        // slot内OFF
         Object.keys(equipped[key]).forEach((k) => {
           const other = ITEMS[k];
           if (!other) return;
           if (String(other.slot || "") === slot) equipped[key][k] = false;
         });
 
-        // 選んだやつだけON
         equipped[key][itemKey] = true;
 
         saveAll();
@@ -774,7 +745,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         }
 
         if (bunny.bornAt === selectedBornAt) {
-          // ✅ hat は置き換え：選択中のhatがあればそれだけ着せる。無ければ外す。
           let pickedHat = null;
           for (const k of selectedItems) {
             const it = ITEMS[k];
@@ -783,7 +753,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
           if (pickedHat) setEquipExclusiveBySlot(bunny, pickedHat);
           else clearEquipBySlot(bunny, "hat");
-
           return;
         }
 
@@ -811,7 +780,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (transform-synced fitToBunny + hat exclusive + z-follow)");
+      console.log("[isyou] ready (no cross-bunny z issue)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
