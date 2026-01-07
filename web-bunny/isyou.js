@@ -6,8 +6,7 @@
 // ✅ FIX：親(bunnyWrap.flip)が反転してるのでアクセ側で scaleX しない（二重反転回避）
 // ✅ slot（部類）導入：hat
 // ✅ FIX：アンカー座標を getBoundingClientRect ではなく offset 系（レイアウト座標）で取る
-//     → flip（transform）しても帽子がズレない
-// ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる）※offset系で位置決め
+// ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる：autoズレ対策済み）
 // ✅ aimasuku は fitToBunny=true（うさぎと同じ大きさ＆同じ位置）
 // ✅ 重要：hat は「複数装着」ではなく「置き換え」（同時に1つだけ）
 
@@ -100,18 +99,18 @@
           z: 9999,
         },
 
-        // ✅ aimasuku：うさぎと同じ大きさ＆同じ位置（ズレない版）
+        // ✅ aimasuku：うさぎと同じ大きさ＆同じ位置（完全一致）
         aimasuku: {
           label: "アイマスク",
           img: "/assets/isyou/aimasuku.png",
           price: 1200,
           slot: "hat",
-          fitToBunny: true,   // ←完全一致
+          fitToBunny: true,
           offsetX: 0,
           offsetY: 0,
           scale: 1,
           z: 9999,
-          keepUpright: true,  // 顔の向きはそのまま
+          keepUpright: true, // 目線の向き固定したいならtrue（好み）
         },
 
         // ✅ ahiru：hatと同じ部類（置き換え対象）
@@ -120,7 +119,7 @@
           img: "/assets/isyou/ahiru.png",
           price: 600,
           slot: "hat",
-          fitToBunny: true,   // 今回は「同位置で重ねる」仕様に統一
+          fitToBunny: true, // 同サイズ重ね（画像が320x298ならこれで一致）
           offsetX: 0,
           offsetY: 0,
           scale: 1,
@@ -290,7 +289,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       let tab = "shop";
       let equipMode = false;
 
-      // ✅ 選択（hatは常に1つだけ）
+      // 「装着する候補」選択（hatは1つだけ）
       const selectedItems = new Set();
       let selectedBornAt = null;
 
@@ -437,7 +436,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
             const hint = document.createElement("div");
             hint.className = "isyouSmall";
-            hint.textContent = "①アイテム選択（hatは1つだけ） ②うさぎをクリックで赤枠 ③同じうさぎを再クリックで置き換え";
+            hint.textContent = "①アイテム選択（hatは1つだけ） ②うさぎをクリックで赤枠 ③同じうさぎを再クリックで着せ替え";
 
             rowTop.appendChild(toggle);
             rowTop.appendChild(hint);
@@ -484,12 +483,12 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
               pick.style.background = onSel ? "#ffe6f2" : "#fff";
               pick.disabled = count <= 0;
 
+              // ✅ hat は 1つだけ選択（他のhat候補を解除して置き換え）
               pick.addEventListener("click", () => {
                 if (count <= 0) return;
 
                 const slot = String(it.slot || "");
                 if (slot === "hat") {
-                  // ✅ hatは常に1つだけ選択
                   for (const k of Array.from(selectedItems)) {
                     const other = ITEMS[k];
                     if (other && String(other.slot || "") === "hat") selectedItems.delete(k);
@@ -556,7 +555,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         );
       }
 
-      // ✅ offset系で「wrap内ローカル座標」を取る（transformの影響を受けない）
+      // ✅ transformの影響を受けない「wrap内ローカル座標（レイアウト座標）」を取る
       function getLocalPosWithin(el, root) {
         let x = 0, y = 0;
         let cur = el;
@@ -568,7 +567,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return { x, y, ok: (cur === root) };
       }
 
-      // ✅ hatアンカー（比率）を「ローカル座標」で返す（fitToBunny時は使わない）
       function getAnchorPoint(bunny, slotKey) {
         const wrap = bunny?.wrap;
         if (!wrap) return { x: 0, y: 0 };
@@ -587,6 +585,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return { x: p.x + w * ax, y: p.y + h * ay };
       }
 
+      // ✅ fitToBunny：left/top が auto でもズレない版
       function applyTransform(imgEl, bunny, it) {
         const keepUpright = !!it.keepUpright;
 
@@ -600,21 +599,22 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const ox = (Number(it.offsetX) || 0) + sox;
         const oy = (Number(it.offsetY) || 0) + soy;
 
-        // ✅ fitToBunny：offset系で完全一致（ズレない）
         if (it.fitToBunny) {
           const wrap = bunny?.wrap;
           const bimg = wrap ? getBunnyImgEl(wrap) : null;
           if (!wrap || !bimg) return;
 
+          // ✅ 位置/サイズは offset系で確定（auto問題を完全回避）
           const p = getLocalPosWithin(bimg, wrap);
-          const w = bimg.offsetWidth || bimg.clientWidth || 0;
+          const w = bimg.offsetWidth  || bimg.clientWidth  || 0;
           const h = bimg.offsetHeight || bimg.clientHeight || 0;
 
-          imgEl.style.left   = `${p.x}px`;
-          imgEl.style.top    = `${p.y}px`;
+          imgEl.style.left = `${p.x}px`;
+          imgEl.style.top  = `${p.y}px`;
           imgEl.style.width  = `${w}px`;
           imgEl.style.height = `${h}px`;
 
+          // ✅ transformは computed をコピー（flipは親にあるので二重反転しない）
           const cs = getComputedStyle(bimg);
           imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
 
@@ -631,7 +631,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
           return;
         }
 
-        // 旧：アンカー比率で置く（互換）
+        // 互換：アンカー比率
         const sc = Number(it.scale) || 1;
         const a = getAnchorPoint(bunny, slotKey);
         imgEl.style.left = `${a.x}px`;
@@ -680,6 +680,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       // ✅ 置き換え（slot内は1つだけON）
       function setEquipExclusiveBySlot(bunny, itemKey) {
         if (!bunny || bunny.isBaby) return;
+        if ((owned[itemKey] || 0) <= 0) return;
 
         const it = ITEMS[itemKey];
         if (!it) return;
@@ -690,14 +691,14 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const key = String(bunny.bornAt);
         equipped[key] = equipped[key] || {};
 
-        // slot内の他アイテムを全部OFF
+        // slot内を全部OFF
         Object.keys(equipped[key]).forEach((k) => {
           const other = ITEMS[k];
           if (!other) return;
           if (String(other.slot || "") === slot) equipped[key][k] = false;
         });
 
-        // これだけON
+        // 選んだやつだけON
         equipped[key][itemKey] = true;
 
         saveAll();
@@ -783,7 +784,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (fitToBunny offset + hat replace)");
+      console.log("[isyou] ready (fitToBunny no-auto-drift + hat exclusive)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
