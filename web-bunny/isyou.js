@@ -3,10 +3,10 @@
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
-// ✅ FIX：親(bunnyWrap.flip)が反転してるのでアクセ側で scaleX しない（二重反転回避）
+// ✅ FIX：親(bunnyWrap.flip)が反転してるのでアクセ側で常時 scaleX しない（二重反転回避）
 // ✅ slot（部類）導入：hat
 // ✅ FIX：アンカー座標を getBoundingClientRect ではなく offset 系（レイアウト座標）で取る
-// ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる：autoズレ対策済み）
+// ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる：transformコピーしない＝ズレない）
 // ✅ aimasuku は fitToBunny=true（うさぎと同じ大きさ＆同じ位置）
 // ✅ 重要：hat は「複数装着」ではなく「置き換え」（同時に1つだけ）
 
@@ -55,7 +55,6 @@
 
       const SLOTS = {
         hat: {
-          // ※fitToBunnyの時は anchor は使わない（互換のため残してOK）
           anchorX: 0.59,
           anchorY: 0.18,
           offsetX: 0,
@@ -110,16 +109,16 @@
           offsetY: 0,
           scale: 1,
           z: 9999,
-          keepUpright: true, // 目線の向き固定したいならtrue（好み）
+          // ✅「向き固定」したいなら true（flip時だけ打ち消す）
+          keepUpright: true,
         },
 
-        // ✅ ahiru：hatと同じ部類（置き換え対象）
         ahiru: {
           label: "ぷかアヒル",
           img: "/assets/isyou/ahiru.png",
           price: 600,
           slot: "hat",
-          fitToBunny: true, // 同サイズ重ね（画像が320x298ならこれで一致）
+          fitToBunny: true,
           offsetX: 0,
           offsetY: 0,
           scale: 1,
@@ -132,9 +131,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV11")) return;
+        if (document.getElementById("isyouStyleFinalV12")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV11";
+        s.id = "isyouStyleFinalV12";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -289,8 +288,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       let tab = "shop";
       let equipMode = false;
 
-      // 「装着する候補」選択（hatは1つだけ）
-      const selectedItems = new Set();
+      const selectedItems = new Set(); // hatは1つだけ
       let selectedBornAt = null;
 
       function getBunnyList() {
@@ -483,7 +481,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
               pick.style.background = onSel ? "#ffe6f2" : "#fff";
               pick.disabled = count <= 0;
 
-              // ✅ hat は 1つだけ選択（他のhat候補を解除して置き換え）
+              // ✅ hatは1つだけ（選び直しで置き換え）
               pick.addEventListener("click", () => {
                 if (count <= 0) return;
 
@@ -499,7 +497,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
                   if (selectedItems.has(key)) selectedItems.delete(key);
                   else selectedItems.add(key);
                 }
-
                 render();
               });
 
@@ -547,12 +544,12 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       function getBunnyImgEl(wrap) {
-        return (
-          wrap.querySelector("img.bunnyImg") ||
-          wrap.querySelector("img[data-bunny]") ||
-          wrap.querySelector("img[src*='bunny']") ||
-          wrap.querySelector("img")
-        );
+        // app.js では this.el.className="bunny" なのでまずそれを掴む
+        return wrap.querySelector("img.bunny") ||
+               wrap.querySelector("img.bunnyImg") ||
+               wrap.querySelector("img[data-bunny]") ||
+               wrap.querySelector("img[src*='bunny']") ||
+               wrap.querySelector("img");
       }
 
       // ✅ transformの影響を受けない「wrap内ローカル座標（レイアウト座標）」を取る
@@ -585,7 +582,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return { x: p.x + w * ax, y: p.y + h * ay };
       }
 
-      // ✅ fitToBunny：left/top が auto でもズレない版
+      // ✅ fitToBunny：うさぎ画像と同サイズ・同位置に重ねる（transformはコピーしない＝ズレない）
       function applyTransform(imgEl, bunny, it) {
         const keepUpright = !!it.keepUpright;
 
@@ -600,38 +597,33 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const oy = (Number(it.offsetY) || 0) + soy;
 
         if (it.fitToBunny) {
-  const wrap = bunny?.wrap;
-  const bimg = wrap ? getBunnyImgEl(wrap) : null;
-  if (!wrap || !bimg) return;
+          const wrap = bunny?.wrap;
+          const bimg = wrap ? getBunnyImgEl(wrap) : null;
+          if (!wrap || !bimg) return;
 
-  const wrapRect = wrap.getBoundingClientRect();
-  const imgRect  = bimg.getBoundingClientRect();
+          const p = getLocalPosWithin(bimg, wrap);
+          const w = bimg.offsetWidth  || bimg.clientWidth  || 0;
+          const h = bimg.offsetHeight || bimg.clientHeight || 0;
 
-  // ✅ wrap内ローカル（見えてる位置の差分なのでズレない）
-  const left = imgRect.left - wrapRect.left;
-  const top  = imgRect.top  - wrapRect.top;
+          imgEl.style.left = `${p.x}px`;
+          imgEl.style.top  = `${p.y}px`;
+          imgEl.style.width  = `${w}px`;
+          imgEl.style.height = `${h}px`;
 
-  imgEl.style.left = `${left}px`;
-  imgEl.style.top  = `${top}px`;
-  imgEl.style.width  = `${imgRect.width}px`;
-  imgEl.style.height = `${imgRect.height}px`;
+          // ✅ flipは親(wrap)で起きるので基本何もしない
+          // ✅ keepUpright=true の時だけ、親がflipなら打ち消す（同じ見え方に固定）
+          const parentFlipped = !!wrap.classList?.contains("flip");
+          const counterFlip = (keepUpright && parentFlipped) ? " scaleX(-1)" : "";
 
-  const cs = getComputedStyle(bimg);
-  imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
+          const move = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
+          const t = `${move}${counterFlip}`.trim() || "none";
+          imgEl.style.setProperty("--isyouT", t);
+          imgEl.style.transform = t;
 
-  const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
-  const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
-  const extraFlip = keepUpright ? " scaleX(-1)" : "";
-
-  const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
-  imgEl.style.setProperty("--isyouT", t);
-  imgEl.style.transform = t;
-
-  const finalZ = (Number(slot?.z) || 0) || (Number(it.z) || 10);
-  imgEl.style.zIndex = String(finalZ);
-  return;
-}
-
+          const finalZ = (sz || 0) || (Number(it.z) || 10);
+          imgEl.style.zIndex = String(finalZ);
+          return;
+        }
 
         // 互換：アンカー比率
         const sc = Number(it.scale) || 1;
@@ -749,7 +741,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         }
 
         if (bunny.bornAt === selectedBornAt) {
-          // ✅ hat は置き換え：選択中のhatがあればそれだけ着せる。無ければ外す。
           let pickedHat = null;
           for (const k of selectedItems) {
             const it = ITEMS[k];
@@ -758,7 +749,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
           if (pickedHat) setEquipExclusiveBySlot(bunny, pickedHat);
           else clearEquipBySlot(bunny, "hat");
-
           return;
         }
 
@@ -786,7 +776,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (fitToBunny no-auto-drift + hat exclusive)");
+      console.log("[isyou] ready (fitToBunny no-transform-copy => no drift)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
