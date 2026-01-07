@@ -104,12 +104,6 @@ html,body{
   transform:scaleX(-1);
 }
 
-/* babyは小さく */
-.bunnyWrap.baby .bunny{
-  width:86px;
-  opacity:.95;
-}
-
 /* =========================
    HEART
 ========================= */
