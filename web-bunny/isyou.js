@@ -501,17 +501,25 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       function applyTransform(imgEl, bunny, it) {
-        const flip = !!bunny?.wrap?.classList?.contains("flip");
-        const fx = flip ? -1 : 1;
-        const ox = (Number(it.offsetX) || 0) * (flip ? -1 : 1);
-        const oy = (Number(it.offsetY) || 0);
-        const sc = (Number(it.scale) || 1);
-        imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
-        const baseT = `translate(calc(-50% + ${ox}px), ${oy}px) scale(${sc}) scaleX(${fx})`;
-        imgEl.style.setProperty("--isyouT", baseT);
-        imgEl.style.transform = baseT;
-        imgEl.style.zIndex = String(it.z || 10);
-      }
+  const flip = !!bunny?.wrap?.classList?.contains("flip");
+  const fx = flip ? -1 : 1;
+
+  // ★重要：offsetX を flip で反転しない（ズレ防止）
+  const ox = (Number(it.offsetX) || 0);
+  const oy = (Number(it.offsetY) || 0);
+  const sc = (Number(it.scale) || 1);
+
+  imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
+
+  const baseT =
+    `translate(calc(-50% + ${ox}px), ${oy}px) ` +
+    `scale(${sc}) scaleX(${fx})`;
+
+  imgEl.style.setProperty("--isyouT", baseT);
+  imgEl.style.transform = baseT;
+  imgEl.style.zIndex = String(it.z || 10);
+}
+
 
       function drawAllForBunny(bunny) {
         if (!bunny?.wrap || bunny.isBaby) return;
