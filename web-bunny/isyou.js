@@ -53,16 +53,16 @@
 
       // ★hat位置（ここだけで全帽子が動く）
       const SLOTS = {
-        hat: {
-          // 頭アンカー（画像内比率）
-          anchorX: 0.74,
-          anchorY: 0.10,
-          // 微調整（px）
-          offsetX: 10,
-          offsetY: 55,
-          z: 9999,
-        },
-      };
+       const SLOTS = {
+  hat: {
+    anchorX: 0.59,  // ★耳と耳の間（頭の中心寄り）
+    anchorY: 0.18,  // ★頭のてっぺん寄り
+    offsetX: 0,     // 微調整はここ（+で右）
+    offsetY: 6,     // 微調整はここ（+で下）※まず少しだけ下げる
+    z: 9999,
+  },
+};
+
 
       const ITEMS = {
         partyhat: {
