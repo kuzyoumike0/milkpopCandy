@@ -397,6 +397,7 @@
 
   /* =========================
    * CSS（中央固定＆豪華演出＋虹ライン）
+   * ※結果表示を「台の上」に固定
    * ========================= */
   function injectStyles() {
     if (document.getElementById("slotStyleLuxV2Bet")) return;
@@ -743,7 +744,26 @@
   z-index:2147483647;
   pointer-events:auto;
 }
-#${PANEL_ID} .results{ top: calc(var(--panelTop) + var(--panelH) * var(--resY)); }
+
+/* ===== 結果表示：台の上に固定 =====
+   ここで「台の上」に出す
+   位置微調整したい場合は 0.52 を変える（大きいほど上へ） */
+#${PANEL_ID} .results{
+  left: 50%;
+  top: calc(50% - min(520px, 92vw) * 0.52);
+  transform: translate(-50%, -50%);
+  width: min(520px, 92vw);
+  max-width: 560px;
+  justify-content: center;
+  pointer-events: none; /* 結果が台クリックを邪魔しない */
+}
+#${PANEL_ID} .results .chip{
+  background: rgba(255,255,255,.94);
+  box-shadow: 0 18px 60px rgba(0,0,0,.22);
+  border-radius: 18px;
+  padding: 12px 16px;
+}
+
 #${PANEL_ID} .controls{ top: calc(var(--panelTop) + var(--panelH) * var(--uiY)); }
 
 #${PANEL_ID} .chip{
