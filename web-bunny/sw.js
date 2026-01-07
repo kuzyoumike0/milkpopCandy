@@ -1,4 +1,4 @@
-const CACHE_NAME = "web-bunny-cache-v4"; // ★必ず上げる（v3でもOK）
+const CACHE_NAME = "web-bunny-cache-v5"; // ★必ず上げる（v3でもOK）
 
 const STATIC_ASSETS = [
   "./",
