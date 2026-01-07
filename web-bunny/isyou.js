@@ -119,6 +119,38 @@
           scale: 1,
           z: 9999,
         },
+        aimasuku: {
+  label: "アイマスク",
+  img: "/assets/isyou/aimasuku.png",
+          price: 1200,
+          slot: "hat",
+          fitToBunny: true,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+          z: 9999,
+        },
+
+  // 反転時も顔向きはそのままにしたいなら true（好み）
+  keepUpright: true,
+},
+
+ahiru: {
+  label: "ぷかアヒル",
+  img: "/assets/isyou/ahiru.png",
+  price: 600,
+  slot: "hat",
+
+  fitToBunny: false,
+  scale: 0.60,     // ←大きさ
+  offsetX: 0,
+  offsetY: 0,
+  z: 9997,
+
+  // 反転に合わせて左右も反転してほしいなら keepUpright は false のまま（指定しない）
+  keepUpright: false,
+},
+
       };
 
       /* =========================
