@@ -1,8 +1,8 @@
-// zisseki.js
-// 実績システム（増設版）
+// zisseki.js（実績システム：増設版・互換強化）
 // - localStorage 永続化
 // - WB events が無くても、定期チェックで解除できる
 // - SYOUGOU の各種カウント（うんち/旅立ち/花火/スロット当たり/お迎え）を実績に反映
+// - ✅ 新旧WB互換：getCoin/getBunnies/stats など優先して参照
 
 (() => {
   if (!window.WB) return;
@@ -40,7 +40,6 @@
     ach[id] = true;
     saveAch();
 
-    // 通知
     toast(`🏆 実績解除：${meta?.name || id}`);
 
     // イベント通知（他UIと連動したい場合）
@@ -86,19 +85,27 @@
 
   function toast(text) {
     ensureToastStyle();
+    const t = String(text ?? "").trim();
+    if (!t) return;
     const el = document.createElement("div");
     el.className = "wbAchToast";
-    el.textContent = text;
+    el.textContent = t;
     document.body.appendChild(el);
     setTimeout(() => { try { el.remove(); } catch {} }, 3600);
   }
 
   /* =========================
-   * Helpers (getters)
+   * Helpers (getters) — 新旧互換
    * ========================= */
 
-  // 所持コイン
+  // 所持コイン（新：WB.getCoin / 旧：WB.coins / 最後：HUD表示）
   function getCoins() {
+    try {
+      if (typeof WB.getCoin === "function") {
+        const v = Number(WB.getCoin());
+        return Number.isFinite(v) ? v : 0;
+      }
+    } catch {}
     try {
       if (typeof WB.coins === "number") return WB.coins;
     } catch {}
@@ -106,8 +113,14 @@
     return el ? (Number(el.textContent) || 0) : 0;
   }
 
-  // 同時うさぎ数
+  // 同時うさぎ数（新：WB.getBunnies / 旧：WB.bunnies）
   function getBunnyCount() {
+    try {
+      if (typeof WB.getBunnies === "function") {
+        const arr = WB.getBunnies();
+        return Array.isArray(arr) ? arr.length : 0;
+      }
+    } catch {}
     try {
       if (Array.isArray(WB.bunnies)) return WB.bunnies.length;
     } catch {}
@@ -125,7 +138,6 @@
 
   // WB側で「累計購入数」等がある場合だけ拾う（無ければ 0）
   function getStatMaybe(keys) {
-    // keys: ["totalBunnyBought", "bunnyBought", ...]
     for (const k of keys) {
       try {
         const v = WB?.[k];
@@ -151,7 +163,6 @@
       desc: `同時うさぎ数が${UNLOCK_BUNNY4_NEED}匹に到達（bunny4/bunny5解放）`,
       check: () => (getBunnyCount() >= UNLOCK_BUNNY4_NEED),
       onUnlock: () => {
-        // 既存挙動：ショップ解放の通知
         toast("🐰✨ bunny4 / bunny5 がショップに出現しました！");
         try { WB.emit?.("unlockShop", { id: "unlock_bunny4" }); } catch {}
       },
@@ -178,9 +189,9 @@
     { id: "hanabi_100", name: "天上の花火師",   desc: "花火回数 100",  check: () => getSyougouCount("hanabi") >= 100 },
 
     // --- SYOUGOU連動：スロット当たり ---
-    { id: "slotwin_10",  name: "当たり癖",       desc: "スロット当たり回数 10",  check: () => getSyougouCount("slot_win") >= 10 },
-    { id: "slotwin_50",  name: "勝ち筋が見える", desc: "スロット当たり回数 50",  check: () => getSyougouCount("slot_win") >= 50 },
-    { id: "slotwin_100", name: "スロットの申し子", desc: "スロット当たり回数 100", check: () => getSyougouCount("slot_win") >= 100 },
+    { id: "slotwin_10",  name: "当たり癖",         desc: "スロット当たり回数 10",   check: () => getSyougouCount("slot_win") >= 10 },
+    { id: "slotwin_50",  name: "勝ち筋が見える",   desc: "スロット当たり回数 50",   check: () => getSyougouCount("slot_win") >= 50 },
+    { id: "slotwin_100", name: "スロットの申し子", desc: "スロット当たり回数 100",  check: () => getSyougouCount("slot_win") >= 100 },
 
     // --- SYOUGOU連動：お迎え ---
     { id: "omukae_10",  name: "お迎え係",     desc: "お迎え回数 10",   check: () => getSyougouCount("omukae") >= 10 },
@@ -188,24 +199,9 @@
     { id: "omukae_100", name: "冥府の執事",   desc: "お迎え回数 100",  check: () => getSyougouCount("omukae") >= 100 },
 
     // --- 累計うさぎ購入（WBに数値がある場合だけ機能） ---
-    {
-      id: "buy_10",
-      name: "多頭飼いデビュー",
-      desc: "累計うさぎ購入 10",
-      check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 10,
-    },
-    {
-      id: "buy_50",
-      name: "牧場主",
-      desc: "累計うさぎ購入 50",
-      check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 50,
-    },
-    {
-      id: "buy_100",
-      name: "超・牧場主",
-      desc: "累計うさぎ購入 100",
-      check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 100,
-    },
+    { id: "buy_10",  name: "多頭飼いデビュー", desc: "累計うさぎ購入 10",  check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 10 },
+    { id: "buy_50",  name: "牧場主",           desc: "累計うさぎ購入 50",  check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 50 },
+    { id: "buy_100", name: "超・牧場主",       desc: "累計うさぎ購入 100", check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 100 },
   ];
 
   /* =========================
@@ -214,6 +210,7 @@
   function checkUnlocks() {
     for (const a of ACH_MASTER) {
       if (isUnlocked(a.id)) continue;
+
       let ok = false;
       try { ok = !!a.check?.(); } catch { ok = false; }
       if (!ok) continue;
@@ -229,7 +226,7 @@
    * Hooks
    * ========================= */
 
-  // うさぎ数が変わるたびにチェック（既存）
+  // うさぎ数が変わるたびにチェック
   try { WB.on?.("bunnyCountChanged", checkUnlocks); } catch {}
 
   // コイン変化が取れるならチェック
@@ -237,14 +234,13 @@
   try { WB.on?.("coinChanged", checkUnlocks); } catch {}
 
   // SYOUGOU連動が増えるイベント（あれば拾う）
-  // ※あなたの各スクリプト側で WB.emit('xxx') を入れておけば確実に拾える
   try { WB.on?.("goldenUnchiCollected", checkUnlocks); } catch {}
   try { WB.on?.("tabidachi", checkUnlocks); } catch {}
   try { WB.on?.("hanabiFired", checkUnlocks); } catch {}
   try { WB.on?.("slotWin", checkUnlocks); } catch {}
   try { WB.on?.("omukae", checkUnlocks); } catch {}
 
-  // リセット時は実績も消したい場合（既存）
+  // リセット時は実績も消したい場合
   try {
     WB.on?.("resetRequested", () => {
       try { localStorage.removeItem(LS_ACH); } catch {}
