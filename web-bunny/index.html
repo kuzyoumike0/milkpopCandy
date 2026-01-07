@@ -90,11 +90,21 @@
   <script src="./tabidati.js"></script>
   <script src="./slot.js"></script>
 
-  <!-- Service Worker -->
+  <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
   <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
-    }
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const noSw = params.get("nosw") === "1";
+
+      if (noSw) {
+        console.warn("[SW] disabled by ?nosw=1");
+        return;
+      }
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("./sw.js").catch(() => {});
+      }
+    })();
   </script>
 
 </body>
