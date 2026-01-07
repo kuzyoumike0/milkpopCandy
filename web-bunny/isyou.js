@@ -1,6 +1,9 @@
-// isyou.js — お洒落（ショップ＋複数装着＋flip補正＋称号連動＋赤枠）完全版（WB待機つき）
-// ★修正：partyhat は「/assets/isyou/partyhat.png」を優先（あなたの実パス）
-// ★追加：装着時「ポンッ」と被るアニメ（isyouPop）
+// isyou.js — 赤枠で選択したうさぎにだけ装着（partyhat）
+// - 装着モードON：うさぎクリックで赤枠ロック
+// - 赤枠の同じうさぎを再クリック：選択中アイテムを装着/解除（ポンッ）
+// - モーダル内クリックは無視（アイテム選択できる）
+// - flip補正 / 複数装着OK / babyは装着しない
+// - partyhat.png パスは /assets/isyou/partyhat.png
 
 (() => {
   "use strict";
@@ -35,7 +38,6 @@
         return;
       }
       window.__ISYOU_INITED__ = true;
-
       console.log("[isyou] init");
 
       /* =========================
@@ -47,8 +49,7 @@
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
-      // ★あなたの実パスは「/assets/isyou/partyhat.png」
-      // なので先頭は必ず /assets... にする（相対 ./assets... は保険で残す）
+      // 画像パスはあなたの実パスを優先
       const ITEM_IMAGES = {
         partyhat: ["/assets/isyou/partyhat.png", "./assets/isyou/partyhat.png"],
         crown:   ["/assets/isyou/crown.png", "./assets/isyou/crown.png"],
@@ -60,11 +61,10 @@
           label: "パーティーハット",
           img: ITEM_IMAGES.partyhat[0],
           price: 500,
-
-          anchorY: 0.03,
-          offsetX: 14,
+          anchorY: 0.03, // 頭頂部寄り
+          offsetX: 12,   // 耳の間に寄せる（微調整OK）
           offsetY: -6,
-          scale: 0.60,   // 小さめ
+          scale: 0.58,   // ★小さめ
           z: 25,
         },
         crown: {
@@ -74,7 +74,7 @@
           anchorY: 0.10,
           offsetX: 0,
           offsetY: -26,
-          scale: 1.25,
+          scale: 1.15,
           z: 30,
         },
         ribbon: {
@@ -89,11 +89,6 @@
         },
       };
 
-      const TITLE_LINKS = [
-        { match: /黄金の王/, autoEquip: ["crown"] },
-        { match: /黄金に選ばれし者/, autoEquip: ["crown"] },
-      ];
-
       /* =========================
        * HUD
        * ========================= */
@@ -107,20 +102,20 @@
        * CSS inject
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleV8")) return;
+        if (document.getElementById("isyouStyleLockHatV1")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleV8";
+        s.id = "isyouStyleLockHatV1";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{ pointer-events:auto; z-index:2147483647; }
 
-/* 装着モード：赤枠 */
 body.isyouEquipMode .bunnyWrap{ outline:none; }
 body.isyouEquipMode .bunnyWrap:hover{
   outline: 4px solid rgba(255,64,64,.60);
   outline-offset: 3px;
   border-radius: 18px;
 }
+
 .bunnyWrap.isyouSelectedTarget{
   outline: 4px solid rgba(255,64,64,.92);
   outline-offset: 3px;
@@ -128,7 +123,6 @@ body.isyouEquipMode .bunnyWrap:hover{
   box-shadow: 0 0 0 2px rgba(255,255,255,.65) inset;
 }
 
-/* 装着した瞬間の点滅 */
 .bunnyWrap.isyouJustEquipped{
   outline: 4px solid rgba(255,64,64,.92);
   outline-offset: 3px;
@@ -141,23 +135,8 @@ body.isyouEquipMode .bunnyWrap:hover{
   100%{ filter: brightness(1.0); }
 }
 
-/* ★ポンッ（実際のtransformはJSで入れるので、ここはscaleの弾みだけ） */
-.isyouItem.isyouPop{
-  animation: isyouPop 220ms cubic-bezier(.2,.9,.2,1);
-}
-@keyframes isyouPop{
-  0%   { transform: translate(var(--isyou-tx, -50%), var(--isyou-ty, 0px)) scale(var(--isyou-sc0, .70)); }
-  70%  { transform: translate(var(--isyou-tx, -50%), var(--isyou-ty, 0px)) scale(var(--isyou-sc1, 1.12)); }
-  100% { transform: translate(var(--isyou-tx, -50%), var(--isyou-ty, 0px)) scale(var(--isyou-sc2, 1.00)); }
-}
-
-/* アクセサリレイヤ */
-.isyouLayer{
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  z-index:50;
-}
+/* うさぎの上に乗るアクセサリ */
+.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
 .isyouItem{
   position:absolute;
   left:50%;
@@ -167,7 +146,17 @@ body.isyouEquipMode .bunnyWrap:hover{
   -webkit-user-drag:none;
 }
 
-/* モーダル */
+/* ポンッ（JSで変数渡し） */
+.isyouItem.isyouPop{
+  animation: isyouPop 240ms cubic-bezier(.2,.95,.25,1);
+}
+@keyframes isyouPop{
+  0%   { transform: translate(var(--tx), var(--ty)) scale(var(--sc0)) scaleX(var(--fx)); }
+  70%  { transform: translate(var(--tx), var(--ty)) scale(var(--sc1)) scaleX(var(--fx)); }
+  100% { transform: translate(var(--tx), var(--ty)) scale(var(--sc2)) scaleX(var(--fx)); }
+}
+
+/* Modal */
 .isyouBackdrop{
   position:fixed;
   inset:0;
@@ -197,7 +186,6 @@ body.isyouEquipMode .bunnyWrap:hover{
 .isyouCardHead{ display:flex; align-items:center; gap:10px; }
 .isyouThumb{ width:54px; height:54px; object-fit:contain; }
 .isyouName{ font-weight:900; }
-.isyouMeta{ margin-top:6px; font-size:12px; opacity:.85; line-height:1.35; }
 .isyouRow{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .isyouBtn{
   border:none; padding:7px 10px; border-radius:12px; cursor:pointer;
@@ -206,8 +194,6 @@ body.isyouEquipMode .bunnyWrap:hover{
 }
 .isyouBtn.primary{ background:#ffe6f2; }
 .isyouSmall{ font-size:12px; opacity:.85; }
-
-body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
         `;
         document.head.appendChild(s);
       })();
@@ -241,9 +227,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
       function spendCoins(amount) {
         amount = Math.max(0, Math.floor(Number(amount) || 0));
         if (amount <= 0) return true;
-
         if (typeof WB.spendCoin === "function") return !!WB.spendCoin(amount);
-
         if (typeof WB.coins === "number") {
           if (WB.coins < amount) return false;
           WB.coins -= amount;
@@ -266,14 +250,14 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
       }
 
       /* =========================
-       * Modal State
+       * Modal
        * ========================= */
       let backdrop = null;
-      let modal = null;
       let tab = "shop"; // "shop" | "equip"
       let equipMode = false;
-      const selectedItems = new Set();
-      let selectedBornAt = null;
+
+      const selectedItems = new Set(); // ここに選んだアイテムが入る
+      let selectedBornAt = null;       // 赤枠の対象
 
       function getBunnyList() {
         return Array.isArray(WB.bunnies)
@@ -282,9 +266,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
       }
 
       function clearSelectedTargetVisual() {
-        (getBunnyList() || []).forEach((b) =>
-          b?.wrap?.classList?.remove("isyouSelectedTarget")
-        );
+        (getBunnyList() || []).forEach((b) => b?.wrap?.classList?.remove("isyouSelectedTarget"));
       }
 
       function setSelectedTarget(bunnyOrNull) {
@@ -309,7 +291,6 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
         setSelectedTarget(null);
         try { backdrop?.remove(); } catch {}
         backdrop = null;
-        modal = null;
       }
 
       function openModal() {
@@ -318,7 +299,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
         backdrop = document.createElement("div");
         backdrop.className = "isyouBackdrop";
 
-        modal = document.createElement("div");
+        const modal = document.createElement("div");
         modal.className = "isyouModal";
         modal.addEventListener("click", (e) => e.stopPropagation());
 
@@ -377,8 +358,6 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
               const img = document.createElement("img");
               img.className = "isyouThumb";
               img.src = it.img;
-
-              // サムネもフォールバック（念のため）
               img.onerror = () => {
                 const c = ITEM_IMAGES[key] || [];
                 if (c[1]) img.src = c[1];
@@ -391,21 +370,17 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
               top.appendChild(img);
               top.appendChild(name);
 
-              const meta = document.createElement("div");
-              meta.className = "isyouMeta";
-              meta.textContent = `価格：${it.price} 🪙`;
-
               const row = document.createElement("div");
               row.className = "isyouRow";
 
               const buy = document.createElement("button");
               buy.className = "isyouBtn primary";
-              buy.textContent = "購入";
+              buy.textContent = `購入（${it.price}🪙）`;
               buy.addEventListener("click", () => {
                 const ok = spendCoins(it.price);
                 if (!ok) {
                   buy.textContent = "コイン不足";
-                  setTimeout(() => (buy.textContent = "購入"), 700);
+                  setTimeout(() => (buy.textContent = `購入（${it.price}🪙）`), 700);
                   return;
                 }
                 owned[key] = (owned[key] || 0) + 1;
@@ -416,7 +391,6 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
 
               row.appendChild(buy);
               card.appendChild(top);
-              card.appendChild(meta);
               card.appendChild(row);
               grid.appendChild(card);
             });
@@ -440,7 +414,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
 
             const hint = document.createElement("div");
             hint.className = "isyouSmall";
-            hint.textContent = "①アイテム選択 ②うさぎをクリックして赤枠 ③同じ子をもう一度クリックで装着/解除";
+            hint.textContent = "①アイテム選択 → ②うさぎをクリックで赤枠 → ③同じ子を再クリックで装着/解除";
 
             rowTop.appendChild(toggle);
             rowTop.appendChild(hint);
@@ -451,7 +425,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
             targetLine.className = "isyouSmall";
             targetLine.style.marginTop = "6px";
             targetLine.textContent = sel
-              ? `装着対象：${sel.kind || "bunny"}（ID: ${sel.bornAt}）`
+              ? `装着対象：${sel.kind || "bunny"}（ID:${sel.bornAt}）`
               : "装着対象：未選択（うさぎをクリックして赤枠で選択）";
             body.appendChild(targetLine);
 
@@ -528,7 +502,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
       });
 
       /* =========================
-       * Accessory layer helpers
+       * Accessory drawing
        * ========================= */
       function ensureLayer(bunny) {
         if (!bunny?.wrap) return null;
@@ -541,51 +515,42 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
         return layer;
       }
 
-      function isFlip(bunny) {
-        return !!bunny?.wrap?.classList?.contains("flip");
-      }
-
-      function applyTransform(imgEl, bunny, it) {
-        const flip = isFlip(bunny);
-        const ox = (Number(it.offsetX) || 0) * (flip ? -1 : 1);
-        const oy = (Number(it.offsetY) || 0);
-        const sc = (Number(it.scale) || 1);
-        const fx = flip ? -1 : 1;
-
-        imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
-
-        // ★ポンッ用に変数に分解して CSS keyframes へ渡す
-        const tx = `calc(-50% + ${ox}px)`;
-        const ty = `${oy}px`;
-
-        imgEl.style.setProperty("--isyou-tx", tx);
-        imgEl.style.setProperty("--isyou-ty", ty);
-
-        // pop中のスケールはCSS側で弾ませ、ここは最終形を変数で渡す
-        imgEl.style.setProperty("--isyou-sc2", String(sc));
-        imgEl.style.setProperty("--isyou-sc0", String(Math.max(0.01, sc * 0.70)));
-        imgEl.style.setProperty("--isyou-sc1", String(sc * 1.12));
-
-        imgEl.style.transform = `translate(${tx}, ${ty}) scale(${sc}) scaleX(${fx})`;
-        imgEl.style.zIndex = String(it.z || 10);
-      }
-
       function setImgWithFallback(imgEl, itemKey) {
         const candidates = ITEM_IMAGES[itemKey] || [ITEMS[itemKey]?.img].filter(Boolean);
-        if (!candidates || candidates.length === 0) return;
-
-        let idx = 0;
-        imgEl.src = candidates[idx];
-
+        let i = 0;
+        imgEl.src = candidates[i];
         imgEl.onerror = () => {
-          idx++;
-          if (idx < candidates.length) {
-            imgEl.src = candidates[idx];
-          } else {
+          i++;
+          if (i < candidates.length) imgEl.src = candidates[i];
+          else {
             console.warn("[isyou] image load failed:", itemKey, candidates);
             imgEl.onerror = null;
           }
         };
+      }
+
+      function applyTransform(imgEl, bunny, it) {
+        const flip = !!bunny?.wrap?.classList?.contains("flip");
+        const fx = flip ? -1 : 1;
+
+        const ox = (Number(it.offsetX) || 0) * (flip ? -1 : 1);
+        const oy = (Number(it.offsetY) || 0);
+        const sc = (Number(it.scale) || 1);
+
+        imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
+
+        const tx = `calc(-50% + ${ox}px)`;
+        const ty = `${oy}px`;
+
+        imgEl.style.setProperty("--tx", tx);
+        imgEl.style.setProperty("--ty", ty);
+        imgEl.style.setProperty("--fx", String(fx));
+        imgEl.style.setProperty("--sc2", String(sc));
+        imgEl.style.setProperty("--sc0", String(Math.max(0.01, sc * 0.70)));
+        imgEl.style.setProperty("--sc1", String(sc * 1.12));
+
+        imgEl.style.transform = `translate(${tx}, ${ty}) scale(${sc}) scaleX(${fx})`;
+        imgEl.style.zIndex = String(it.z || 10);
       }
 
       function drawAllForBunny(bunny) {
@@ -620,16 +585,12 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
             img.className = "isyouItem";
             img.dataset.itemKey = itemKey;
             img.draggable = false;
-
-            // ★表示されない対策：あなたのパス(/assets/...)を最優先
             setImgWithFallback(img, itemKey);
-
             layer.appendChild(img);
           }
 
           applyTransform(img, bunny, it);
 
-          // ★装着直後だけ「ポンッ」
           if (newlyCreated) {
             img.classList.add("isyouPop");
             setTimeout(() => img?.classList?.remove("isyouPop"), 260);
@@ -649,11 +610,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
 
       function toggleEquip(bunny, itemKey) {
         if (!bunny || bunny.isBaby) return;
-        const it = ITEMS[itemKey];
-        if (!it) return;
-
-        const have = owned[itemKey] || 0;
-        if (have <= 0) return;
+        if ((owned[itemKey] || 0) <= 0) return;
 
         const key = String(bunny.bornAt);
         equipped[key] = equipped[key] || {};
@@ -669,7 +626,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
       }
 
       /* =========================
-       * 装着モード：クリック（モーダル内は無視）
+       * Click: 赤枠選択→同じ子再クリックで装着
        * ========================= */
       function getBunnyFromWrap(wrap) {
         const list = getBunnyList();
@@ -678,6 +635,8 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
 
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
+
+        // モーダル内は無視（アイテム選択できる）
         if (e.target?.closest?.(".isyouModal")) return;
 
         const wrap = e.target?.closest?.(".bunnyWrap");
@@ -686,92 +645,31 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
         const bunny = getBunnyFromWrap(wrap);
         if (!bunny || bunny.isBaby) return;
 
+        // 未選択 → 選択して赤枠
         if (selectedBornAt == null) {
           setSelectedTarget(bunny);
           return;
         }
 
+        // 同じ赤枠の子 → 選択アイテムを装着/解除
         if (bunny.bornAt === selectedBornAt) {
           if (selectedItems.size === 0) return;
           selectedItems.forEach((k) => toggleEquip(bunny, k));
           return;
         }
 
+        // 別の子 → 赤枠を移動（装着しない）
         setSelectedTarget(bunny);
       }, { capture: true });
-
-      /* =========================
-       * Title linkage
-       * ========================= */
-      function getCurrentTitle() {
-        try {
-          const v = localStorage.getItem(LS.title);
-          if (!v) return "";
-          if (v.startsWith("{") || v.startsWith("[")) {
-            const j = JSON.parse(v);
-            if (typeof j === "string") return j;
-            return String(j?.equipped || j?.current || j?.name || "");
-          }
-          return v;
-        } catch {
-          return "";
-        }
-      }
-
-      let lastTitle = null;
-      function applyTitleLinkage() {
-        const title = getCurrentTitle();
-        if (title === lastTitle) return;
-        lastTitle = title;
-
-        const auto = new Set();
-        for (const rule of TITLE_LINKS) {
-          if (rule.match.test(title)) (rule.autoEquip || []).forEach(k => auto.add(k));
-        }
-        if (auto.size === 0) return;
-
-        const list = getBunnyList();
-        for (const bunny of (list || [])) {
-          if (!bunny || bunny.isBaby) continue;
-          const key = String(bunny.bornAt);
-          equipped[key] = equipped[key] || {};
-          for (const itemKey of auto) {
-            if ((owned[itemKey] || 0) > 0) equipped[key][itemKey] = true;
-          }
-          drawAllForBunny(bunny);
-        }
-        saveAll();
-      }
-      setInterval(applyTitleLinkage, 1000);
 
       /* =========================
        * Hooks
        * ========================= */
       WB.on?.("bunnyCountChanged", redrawAll);
       WB.on?.("resize", redrawAll);
-      WB.on?.("hudUpdated", applyTitleLinkage);
-
-      // flip監視（軽量）
-      let rafId = null;
-      function startFlipWatcher() {
-        if (rafId) return;
-        let lastSig = "";
-        const loop = () => {
-          const list = getBunnyList();
-          const sig = (list || []).map(b => (b?.wrap?.classList?.contains("flip") ? "1" : "0")).join("");
-          if (sig !== lastSig) { lastSig = sig; redrawAll(); }
-          rafId = requestAnimationFrame(loop);
-        };
-        rafId = requestAnimationFrame(loop);
-      }
-      startFlipWatcher();
 
       redrawAll();
-      applyTitleLinkage();
-
-      console.log("[isyou] ready");
+      console.log("[isyou] ready (locked target equip)");
     })
-    .catch((err) => {
-      console.warn("[isyou] init failed:", err?.message || err);
-    });
+    .catch((err) => console.warn("[isyou] init failed:", err?.message || err));
 })();
