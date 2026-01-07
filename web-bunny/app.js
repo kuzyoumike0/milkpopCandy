@@ -35,35 +35,35 @@
   /* ===== Bunny defs ===== */
   const BUNNY_DEFS = {
     bunny1: {
-      label: "bunny1",
+      label: "通常みるぽ",
       img: "./assets/bunny1.png",
       price: 300,
       coinMul: 0.55,
       desc: "基本のうさぎ。コインは控えめ。",
     },
     bunny3: {
-      label: "bunny3",
+      label: "毒タイプみるぽ",
       img: "./assets/bunny3.png",
       price: 1800,
       coinMul: 1.0,
       desc: "安定してコインを稼ぐ中級うさぎ。",
     },
     bunny4: {
-      label: "bunny4",
+      label: "水タイプみるぽ",
       img: "./assets/bunny4.png",
       price: 6000,
       coinMul: 1.8,
       desc: "大量のコインを生み出す上級うさぎ。",
     },
     bunny5: {
-      label: "bunny5",
+      label: "お正月みるぽ",
       img: "./assets/bunny5.png",
       price: 20000,
       coinMul: 2.8,
       desc: "牧場最上級クラス。圧倒的生産力。",
     },
     reabunny: {
-      label: "reabunny",
+      label: "黄金レアみるぽ",
       img: "./assets/reabunny.png",
       price: 0,
       coinMul: 4.0,
