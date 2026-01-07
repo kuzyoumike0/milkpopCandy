@@ -1,148 +1,166 @@
-// BGM.js
+// BGM.js（非module / WB統合版）
 // - クリック/タップでオーディオを解禁（autoplay制限対策）
-// - 横線三本（ハンバーガー）から音量/ミュート調整
-// - 朝/昼/夜の自動切り替え（存在しないファイルは無視）
-// - 特別BGM（旅立ち等）を再生/解除：bgmPlaySpecial / bgmClearSpecial
+// - ハンバーガーから音量/ミュート調整
+// - 朝/昼/夜の自動切り替え（存在しないファイルは再生失敗するだけ）
+// - 特別BGM（旅立ち等）を再生/解除：WB.bgm.playSpecial / WB.bgm.clearSpecial
+// - ✅ WB.unlockAudioOnce を提供（他スクリプトから使える）
 
-const LS_KEY = "milkpop_bgm_settings_v1";
+(() => {
+  const LS_KEY = "milkpop_bgm_settings_v1";
 
-const TRACKS = {
-  morning: "./assets/bgm_morning.mp3",
-  day:     "./assets/bgm_day.mp3",
-  night:   "./assets/bgm_night.mp3",
-  // special例（任意）："./assets/bgm_depart.mp3" を使いたいなら playSpecial("depart")
-  depart:  "./assets/bgm_depart.mp3",
-};
-
-function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
-function loadSettings() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return { volume: 0.5, muted: false, enabled: true };
-    const j = JSON.parse(raw);
-    return {
-      volume: clamp(Number(j.volume ?? 0.5), 0, 1),
-      muted: !!j.muted,
-      enabled: j.enabled !== false,
-    };
-  } catch {
-    return { volume: 0.5, muted: false, enabled: true };
-  }
-}
-function saveSettings(s) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch {}
-}
-
-let settings = loadSettings();
-
-let unlocked = false;            // ユーザー操作で解禁済みか
-let currentKey = null;           // 現在再生している通常BGMキー
-let specialKey = null;           // 特別BGMキー（再生中なら通常BGMを止める）
-
-let audio = null;                // 現在の Audio 要素（1つに統一）
-
-function ensureAudio() {
-  if (audio) return audio;
-  audio = new Audio();
-  audio.loop = true;
-  audio.preload = "auto";
-  applyVolume();
-  return audio;
-}
-
-function applyVolume() {
-  ensureAudio();
-  audio.volume = settings.muted ? 0 : settings.volume;
-}
-
-function pickByTime() {
-  const h = new Date().getHours();
-  // 朝 5-10 / 昼 11-17 / 夜 18-4
-  if (h >= 5 && h <= 10) return "morning";
-  if (h >= 11 && h <= 17) return "day";
-  return "night";
-}
-
-async function tryPlay(src) {
-  ensureAudio();
-  if (!src) return false;
-
-  // src更新が必要なら差し替え
-  if (audio.src !== new URL(src, location.href).href) {
-    audio.pause();
-    audio.src = src;
-    audio.currentTime = 0;
-  }
-
-  applyVolume();
-
-  if (!settings.enabled) return false;
-  if (!unlocked) return false;
-
-  try {
-    await audio.play();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function stop() {
-  if (!audio) return;
-  try { audio.pause(); } catch {}
-}
-
-function startNormalBgm(force = false) {
-  // 特別BGM中は通常を鳴らさない
-  if (specialKey) return;
-
-  const key = pickByTime();
-  if (!force && key === currentKey) return;
-
-  const src = TRACKS[key];
-  currentKey = key;
-
-  // ファイルが存在しないときでもエラーにせず、再生だけ失敗する
-  tryPlay(src);
-}
-
-function setupAutoplayUnlock() {
-  const unlockOnce = async () => {
-    if (unlocked) return;
-    unlocked = true;
-
-    // 解禁した瞬間に、いま鳴らすべきBGMを再生
-    if (specialKey) {
-      await tryPlay(TRACKS[specialKey]);
-    } else {
-      startNormalBgm(true);
-    }
-
-    window.removeEventListener("pointerdown", unlockOnce);
-    window.removeEventListener("keydown", unlockOnce);
-    window.removeEventListener("touchstart", unlockOnce);
+  const TRACKS = {
+    morning: "./assets/bgm_morning.mp3",
+    day:     "./assets/bgm_day.mp3",
+    night:   "./assets/bgm_night.mp3",
+    depart:  "./assets/bgm_depart.mp3",
   };
 
-  // iOS/Safari対策で touchstart も付ける
-  window.addEventListener("pointerdown", unlockOnce, { once: false });
-  window.addEventListener("keydown", unlockOnce, { once: false });
-  window.addEventListener("touchstart", unlockOnce, { once: false });
-}
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-function startTimeWatcher() {
-  // 30秒ごとに「朝/昼/夜」の切替チェック（軽い）
-  setInterval(() => startNormalBgm(false), 30_000);
-}
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (!raw) return { volume: 0.5, muted: false, enabled: true };
+      const j = JSON.parse(raw);
+      return {
+        volume: clamp(Number(j.volume ?? 0.5), 0, 1),
+        muted: !!j.muted,
+        enabled: j.enabled !== false,
+      };
+    } catch {
+      return { volume: 0.5, muted: false, enabled: true };
+    }
+  }
+  function saveSettings(s) {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(s)); } catch {}
+  }
 
-/* =========================
- * Settings UI（ハンバーガー）
- * ========================= */
-function mountUI({ position = "top-right", title = "BGM" } = {}) {
-  if (document.getElementById("bgmHamburgerV1")) return;
+  let settings = loadSettings();
 
-  const style = document.createElement("style");
-  style.textContent = `
+  let unlocked = false;       // ユーザー操作で解禁済みか
+  let currentKey = null;      // 現在の通常BGMキー
+  let specialKey = null;      // 特別BGMキー（再生中なら通常BGMは止める）
+
+  let audio = null;           // Audio 要素（1つに統一）
+
+  // 既存WBと統合
+  const WB = (window.WB = window.WB || {});
+
+  function ensureAudio() {
+    if (audio) return audio;
+    audio = new Audio();
+    audio.loop = true;
+    audio.preload = "auto";
+    applyVolume();
+    return audio;
+  }
+
+  function applyVolume() {
+    ensureAudio();
+    audio.volume = settings.muted ? 0 : settings.volume;
+  }
+
+  function pickByTime() {
+    const h = new Date().getHours();
+    // 朝 5-10 / 昼 11-17 / 夜 18-4
+    if (h >= 5 && h <= 10) return "morning";
+    if (h >= 11 && h <= 17) return "day";
+    return "night";
+  }
+
+  async function tryPlay(src) {
+    ensureAudio();
+    if (!src) return false;
+
+    // src更新が必要なら差し替え
+    const nextHref = new URL(src, location.href).href;
+    if (audio.src !== nextHref) {
+      try { audio.pause(); } catch {}
+      audio.src = src;
+      audio.currentTime = 0;
+    }
+
+    applyVolume();
+
+    if (!settings.enabled) return false;
+    if (!unlocked) return false;
+
+    try {
+      await audio.play();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function stop() {
+    if (!audio) return;
+    try { audio.pause(); } catch {}
+  }
+
+  function startNormalBgm(force = false) {
+    if (specialKey) return; // 特別BGM中は通常を鳴らさない
+
+    const key = pickByTime();
+    if (!force && key === currentKey) return;
+
+    const src = TRACKS[key];
+    currentKey = key;
+
+    tryPlay(src);
+  }
+
+  // ✅ 他スクリプトから呼べる「解禁」関数
+  // 既にWBにあれば上書きしない（好みで上書きしたいならifを外す）
+  if (typeof WB.unlockAudioOnce !== "function") {
+    WB.unlockAudioOnce = async () => {
+      if (unlocked) return;
+      unlocked = true;
+
+      // 解禁した瞬間に、いま鳴らすべきBGMを再生
+      if (specialKey) {
+        const src = TRACKS[specialKey];
+        if (src) await tryPlay(src);
+      } else {
+        startNormalBgm(true);
+      }
+    };
+  }
+
+  function setupAutoplayUnlock() {
+    const unlockOnce = async () => {
+      if (unlocked) return;
+      unlocked = true;
+
+      if (specialKey) {
+        await tryPlay(TRACKS[specialKey]);
+      } else {
+        startNormalBgm(true);
+      }
+
+      window.removeEventListener("pointerdown", unlockOnce);
+      window.removeEventListener("keydown", unlockOnce);
+      window.removeEventListener("touchstart", unlockOnce);
+    };
+
+    // iOS/Safari対策で touchstart も付ける
+    window.addEventListener("pointerdown", unlockOnce, { once: false });
+    window.addEventListener("keydown", unlockOnce, { once: false });
+    window.addEventListener("touchstart", unlockOnce, { once: false });
+  }
+
+  function startTimeWatcher() {
+    setInterval(() => startNormalBgm(false), 30_000);
+  }
+
+  /* =========================
+   * Settings UI（ハンバーガー）
+   * ========================= */
+  function mountUI({ position = "top-right", title = "BGM" } = {}) {
+    if (document.getElementById("bgmHamburgerV1")) return;
+
+    const style = document.createElement("style");
+    style.textContent = `
 #bgmHamburgerV1{
   position:fixed;
   z-index:2147483000;
@@ -192,17 +210,17 @@ function mountUI({ position = "top-right", title = "BGM" } = {}) {
 #bgmPanelV1 .fine{ font-size:12px; opacity:.75; }
 #bgmPanelV1 .sep{ height:1px; background:rgba(0,0,0,.08); margin:10px 0; }
 `;
-  document.head.appendChild(style);
+    document.head.appendChild(style);
 
-  const btn = document.createElement("button");
-  btn.id = "bgmHamburgerV1";
-  btn.type = "button";
-  btn.innerHTML = `<span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>`;
-  btn.title = "BGM設定";
+    const btn = document.createElement("button");
+    btn.id = "bgmHamburgerV1";
+    btn.type = "button";
+    btn.innerHTML = `<span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>`;
+    btn.title = "BGM設定";
 
-  const panel = document.createElement("div");
-  panel.id = "bgmPanelV1";
-  panel.innerHTML = `
+    const panel = document.createElement("div");
+    panel.id = "bgmPanelV1";
+    panel.innerHTML = `
 <div class="row">
   <div>
     <div class="ttl">${title}</div>
@@ -223,131 +241,131 @@ function mountUI({ position = "top-right", title = "BGM" } = {}) {
 <div class="fine" id="bgmInfoV1"></div>
 `;
 
-  document.body.appendChild(btn);
-  document.body.appendChild(panel);
+    document.body.appendChild(btn);
+    document.body.appendChild(panel);
 
-  const stateText = panel.querySelector("#bgmStateTextV1");
-  const info = panel.querySelector("#bgmInfoV1");
-  const toggle = panel.querySelector("#bgmToggleV1");
-  const mute = panel.querySelector("#bgmMuteV1");
-  const vol = panel.querySelector("#bgmVolV1");
-  const close = panel.querySelector("#bgmCloseV1");
+    const stateText = panel.querySelector("#bgmStateTextV1");
+    const info = panel.querySelector("#bgmInfoV1");
+    const toggle = panel.querySelector("#bgmToggleV1");
+    const mute = panel.querySelector("#bgmMuteV1");
+    const vol = panel.querySelector("#bgmVolV1");
+    const close = panel.querySelector("#bgmCloseV1");
 
-  function refreshUI() {
-    vol.value = String(Math.round(settings.volume * 100));
-    toggle.textContent = settings.enabled ? "ON" : "OFF";
-    toggle.style.opacity = settings.enabled ? "1" : "0.6";
-    mute.textContent = settings.muted ? "ミュート中" : "ミュート";
-    mute.style.opacity = settings.muted ? "0.75" : "1";
+    function refreshUI() {
+      vol.value = String(Math.round(settings.volume * 100));
+      toggle.textContent = settings.enabled ? "ON" : "OFF";
+      toggle.style.opacity = settings.enabled ? "1" : "0.6";
+      mute.textContent = settings.muted ? "ミュート中" : "ミュート";
+      mute.style.opacity = settings.muted ? "0.75" : "1";
 
-    const nowKey = specialKey || currentKey || pickByTime();
-    const mode = specialKey ? `特別BGM：${specialKey}` : `通常：${nowKey}`;
-    const u = unlocked ? "解禁済み" : "未解禁（クリックで開始）";
-    info.textContent = `${mode} / ${u}`;
+      const nowKey = specialKey || currentKey || pickByTime();
+      const mode = specialKey ? `特別BGM：${specialKey}` : `通常：${nowKey}`;
+      const u = unlocked ? "解禁済み" : "未解禁（クリックで開始）";
+      info.textContent = `${mode} / ${u}`;
 
-    if (stateText) {
-      const playing = audio && !audio.paused && unlocked && settings.enabled && !settings.muted && audio.volume > 0;
-      stateText.textContent = playing ? "再生中" : "停止中（クリックで開始）";
-    }
-  }
-
-  btn.addEventListener("click", () => {
-    panel.style.display = (panel.style.display === "block") ? "none" : "block";
-    refreshUI();
-  });
-
-  close.addEventListener("click", () => {
-    panel.style.display = "none";
-  });
-
-  toggle.addEventListener("click", () => {
-    settings.enabled = !settings.enabled;
-    saveSettings(settings);
-    if (!settings.enabled) stop();
-    else {
-      // 解禁済みなら即再生
-      if (unlocked) {
-        if (specialKey) tryPlay(TRACKS[specialKey]);
-        else startNormalBgm(true);
+      if (stateText) {
+        const playing = audio && !audio.paused && unlocked && settings.enabled && !settings.muted && audio.volume > 0;
+        stateText.textContent = playing ? "再生中" : "停止中（クリックで開始）";
       }
     }
+
+    btn.addEventListener("click", () => {
+      panel.style.display = (panel.style.display === "block") ? "none" : "block";
+      refreshUI();
+    });
+
+    close.addEventListener("click", () => {
+      panel.style.display = "none";
+    });
+
+    toggle.addEventListener("click", () => {
+      settings.enabled = !settings.enabled;
+      saveSettings(settings);
+
+      if (!settings.enabled) stop();
+      else {
+        if (unlocked) {
+          if (specialKey) tryPlay(TRACKS[specialKey]);
+          else startNormalBgm(true);
+        }
+      }
+      refreshUI();
+    });
+
+    mute.addEventListener("click", () => {
+      settings.muted = !settings.muted;
+      saveSettings(settings);
+      applyVolume();
+      refreshUI();
+    });
+
+    vol.addEventListener("input", () => {
+      settings.volume = clamp(Number(vol.value) / 100, 0, 1);
+      saveSettings(settings);
+      applyVolume();
+
+      if (unlocked && settings.enabled) {
+        if (specialKey) tryPlay(TRACKS[specialKey]);
+        else startNormalBgm(false);
+      }
+      refreshUI();
+    });
+
+    // 外側クリックで閉じる
+    document.addEventListener("pointerdown", (e) => {
+      if (panel.style.display !== "block") return;
+      if (panel.contains(e.target) || btn.contains(e.target)) return;
+      panel.style.display = "none";
+    });
+
+    setInterval(refreshUI, 500);
     refreshUI();
-  });
-
-  mute.addEventListener("click", () => {
-    settings.muted = !settings.muted;
-    saveSettings(settings);
-    applyVolume();
-    refreshUI();
-  });
-
-  vol.addEventListener("input", () => {
-    settings.volume = clamp(Number(vol.value) / 100, 0, 1);
-    saveSettings(settings);
-    applyVolume();
-    // 解禁済み＆ONなら、音量触った瞬間に再生開始できるブラウザもある
-    if (unlocked && settings.enabled) {
-      if (specialKey) tryPlay(TRACKS[specialKey]);
-      else startNormalBgm(false);
-    }
-    refreshUI();
-  });
-
-  // 外側クリックで閉じる
-  document.addEventListener("pointerdown", (e) => {
-    if (panel.style.display !== "block") return;
-    if (panel.contains(e.target) || btn.contains(e.target)) return;
-    panel.style.display = "none";
-  });
-
-  // 状態テキストをたまに更新
-  setInterval(refreshUI, 500);
-
-  refreshUI();
-}
-
-/* =========================
- * Public API
- * ========================= */
-export function bgmMountSettingsUI(opts) {
-  mountUI(opts);
-}
-
-export function bgmPlaySpecial(keyOrSrc) {
-  // key名でも、直接srcでもOKにする
-  const src = TRACKS[keyOrSrc] || keyOrSrc;
-  specialKey = TRACKS[keyOrSrc] ? keyOrSrc : "__custom__";
-  ensureAudio();
-
-  // customの場合はsrcを直接流す
-  if (specialKey === "__custom__") {
-    tryPlay(src);
-    return;
   }
-  tryPlay(TRACKS[specialKey]);
-}
 
-export function bgmClearSpecial() {
-  specialKey = null;
-  // 通常BGMへ戻す
-  startNormalBgm(true);
-}
+  /* =========================
+   * Public API（WBに公開）
+   * ========================= */
+  function playSpecial(keyOrSrc) {
+    const src = TRACKS[keyOrSrc] || keyOrSrc;
+    if (!src) return;
 
-export function bgmStart() {
-  // 解禁済みなら即スタート（未解禁でも呼んでOK）
-  startNormalBgm(true);
-}
+    // key名でも、直接srcでもOK
+    specialKey = TRACKS[keyOrSrc] ? keyOrSrc : "__custom__";
+    ensureAudio();
 
-export function bgmStop() {
-  stop();
-}
+    tryPlay(src);
+  }
 
-/* =========================
- * Boot
- * ========================= */
-(function boot() {
-  ensureAudio();
-  setupAutoplayUnlock();
-  startNormalBgm(false);
-  startTimeWatcher();
+  function clearSpecial() {
+    specialKey = null;
+    startNormalBgm(true);
+  }
+
+  function start() {
+    startNormalBgm(true);
+  }
+
+  function stopBgm() {
+    stop();
+  }
+
+  WB.bgm = WB.bgm || {};
+  WB.bgm.mountUI = mountUI;
+  WB.bgm.playSpecial = playSpecial;
+  WB.bgm.clearSpecial = clearSpecial;
+  WB.bgm.start = start;
+  WB.bgm.stop = stopBgm;
+  WB.bgm.TRACKS = TRACKS;
+
+  /* =========================
+   * Boot
+   * ========================= */
+  (function boot() {
+    ensureAudio();
+    setupAutoplayUnlock();
+    startNormalBgm(false);
+    startTimeWatcher();
+    // UIを自動で出したいならここをON：
+    // mountUI({ position:"top-right", title:"BGM" });
+  })();
 })();
