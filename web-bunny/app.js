@@ -1,18 +1,15 @@
-/* app.js — Milkpop牧場（v12.6 FREEZE-KILL + SPREAD）
- * ✅ ページが応答しません対策：
- *  - MutationObserverなし
- *  - getBoundingClientRectは「mousemove毎」には使わず、rectキャッシュのみ
- *  - 1本RAFのみ、dt上限、例外ガード
- *
- * ✅ 変更点：
- *  - コインは足元にパラッと散る（雨みたいに上に吹き上がらない）
- *  - ティアが高いほど“少しだけ”広く散る（spread）
- *  - マグネット吸引は dt 連動（環境差で暴走しない）
+/* app.js — Milkpop牧場（v12.7 FREEZE-KILL + SPREAD + HEART-SWAY）
+ * ✅ 追加修正：
+ *  - hart.png：MAX中は常に「ゆらゆら」＋ MAX到達瞬間だけ「ふわっ」
+ *  - 回収幅が大きすぎ問題：
+ *    - 当たり判定（padding）を縮小
+ *    - hover回収は「地面に落ちてから」だけ有効（散らばる前に吸われない）
+ *    - マグネットは「地面付近」だけ効く（空中で吸われない）
  */
 
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v12.6 FREEZE-KILL+SPREAD", Date.now());
+  console.log("[app.js] LOADED v12.7", Date.now());
 
   /* ===== helpers ===== */
   const $ = (q, p = document) => p.querySelector(q);
@@ -35,6 +32,33 @@
     console.error("[app.js] required DOM not found");
     return;
   }
+
+  /* ===== inject CSS（heart sway + float） ===== */
+  (() => {
+    const css = `
+      @keyframes wbHeartSway {
+        0%   { transform: translateX(-50%) rotate(-7deg); }
+        50%  { transform: translateX(-50%) rotate(7deg); }
+        100% { transform: translateX(-50%) rotate(-7deg); }
+      }
+      @keyframes wbHeartFloat {
+        0%   { transform: translate(-50%, 0) rotate(-6deg); }
+        50%  { transform: translate(-50%, -7px) rotate(6deg); }
+        100% { transform: translate(-50%, 0) rotate(-6deg); }
+      }
+      /* MAX中（表示だけ）は「ゆらゆら」 */
+      .bunnyHeart.visible{
+        animation: wbHeartSway 2.2s ease-in-out infinite;
+      }
+      /* MAX到達瞬間は「ふわっ」＋ゆらゆら（少し派手） */
+      .bunnyHeart.show{
+        animation: wbHeartFloat 1.1s ease-in-out 2, wbHeartSway 2.2s ease-in-out infinite;
+      }
+    `;
+    const st = document.createElement("style");
+    st.textContent = css;
+    document.head.appendChild(st);
+  })();
 
   /* ===== constants ===== */
   const ASSET = {
@@ -86,15 +110,18 @@
 
   const GAUGE = { max: 100, perSec: 4, drainOnDrop: 35 };
 
-  // コイン：見た目大きめ＆拾いやすい
+  // コイン：見た目大きめ＆拾いやすい（ただし当たり判定は縮小）
   const COIN_W = 66, COIN_H = 66;
 
-  // ★枚数が多いと重いので下げる（体感かなり軽くなる）
+  // ★枚数が多いと重いので抑える
   const MAX_COINS_ON_FIELD = 90;
 
-  // マグネット（回収しやすい）：近い時だけ軽く吸う
-  const MAGNET_RADIUS = 240;
-  const MAGNET_PULL_PX_PER_SEC = 520; // dt連動で px/sec
+  // マグネット（回収しやすい）：地面付近だけ軽く吸う
+  const MAGNET_RADIUS = 190;
+  const MAGNET_PULL_PX_PER_SEC = 360;
+
+  // hover回収は「地面に落ちてから」だけ（散らばる前に吸われない）
+  const HOVER_ENABLE_DELAY = 0.35; // sec（生成後すぐは無効）
 
   /* ===== Audio ===== */
   const SE = {
@@ -122,36 +149,26 @@
   /* ===== State ===== */
   let coin = 0;
   const bunnies = [];
-  const coins = []; // {id, el, x, y, vx, vy, value, collected, life, bounces}
+  const coins = []; // {id, el, x, y, vx, vy, value, collected, life, bounces, bornAt}
   let nextCoinId = 1;
 
   let rafId = 0;
   let lastTickAt = now();
 
   /* ===== field rect cache（mousemove毎に測らない） ===== */
-  let fieldLeft = 0, fieldTop = 0, fieldW = 0, fieldH = 0;
+  let fieldLeft = 0, fieldTop = 0;
   function refreshFieldRect() {
-    // ここだけ計測（mousemove毎には呼ばない）
     const r = field.getBoundingClientRect();
     fieldLeft = r.left;
     fieldTop  = r.top;
-    fieldW    = r.width;
-    fieldH    = r.height;
   }
-  // 初回
   refreshFieldRect();
-  // リサイズ時
   window.addEventListener("resize", refreshFieldRect, { passive: true });
-  // スクロールでずれる環境対策（軽い）
-  window.addEventListener("scroll", () => {
-    // 連打されてもOKなように次フレームで1回だけ
-    requestAnimationFrame(refreshFieldRect);
-  }, { passive: true });
+  window.addEventListener("scroll", () => requestAnimationFrame(refreshFieldRect), { passive: true });
 
   /* ===== mouse（field座標） ===== */
   let mouseFx = -9999, mouseFy = -9999;
   function updateMouseFromEvent(e) {
-    // rectキャッシュを使う（計測ゼロ）
     mouseFx = e.clientX - fieldLeft;
     mouseFy = e.clientY - fieldTop;
   }
@@ -226,7 +243,6 @@
     playSE(SE.coin);
   }
 
-  // tier/spread を渡して「高ティアほど少し広く散る」
   function spawnCoin(tier, x, y, spread = 1.0) {
     const def = COIN_TIER[tier] || COIN_TIER[1];
     spread = clamp(spread, 1.0, 1.8);
@@ -248,18 +264,20 @@
     el.style.userSelect = "none";
     el.style.zIndex = "40";
 
-    // 当たり判定拡大（回収しやすい）
-    el.style.padding = "18px";
-    el.style.margin = "-18px";
+    // ✅ 当たり判定「大きすぎ」修正：控えめにする
+    // （前：18px → 今：6px）
+    el.style.padding = "6px";
+    el.style.margin  = "-6px";
 
     const floorY = getFloorY() - COIN_H + 2;
     const sx = clamp(x, 0, field.clientWidth - COIN_W);
     const sy = clamp(y, 0, floorY);
 
-    // ✅ 足元に「パラッ」と散る：上に吹き上げない
-    // 高ティアほど少し広めに（spread）
-    const vxMax = clamp(120 * spread, 120, 240); // 横
-    const vyUp  = clamp(120 * spread, 120, 200); // ちょい跳ね
+    // ✅ 足元にパラッ：高ティアほど少し広く散る
+    const vxMax = clamp(120 * spread, 120, 240);
+    const vyUp  = clamp(110 * spread, 110, 180);
+
+    const bornAt = now();
 
     const c = {
       id: nextCoinId++,
@@ -267,18 +285,27 @@
       x: sx,
       y: sy,
       vx: rand(-vxMax, vxMax),
-      vy: rand(-vyUp, -40), // 少しだけ上に → すぐ落ちる
+      vy: rand(-vyUp, -35),
       value: def.value,
       collected: false,
-      life: 7.5,
+      life: 8.0,
       bounces: 0,
+      bornAt,
     };
 
     el.style.left = `${c.x}px`;
-    el.style.top = `${c.y}px`;
+    el.style.top  = `${c.y}px`;
 
-    el.addEventListener("mouseenter", () => collectCoin(c), { passive: true });
+    // クリック回収はいつでも
     el.addEventListener("click", () => collectCoin(c));
+
+    // hover回収は「地面に落ちてから」だけ
+    el.addEventListener("mouseenter", () => {
+      const floorNow = getFloorY() - COIN_H + 2;
+      const landed = (c.y >= floorNow - 2) && (Math.abs(c.vy) < 10);
+      const enoughTime = (now() - c.bornAt) >= (HOVER_ENABLE_DELAY * 1000);
+      if (landed && enoughTime) collectCoin(c);
+    }, { passive: true });
 
     coinLayer.appendChild(el);
     coins.push(c);
@@ -297,13 +324,11 @@
     const floorY = getFloorY();
     b.y = clamp(floorY - 140 + 22, 0, floorY);
 
-    // ★同値ならDOM更新しない
     const lx = (b._lx ?? NaN), ly = (b._ly ?? NaN);
     if (b.x !== lx) b.wrap.style.left = `${b.x}px`;
     if (b.y !== ly) b.wrap.style.top  = `${b.y}px`;
     b._lx = b.x; b._ly = b.y;
 
-    // ★flipも同値なら更新しない
     const flipNow = b.dir < 0;
     if (b._flip !== flipNow) {
       b.wrap.classList.toggle("flip", flipNow);
@@ -325,10 +350,11 @@
       setHeartState(b, "hide");
       return;
     }
+    // MAX瞬間だけ show、以後 visible（＝ゆらゆら）
     if (b.maxAnimArmed) {
       b.maxAnimArmed = false;
       setHeartState(b, "show");
-      setTimeout(() => setHeartState(b, "visible"), 2600);
+      setTimeout(() => setHeartState(b, "visible"), 2400);
       saveBunnies();
     } else {
       setHeartState(b, "visible");
@@ -350,7 +376,6 @@
     const footX = b.x + 70;
     const footY = b.y + 140 - 22;
 
-    // ✅ 高ティアほど生成位置も“少し”広げる（やりすぎない）
     const posX = clamp(12 * spread, 12, 20);
     const posY = clamp(6  * spread, 6,  10);
 
@@ -441,7 +466,7 @@
   function step() {
     try {
       const t = now();
-      const dt = Math.max(0, Math.min(0.033, (t - lastTickAt) / 1000)); // 最大33ms
+      const dt = Math.max(0, Math.min(0.033, (t - lastTickAt) / 1000));
       lastTickAt = t;
 
       // --- bunny ---
@@ -459,9 +484,7 @@
 
       // --- coins physics ---
       const floorY = getFloorY() - COIN_H + 2;
-
-      // ✅ 浮きにくい：重力弱め
-      const g = 900; // px/sec^2
+      const g = 900;
 
       for (let i = coins.length - 1; i >= 0; i--) {
         const c = coins[i];
@@ -474,16 +497,19 @@
           continue;
         }
 
-        // magnet（dt連動）
-        const dx = mouseFx - (c.x + COIN_W / 2);
-        const dy = mouseFy - (c.y + COIN_H / 2);
-        const d2 = dx * dx + dy * dy;
+        // ✅ マグネットは「地面付近」だけ効く（散らばる前に吸わない）
+        const nearGround = (c.y >= floorY - 22);
+        if (nearGround) {
+          const dx = mouseFx - (c.x + COIN_W / 2);
+          const dy = mouseFy - (c.y + COIN_H / 2);
+          const d2 = dx * dx + dy * dy;
 
-        if (d2 < MAGNET_RADIUS * MAGNET_RADIUS) {
-          const d = Math.sqrt(d2) || 1;
-          const pull = MAGNET_PULL_PX_PER_SEC * dt;
-          c.x += (dx / d) * pull;
-          c.y += (dy / d) * pull;
+          if (d2 < MAGNET_RADIUS * MAGNET_RADIUS) {
+            const d = Math.sqrt(d2) || 1;
+            const pull = MAGNET_PULL_PX_PER_SEC * dt;
+            c.x += (dx / d) * pull;
+            c.y += (dy / d) * pull;
+          }
         }
 
         // gravity
@@ -495,7 +521,7 @@
 
         c.x = clamp(c.x, 0, field.clientWidth - COIN_W);
 
-        // ✅ バウンドは軽く・最大1回（浮き続け防止）
+        // バウンドは軽く・最大1回
         if (c.y >= floorY) {
           c.y = floorY;
 
@@ -514,7 +540,6 @@
 
     } catch (e) {
       console.error("[app.js] step crash", e);
-      // 落ちても次フレームで復帰（応答しません回避）
     }
 
     rafId = requestAnimationFrame(step);
@@ -594,5 +619,5 @@
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(step);
 
-  WB.emit("core:ready", { version: "app.js-core-v12.6-freeze-kill+spread", startBunnies: bunnies.length });
+  WB.emit("core:ready", { version: "app.js-core-v12.7-heart-sway", startBunnies: bunnies.length });
 })();
