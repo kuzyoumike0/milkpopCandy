@@ -1,203 +1,106 @@
 // tabidati.js
-// 旅立ちモード：視認性UP / 赤縁ホバー / 旅立ちメッセージ / 空白バグ対策（farewellMilestone不使用）
+// - 旅立ちモードON/OFF
+// - 旅立ち時：コスト支払い / SE / 記録 / メッセージ / うさぎ削除
+// - 旅立ちモード中：うさぎホバーで赤縁取り
+// - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（はみ出し防止）
+// - 「長い空白メッセージ」対策：専用トーストCSSで表示
 
 (() => {
   if (!window.WB) return;
   const WB = window.WB;
 
-  /* =========================
-   * 状態
-   * ========================= */
+  // 旅立ちモードON/OFF
   let departMode = false;
-  let overlayEl = null;
-  let lastHoverWrap = null;
 
-  const OVERLAY_ID = "wbDepartOverlayV1";
-  const STYLE_ID   = "wbDepartStyleV2";
+  // はみ出し防止クランプ用
+  let clampTimer = null;
 
   /* =========================
-   * Style
+   * Toast（専用CSSで空白バグ回避）
    * ========================= */
-  function ensureStyles() {
-    if (document.getElementById(STYLE_ID)) return;
+  function ensureToastStyles() {
+    if (document.getElementById("tabidatiToastStyleV1")) return;
     const s = document.createElement("style");
-    s.id = STYLE_ID;
+    s.id = "tabidatiToastStyleV1";
     s.textContent = `
-/* ===== toast（独自クラス：既存CSSと衝突しない） ===== */
-.wbToast{
+.tabidatiToast{
   position: fixed;
   left: 50%;
-  top: 14%;
+  top: 10%;
   transform: translate(-50%, -50%);
   z-index: 2147483647;
-  pointer-events: none;
-  background: rgba(255,255,255,.96);
+  background: rgba(0,0,0,.78);
+  color: #fff;
   border-radius: 16px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   font-weight: 900;
-  color: #222;
-  box-shadow: 0 16px 40px rgba(0,0,0,.18);
-  white-space: nowrap;
+  box-shadow: 0 18px 50px rgba(0,0,0,.26);
+  max-width: min(92vw, 520px);
+  text-align: center;
+  letter-spacing: .02em;
   opacity: 0;
-  transition: opacity .18s ease, transform .18s ease, filter .18s ease;
-  filter: blur(0px);
+  animation: tabToastIn .18s ease-out forwards, tabToastOut .28s ease-in forwards;
+  animation-delay: 0ms, 1.25s;
 }
-.wbToast.on{
-  opacity: 1;
+@keyframes tabToastIn{
+  from { opacity:0; transform:translate(-50%,-80%); }
+  to   { opacity:1; transform:translate(-50%,-50%); }
 }
-.wbToast.out{
+@keyframes tabToastOut{
+  from { opacity:1; transform:translate(-50%,-50%); }
+  to   { opacity:0; transform:translate(-50%,-30%); }
+}
+
+/* ===== 旅立ちモード：ホバー赤縁取り ===== */
+body.departModeOn .bunnyWrap{
+  outline: none;
+}
+body.departModeOn .bunnyWrap:hover{
+  outline: 4px solid rgba(255, 64, 64, .85);
+  outline-offset: 3px;
+  border-radius: 18px;
+}
+
+/* 旅立ち中のフェード */
+.bunnyWrap.departing{
+  pointer-events: none !important;
+  filter: saturate(1.05);
+  transition: transform 520ms ease, opacity 520ms ease, filter 520ms ease;
+  transform: translateY(-18px) scale(0.98);
   opacity: 0;
-  transform: translate(-50%, -35%);
-  filter: blur(1px);
-}
-
-/* ボタン点灯 */
-#departBtn.on{
-  background:#ffd6e7;
-  outline:3px solid rgba(255,120,180,.55);
-}
-
-/* カーソル */
-body.wbDepartModeOn, body.wbDepartModeOn *{
-  cursor: crosshair !important;
-}
-
-/* ===== オーバーレイ ===== */
-#${OVERLAY_ID}{
-  position:fixed;
-  left:50%;
-  top:9%;
-  transform:translate(-50%,-50%);
-  z-index:2147483647;
-  width:min(760px,94vw);
-  padding:12px 14px;
-  border-radius:16px;
-  background:rgba(255,255,255,.86);
-  box-shadow:0 18px 60px rgba(0,0,0,.18);
-  display:none;
-  pointer-events:none;
-  font-weight: 900;
-  color:#222;
-}
-#${OVERLAY_ID}.on{ display:block; }
-
-/* ===== うさぎ赤縁 ===== */
-body.wbDepartModeOn .bunnyWrap{
-  position:relative;
-  transition:transform .12s ease, filter .12s ease;
-}
-body.wbDepartModeOn .bunnyWrap::before{
-  content:"";
-  position:absolute;
-  inset:-6px;
-  border-radius:16px;
-  border:3px solid rgba(255,70,70,0);
-  box-shadow:0 0 0 rgba(255,70,70,0);
-  opacity:0;
-  pointer-events:none;
-  transition:.12s ease;
-}
-body.wbDepartModeOn .bunnyWrap.wbDepartHover{
-  transform:translateY(-1px) scale(1.02);
-  filter:drop-shadow(0 0 14px rgba(255,80,80,.55));
-}
-body.wbDepartModeOn .bunnyWrap.wbDepartHover::before{
-  opacity:1;
-  border-color:rgba(255,70,70,.78);
-  box-shadow:0 0 18px rgba(255,70,70,.35);
 }
 `;
     document.head.appendChild(s);
   }
 
-  /* =========================
-   * Toast（空白が出ない）
-   * ========================= */
-  function toast(msg, ms = 1600) {
-    if (!msg) return;
-    ensureStyles();
-
+  function toast(msg) {
+    ensureToastStyles();
+    const text = String(msg ?? "").trim();
+    if (!text) return; // 空文字は出さない（空白バグ対策）
     const el = document.createElement("div");
-    el.className = "wbToast";
-    el.textContent = msg;
-
-    // 念のため：既存CSSに何があってもレイアウト参加しないよう固定
-    el.style.position = "fixed";
-    el.style.display = "inline-block";
-    el.style.margin = "0";
-    el.style.height = "auto";
-    el.style.minHeight = "0";
-    el.style.maxHeight = "none";
-
+    el.className = "tabidatiToast";
+    el.textContent = text;
     document.body.appendChild(el);
-    requestAnimationFrame(() => el.classList.add("on"));
-
-    setTimeout(() => el.classList.add("out"), Math.max(0, ms - 260));
-    setTimeout(() => { try { el.remove(); } catch {} }, ms + 140);
+    setTimeout(() => { try { el.remove(); } catch {} }, 1800);
   }
 
   /* =========================
-   * Overlay
-   * ========================= */
-  function ensureOverlay() {
-    ensureStyles();
-    if (overlayEl && document.body.contains(overlayEl)) return overlayEl;
-
-    overlayEl = document.createElement("div");
-    overlayEl.id = OVERLAY_ID;
-    overlayEl.textContent = "✈️ 旅立ちモード：ON（うさぎをクリック）";
-    document.body.appendChild(overlayEl);
-    return overlayEl;
-  }
-
-  /* =========================
-   * Farewell message（fallback）
-   * ========================= */
-  function ensureFarewellMessage() {
-    if (typeof WB.showFarewellMessage === "function") return;
-
-    const FALLBACK = {
-      bunny1: ["またね。ここでの時間は宝物だよ。"],
-      bunny3: ["安定は強さ。次の空へ。"],
-      bunny4: ["眩しい足跡を残して旅立った。"],
-      bunny5: ["王者のまま、去っていった。"],
-      reabunny: ["幻は掴めた瞬間から消える。"],
-    };
-
-    WB.showFarewellMessage = (kind) => {
-      const arr = FALLBACK[kind] || ["旅立ちは静かに訪れる。"];
-      toast(`🕊️ ${arr[(Math.random() * arr.length) | 0]}`, 2600);
-    };
-  }
-
-  /* =========================
-   * Hover管理
-   * ========================= */
-  function setHoverWrap(wrap) {
-    if (lastHoverWrap && lastHoverWrap !== wrap) {
-      lastHoverWrap.classList.remove("wbDepartHover");
-    }
-    lastHoverWrap = wrap;
-    if (wrap) wrap.classList.add("wbDepartHover");
-  }
-
-  /* =========================
-   * モード切替
+   * 旅立ちモードの見た目
    * ========================= */
   function setDepartMode(on) {
-    ensureFarewellMessage();
     departMode = !!on;
 
-    document.body.classList.toggle("wbDepartModeOn", departMode);
-    WB.departBtn?.classList.toggle("on", departMode);
+    // ボタン見た目
+    try { WB.departBtn?.classList.toggle("on", departMode); } catch {}
 
-    ensureOverlay().classList.toggle("on", departMode);
+    // bodyにクラス（ホバー赤縁取りなど）
+    try { document.body.classList.toggle("departModeOn", departMode); } catch {}
 
-    if (departMode) toast("✈️ 旅立ちモード：ON");
-    else {
-      toast("🛑 旅立ちモード：OFF");
-      setHoverWrap(null);
-    }
+    // はみ出し防止をON/OFF
+    if (departMode) startClamp();
+    else stopClamp();
+
+    toast(departMode ? "✈️ 旅立ちモード：ON（うさぎをクリック）" : "🛑 旅立ちモード：OFF");
   }
 
   function toggleDepartMode() {
@@ -206,75 +109,159 @@ body.wbDepartModeOn .bunnyWrap.wbDepartHover::before{
   }
 
   /* =========================
-   * 旅立ち処理
+   * はみ出し防止（フィールド内にクランプ）
    * ========================= */
-  function departBunny(bunny) {
+  function startClamp() {
+    stopClamp();
+
+    const field = document.getElementById("field");
+    const layer = document.getElementById("bunnyLayer") || field;
+    if (!layer) return;
+
+    // 100msごとに「うさぎwrap」がフィールド外へ出ていないか補正
+    clampTimer = setInterval(() => {
+      if (!departMode) return;
+
+      const area = (layer || field);
+      const ar = area.getBoundingClientRect();
+      if (!ar.width || !ar.height) return;
+
+      const wraps = Array.from(document.querySelectorAll(".bunnyWrap"));
+      for (const w of wraps) {
+        if (!w || !w.isConnected) continue;
+
+        const r = w.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+
+        // はみ出し量（viewport座標）
+        const overL = ar.left - r.left;
+        const overR = r.right - ar.right;
+        const overT = ar.top - r.top;
+        const overB = r.bottom - ar.bottom;
+
+        if (overL <= 0 && overR <= 0 && overT <= 0 && overB <= 0) continue;
+
+        // style.left/top を px で持っている前提で補正（多くの実装がこれ）
+        const cs = getComputedStyle(w);
+        const left = parseFloat(w.style.left || cs.left || "0") || 0;
+        const top  = parseFloat(w.style.top  || cs.top  || "0") || 0;
+
+        // viewportでのズレを「px」補正として反映
+        let nx = left;
+        let ny = top;
+
+        if (overL > 0) nx += overL;
+        if (overR > 0) nx -= overR;
+        if (overT > 0) ny += overT;
+        if (overB > 0) ny -= overB;
+
+        // 念のため無限値ガード
+        if (Number.isFinite(nx)) w.style.left = `${nx}px`;
+        if (Number.isFinite(ny)) w.style.top  = `${ny}px`;
+      }
+    }, 100);
+  }
+
+  function stopClamp() {
+    if (clampTimer) {
+      clearInterval(clampTimer);
+      clampTimer = null;
+    }
+  }
+
+  /* =========================
+   * 旅立ち実行
+   * ========================= */
+  async function departBunny(bunny) {
     if (!bunny) return false;
 
+    // 最後の1匹は残す
     if (WB.bunnies.length <= 1) {
       toast("最後の1匹は旅立たせられないよ");
       return false;
     }
+
+    // コスト不足
     if (WB.coins < WB.DEPART_COST) {
-      toast(`コイン不足（${WB.DEPART_COST}🪙）`);
+      toast(`コイン不足（必要：${WB.DEPART_COST}🪙）`);
       return false;
     }
 
+    // 支払い
     WB.coins -= WB.DEPART_COST;
     WB.saveCoins?.();
     WB.updateHud?.();
+    WB.refreshShopUI?.();
 
+    // SE
     WB.playSE?.(WB.seTabidati);
+
+    // 記録＆メッセージ（app.js側が持ってる想定）
     WB.recordFarewell?.(bunny.kind);
     WB.showFarewellMessage?.(bunny.kind);
 
+    // まず配列から外して、以降の移動/ロジック対象から除外（←これで画面外へ暴走しづらい）
     const idx = WB.bunnies.indexOf(bunny);
     if (idx >= 0) WB.bunnies.splice(idx, 1);
-    bunny.wrap?.remove();
 
+    // 旅立ち演出：軽くフェードしてからDOM削除
+    try {
+      const w = bunny.wrap;
+      if (w) {
+        w.classList.add("departing");
+        // 少し待ってから削除
+        await new Promise((r) => setTimeout(r, 520));
+        try { w.remove(); } catch {}
+      }
+    } catch {
+      try { bunny.wrap?.remove(); } catch {}
+    }
+
+    // 保存＆実績チェック
     WB.saveBunnyMeta?.();
     WB.checkUnlocks?.();
+
     return true;
   }
 
   /* =========================
-   * イベント横取り
+   * 旅立ちモード中：クリック横取り
    * ========================= */
   function onPointerDownCapture(e) {
     if (!departMode) return;
+
+    // 左クリック/タップのみ
     if (e.button != null && e.button !== 0) return;
 
     const wrap = e.target?.closest?.(".bunnyWrap");
     if (!wrap) return;
 
+    // ★通常のクリック処理（コイン生成）を止める
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
 
-    setHoverWrap(wrap);
-    const bunny = WB.bunnies.find((b) => b.wrap === wrap);
-    if (bunny) departBunny(bunny);
-  }
+    // wrapから対象インスタンスを特定
+    const bunny = WB.bunnies.find(b => b.wrap === wrap);
+    if (!bunny) return;
 
-  function onPointerMoveCapture(e) {
-    if (!departMode) return;
-    setHoverWrap(e.target?.closest?.(".bunnyWrap") || null);
+    departBunny(bunny);
   }
 
   /* =========================
-   * Bind
+   * Hook
    * ========================= */
-  ensureStyles();
-  ensureOverlay();
-  ensureFarewellMessage();
+  if (WB.departBtn) {
+    WB.departBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      toggleDepartMode();
+    });
+  }
 
-  WB.departBtn?.addEventListener("click", toggleDepartMode);
+  // うさぎクリック横取り（キャプチャが重要）
   document.addEventListener("pointerdown", onPointerDownCapture, true);
-  document.addEventListener("pointermove", onPointerMoveCapture, true);
 
-  /* =========================
-   * 外部公開
-   * ========================= */
+  // 外部公開
   WB.tabidati = {
     setDepartMode,
     toggleDepartMode,
