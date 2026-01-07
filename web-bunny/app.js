@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v15.2 (faster charge + smaller heart)", Date.now());
+  console.log("[app.js] LOADED FIX v16.0 (visible gauge UI + heart bob + initial charge)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -41,19 +41,23 @@
   const DEPART_COST = 10;
 
   /* =========================
-   * Charge（表示しない）
+   * Charge（UI表示あり）
    * - 通常クリック：ゲージが貯まる（消費しない）
-   * - ゲージMAX：満タン中ずっと hart.png を表示（上下ゆれ）
+   * - ゲージMAX：満タン中ずっと hart.png を表示（上下ゆらゆら）
    * - 満タン中のクリック：多め＆高ティアでドロップ → ゲージ消費(0) → ハート消える
+   * - ✅ 初期からゲージが少し貯まっている
    * ========================= */
   const CHARGE_MAX = 100;
 
-  // ✅ 早く貯まるように調整
-  const CHARGE_GAIN_ON_BUNNY_TAP     = 12; // 8 → 12
-  const CHARGE_GAIN_ON_COIN_COLLECT = 5;  // 3 → 5
+  // たまりやすさ（お好みで調整OK）
+  const CHARGE_GAIN_ON_BUNNY_TAP     = 12;
+  const CHARGE_GAIN_ON_COIN_COLLECT = 5;
 
-  let charge = 0;
-  let chargeReady = false;
+  // ✅ 初期チャージ（0〜100）
+  const INITIAL_CHARGE = 20;
+
+  let charge = clamp(INITIAL_CHARGE, 0, CHARGE_MAX);
+  let chargeReady = (charge >= CHARGE_MAX);
 
   /* =========================
    * Storage
@@ -102,7 +106,7 @@
   /* =========================
    * Utils / Field size cache
    * ========================= */
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   const rand  = (a, b) => a + Math.random() * (b - a);
 
   let FIELD_W = 1, FIELD_H = 1;
@@ -142,17 +146,50 @@
   }
 
   /* =========================
-   * CSS injection（コイン小さく / ハート上下ゆれ / ハートが必ず前面）
+   * CSS injection（コイン小さく / ゲージUI / ハートゆらゆら）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbCoinHeartCss")) return;
+    if (document.getElementById("wbChargeUiCss")) return;
     const st = document.createElement("style");
-    st.id = "wbCoinHeartCss";
+    st.id = "wbChargeUiCss";
     st.textContent = `
-      .coin{
-        width:22px !important;
-        height:22px !important;
+      .coin{ width:22px !important; height:22px !important; }
+
+      /* ゲージUI */
+      #wbChargeHud {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        z-index: 9998;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(255,255,255,.75);
+        backdrop-filter: blur(6px);
+        box-shadow: 0 10px 30px rgba(0,0,0,.10);
+        font-size: 12px;
       }
+      #wbChargeLabel { opacity: .9; white-space: nowrap; }
+      #wbChargeBar {
+        width: 140px;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(0,0,0,.12);
+        overflow: hidden;
+      }
+      #wbChargeFill {
+        height: 100%;
+        width: 0%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(255,120,190,.9), rgba(255,200,120,.95));
+        transform-origin: left center;
+        transition: width 120ms ease;
+      }
+      #wbChargePct { min-width: 36px; text-align: right; opacity: .85; }
+
+      /* ハート */
       .wbChargeHart {
         position:absolute;
         z-index:9999;
@@ -160,19 +197,65 @@
         user-select:none;
         -webkit-user-drag:none;
         transform: translate(-50%, -50%);
-        animation: wbHartBob 0.9s ease-in-out infinite;
-        filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
-        width:42px;
-        height:42px;
+        animation: wbHartFloat 1.1s ease-in-out infinite;
+        filter: drop-shadow(0 8px 14px rgba(0,0,0,.18));
+        width:34px; height:34px; /* ✅ 小さめ */
       }
-      @keyframes wbHartBob {
-        0%   { transform: translate(-50%, -50%) translateY(0px) scale(1); }
-        50%  { transform: translate(-50%, -50%) translateY(-7px) scale(1.03); }
-        100% { transform: translate(-50%, -50%) translateY(0px) scale(1); }
+      @keyframes wbHartFloat {
+        0%   { transform: translate(-50%, -50%) translateY(0px)   rotate(-3deg) scale(1); }
+        50%  { transform: translate(-50%, -50%) translateY(-9px)  rotate( 3deg) scale(1.06); }
+        100% { transform: translate(-50%, -50%) translateY(0px)   rotate(-3deg) scale(1); }
       }
     `;
     document.head.appendChild(st);
   })();
+
+  /* =========================
+   * Charge UI（右上に表示）
+   * ========================= */
+  let chargeHudEl = null;
+  let chargeFillEl = null;
+  let chargePctEl = null;
+
+  function ensureChargeHud() {
+    if (chargeHudEl && chargeHudEl.isConnected) return;
+
+    const hud = document.createElement("div");
+    hud.id = "wbChargeHud";
+
+    const label = document.createElement("div");
+    label.id = "wbChargeLabel";
+    label.textContent = "💖 チャージ";
+
+    const bar = document.createElement("div");
+    bar.id = "wbChargeBar";
+
+    const fill = document.createElement("div");
+    fill.id = "wbChargeFill";
+    bar.appendChild(fill);
+
+    const pct = document.createElement("div");
+    pct.id = "wbChargePct";
+    pct.textContent = "0%";
+
+    hud.appendChild(label);
+    hud.appendChild(bar);
+    hud.appendChild(pct);
+
+    document.body.appendChild(hud);
+
+    chargeHudEl = hud;
+    chargeFillEl = fill;
+    chargePctEl = pct;
+  }
+
+  function updateChargeHud() {
+    ensureChargeHud();
+    const r = clamp(charge / CHARGE_MAX, 0, 1);
+    const pct = Math.round(r * 100);
+    if (chargeFillEl) chargeFillEl.style.width = `${pct}%`;
+    if (chargePctEl) chargePctEl.textContent = `${pct}%`;
+  }
 
   /* =========================
    * Persistent Heart（満タン中ずっと表示）
@@ -186,8 +269,6 @@
     el.className = "wbChargeHart";
     el.src = ASSETS.hart;
     el.draggable = false;
-    el.style.width = "42px";   // ✅ 52 → 42
-    el.style.height = "42px";  // ✅ 52 → 42
     el.style.display = "none";
     field.appendChild(el);
     chargeHartEl = el;
@@ -254,6 +335,7 @@
       showChargeHeart(sourceBunny);
       emit("chargeReady", {});
     }
+    updateChargeHud();
   }
 
   function consumeCharge() {
@@ -261,6 +343,7 @@
     chargeReady = false;
     hideChargeHeart();
     emit("chargeConsumed", {});
+    updateChargeHud();
   }
 
   function getChargeRatio() {
@@ -663,7 +746,7 @@
 
     updateHud,
 
-    // charge（表示しない）
+    // charge
     addCharge: (n) => addCharge(n, null),
     getCharge: () => charge,
     isChargeReady: () => !!chargeReady,
@@ -705,6 +788,13 @@
     refreshFieldSize();
     initBunnies();
     updateHud();
+
+    // ✅ 初期からゲージUIを表示＆反映
+    updateChargeHud();
+
+    // ✅ 初期チャージが満タンなら開始時からハート
+    if (chargeReady) showChargeHeart(null);
+
     emit("bunnyCountChanged", { count: bunnies.length });
 
     requestAnimationFrame(tick);
