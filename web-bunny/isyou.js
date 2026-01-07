@@ -7,6 +7,7 @@
 // ✅ slot（部類）導入：hat に partyhat/crown/ribbon を入れて同一位置
 // ✅ FIX：アンカー座標を getBoundingClientRect ではなく offset 系（レイアウト座標）で取る
 //     → flip（transform）しても帽子がズレない
+// ✅ NEW：帽子を「うさぎ画像と同じサイズ・同じ位置」に完全一致で重ねる（fitToBunny）
 
 (() => {
   "use strict";
@@ -51,18 +52,17 @@
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
-      // ★hat位置（ここだけで全帽子が動く）
+      // slot（今回は hat を「うさぎ画像と完全一致で重ねる」）
       const SLOTS = {
-       const SLOTS = {
-  hat: {
-    anchorX: 0.59,  // ★耳と耳の間（頭の中心寄り）
-    anchorY: 0.18,  // ★頭のてっぺん寄り
-    offsetX: 0,     // 微調整はここ（+で右）
-    offsetY: 6,     // 微調整はここ（+で下）※まず少しだけ下げる
-    z: 9999,
-  },
-};
-
+        hat: {
+          // ※fitToBunnyの時は anchor は使わない（互換のため残してOK）
+          anchorX: 0.59,
+          anchorY: 0.18,
+          offsetX: 0,
+          offsetY: 0,
+          z: 9999,
+        },
+      };
 
       const ITEMS = {
         partyhat: {
@@ -70,9 +70,12 @@
           img: "/assets/isyou/partyhat.png",
           price: 500,
           slot: "hat",
+          // ✅ うさぎ画像と同サイズ・同位置
+          fitToBunny: true,
           offsetX: 0,
           offsetY: 0,
-          scale: 0.32,
+          // fitToBunny時は scale は使わない（残しても無視される）
+          scale: 1,
           z: 9999,
         },
         crown: {
@@ -80,9 +83,10 @@
           img: "/assets/isyou/crown.png",
           price: 3500,
           slot: "hat",
+          fitToBunny: true,
           offsetX: 0,
           offsetY: 0,
-          scale: 0.38,
+          scale: 1,
           z: 9999,
         },
         ribbon: {
@@ -90,9 +94,10 @@
           img: "/assets/isyou/ribbon.png",
           price: 1200,
           slot: "hat",
+          fitToBunny: true,
           offsetX: 0,
           offsetY: 0,
-          scale: 0.45,
+          scale: 1,
           z: 9999,
         },
       };
@@ -101,9 +106,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV8")) return;
+        if (document.getElementById("isyouStyleFinalV9")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV8";
+        s.id = "isyouStyleFinalV9";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -146,7 +151,6 @@ body.isyouEquipMode .bunnyWrap:hover{
 
 /* レイヤ */
 .isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
-/* アンカーはJSで left/top をpx指定 */
 .isyouItem{
   position:absolute;
   left:0; top:0;
@@ -514,17 +518,15 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       function getLocalPosWithin(el, root) {
         let x = 0, y = 0;
         let cur = el;
-        // offsetParent で辿れる限り加算
         while (cur && cur !== root) {
           x += cur.offsetLeft || 0;
           y += cur.offsetTop || 0;
           cur = cur.offsetParent;
         }
-        // root まで辿れないDOM構造でも最悪は el.offsetLeft/Top で使う
         return { x, y, ok: (cur === root) };
       }
 
-      // ✅ hatアンカー（比率）を「ローカル座標」で返す
+      // ✅ hatアンカー（比率）を「ローカル座標」で返す（fitToBunny時は使わない）
       function getAnchorPoint(bunny, slotKey) {
         const wrap = bunny?.wrap;
         if (!wrap) return { x: 0, y: 0 };
@@ -540,10 +542,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const w = img.offsetWidth || img.clientWidth || 0;
         const h = img.offsetHeight || img.clientHeight || 0;
 
-        // ローカル座標（transform前）
-        const x = p.x + w * ax;
-        const y = p.y + h * ay;
-        return { x, y };
+        return { x: p.x + w * ax, y: p.y + h * ay };
       }
 
       // 親がflipで反転してるので、アクセ側で scaleX しない（keepUprightだけ相殺）
@@ -559,15 +558,42 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
         const ox = (Number(it.offsetX) || 0) + sox;
         const oy = (Number(it.offsetY) || 0) + soy;
-        const sc = Number(it.scale) || 1;
 
+        // ✅ NEW：うさぎ画像と同サイズ・同位置に重ねる
+        if (it.fitToBunny) {
+          const wrap = bunny?.wrap;
+          const bimg = wrap ? getBunnyImgEl(wrap) : null;
+          if (!wrap || !bimg) return;
+
+          const p = getLocalPosWithin(bimg, wrap);
+          const w = bimg.offsetWidth || bimg.clientWidth || 0;
+          const h = bimg.offsetHeight || bimg.clientHeight || 0;
+
+          imgEl.style.left = `${p.x}px`;
+          imgEl.style.top  = `${p.y}px`;
+          imgEl.style.width = `${w}px`;
+          imgEl.style.height = `${h}px`;
+
+          // 左上基準で完全一致（scaleは使わない）
+          const extraFlip = keepUpright ? " scaleX(-1)" : "";
+          const baseT = `translate(${ox}px, ${oy}px)` + extraFlip;
+
+          imgEl.style.transformOrigin = "0 0";
+          imgEl.style.setProperty("--isyouT", baseT);
+          imgEl.style.transform = baseT;
+
+          const finalZ = (sz || 0) || (Number(it.z) || 10);
+          imgEl.style.zIndex = String(finalZ);
+          return;
+        }
+
+        // 旧：アンカー比率で置く（互換）
+        const sc = Number(it.scale) || 1;
         const a = getAnchorPoint(bunny, slotKey);
         imgEl.style.left = `${a.x}px`;
         imgEl.style.top  = `${a.y}px`;
 
         const extraFlip = keepUpright ? " scaleX(-1)" : "";
-
-        // アンカー点を中心として扱う
         const baseT =
           `translate(-50%, -50%) translate(${ox}px, ${oy}px) ` +
           `scale(${sc})` + extraFlip;
@@ -671,7 +697,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (flip stable by layout coords)");
+      console.log("[isyou] ready (hat fitToBunny)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
