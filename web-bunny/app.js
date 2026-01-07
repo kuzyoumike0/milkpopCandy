@@ -48,9 +48,6 @@
     bunny5: "./assets/bunny5.png",
     reabunny: "./assets/reabunny.png",
 
-    // babyは「存在しても使わない」
-    baby: "./assets/babybunny.png",
-
     hart: "./assets/hart.png",
 
     coin1: "./assets/coin1.png",
