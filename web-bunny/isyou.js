@@ -534,6 +534,26 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       btn.addEventListener("click", () => {
+        const tap = (e) => {
+  // ✅ お洒落（装着）モード中は「コイン落とし」を無効化
+  if (document.body.classList.contains("isyouEquipMode")) return;
+
+  e?.preventDefault?.();
+  unlockAudioOnce();
+  playSE(this.isBaby ? seBaby : sePoyo);
+
+  if (this.isBaby) {
+    spawnClickCoins(this, 1, () => 0);
+    return;
+  }
+
+  const plan = this.getDropPlanFromOwnCharge();
+  spawnClickCoins(this, plan.count, plan.pickTier);
+
+  this.consumeOwnCharge();
+  this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
+};
+
         WB.unlockAudioOnce?.();
         openModal();
       });
