@@ -4,7 +4,7 @@
 // - 装着モード中、クリックした「うさぎ個体」に帽子を装着
 // - 保存は bunnyIndex ではなく「個体ID = bornAt」
 // - partyhat は大きめ＆下寄せ（耳の下・頭の真ん中）
-
+// - 反転時ズレ対策：--hatXFlip を使用
 
 (() => {
   if (!window.WB) return;
@@ -103,17 +103,15 @@
 /* ===== 帽子：耳の下／頭の真ん中 ===== */
 .bunnyWrap .isyouHat{
   position:absolute;
+  left: var(--hatX, 47%);
+  top:  var(--hatY, 38px);
 
-  /* ★大幅に下へ */
-  left: var(--hatX, 52%);
-  top:  var(--hatY, 36px);   /* ← 18px → 36px */
-
-  width: var(--hatW, 64px); /* ← 少し大きく */
+  width: var(--hatW, 100px);
   height:auto;
 
   transform:
     translateX(-50%)
-    rotate(var(--hatR, -8deg))
+    rotate(var(--hatR, -5deg))
     scale(var(--hatS, 1));
 
   transform-origin: 50% 90%;
@@ -122,12 +120,12 @@
   filter: drop-shadow(0 6px 8px rgba(0,0,0,.18));
 }
 
-
-/* 左右反転時の角度補正 */
+/* ★反転時：X位置だけ鏡側に切り替え（ズレ防止） */
 .bunnyWrap.flip .isyouHat{
+  left: var(--hatXFlip, var(--hatX, 47%));
   transform:
     translateX(-50%)
-    rotate(calc(var(--hatR, -10deg) * -1))
+    rotate(calc(var(--hatR, -5deg) * -1))
     scale(var(--hatS, 1));
 }
 
@@ -267,18 +265,15 @@
     return String(bunny?.bornAt ?? "");
   }
 
-  function setHatStyleFor(bunny) {
-  // ★かなり下：耳の下〜頭の中央
-  const base = {
-    x: "48%",
-    y: "36px",   // ← 大幅に下
-    w: "100px",   // ← 帽子をしっかり主張
-    r: "-5deg",
-    s: "1.0"
-  };
-  return base;
-}
-
+  function setHatStyleFor() {
+    return {
+      x: "47%",      // 通常時
+      y: "38px",     // かなり下
+      w: "100px",    // 大きめ
+      r: "-5deg",
+      s: "1.0"
+    };
+  }
 
   function ensureHatOnBunny(bunny) {
     const id = bunnyId(bunny);
@@ -292,8 +287,18 @@
       bunny.wrap.appendChild(hat);
     }
 
-    const st = setHatStyleFor(bunny);
+    const st = setHatStyleFor();
+
     bunny.wrap.style.setProperty("--hatX", st.x);
+
+    // ★反転用X（鏡位置）
+    const xNum = parseFloat(st.x.replace("%", ""));
+    if (Number.isFinite(xNum)) {
+      bunny.wrap.style.setProperty("--hatXFlip", `${100 - xNum}%`);
+    } else {
+      bunny.wrap.style.setProperty("--hatXFlip", st.x);
+    }
+
     bunny.wrap.style.setProperty("--hatY", st.y);
     bunny.wrap.style.setProperty("--hatW", st.w);
     bunny.wrap.style.setProperty("--hatR", st.r);
@@ -341,6 +346,7 @@
     injectStyles();
     injectHudButton();
     applyEquippedAll();
+
     document.addEventListener("pointerdown", onPointerDownCapture, true);
 
     WB.on?.("bunnyCountChanged", () => {
