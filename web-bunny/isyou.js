@@ -40,16 +40,18 @@
 
       const ITEMS = {
         partyhat: {
-          label: "パーティーハット",
-          img: "/assets/isyou/partyhat.png",
-          price: 500,
-          anchorY: 0.03,
-          offsetX: 12,
-          offsetY: -6,
-          scale: 0.58,
-          z: 25,
-        },
-      };
+  label: "パーティーハット",
+  img: "/assets/isyou/partyhat.png",
+  price: 500,
+
+  // ★ここが肝
+  anchorY: -0.02,  // 0より小さくして “頭頂より上” を基準にする
+  offsetX: 6,      // 右に寄りすぎなら 0〜6で微調整
+  offsetY: -26,    // 上に持ち上げる（-22〜-34あたりで調整）
+  scale: 0.42,     // 小さめ（0.38〜0.50で調整）
+  z: 25,
+},
+
 
       const hud = document.getElementById("hud");
       if (!hud) return;
