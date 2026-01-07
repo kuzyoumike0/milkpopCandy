@@ -428,36 +428,59 @@
     }
 
     // チャージ量が高いほど「枚数が増える＆高ティアが出やすい」
-    getDropPlanFromOwnCharge() {
-      const r = this.getChargeRatio(); // 0..1
+    // チャージ量が高いほど「枚数が増える＆高ティアが出やすい」
+getDropPlanFromOwnCharge() {
+  const r0 = this.getChargeRatio(); // 0..1
 
-      // 枚数：1〜10
-      const count = 1 + Math.floor(r * 15);
+  // ✅ うさぎ種類ごとのコイン倍率（bunny1=0.55〜reabunny=4.0）
+  const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
 
-      // 最大ティア：0〜3
-      const maxTier = Math.floor(r * 6 + 1e-9);
+  // ✅ babyは控えめ（欲しければ 0.6→0.8 などに）
+  const babyMul = this.isBaby ? 0.6 : 1.0;
 
-      const pickTier = () => {
-        if (maxTier <= 0) return 0;
+  // ✅ 体感を上げるため「実効チャージ」を少しブースト（上限は1に丸め）
+  const r = Math.min(1, r0 * (1.15 + mul * 0.15));
 
-        // 高ティア優遇：w(t)=(t+1)^2
-        let sum = 0;
-        const w = [];
-        for (let t = 0; t <= maxTier; t++) {
-          const wt = (t + 1) * (t + 1);
-          w.push(wt);
-          sum += wt;
-        }
-        let x = Math.random() * sum;
-        for (let t = 0; t <= maxTier; t++) {
-          x -= w[t];
-          if (x <= 0) return t;
-        }
-        return maxTier;
-      };
+  // ✅ 枚数：増やす（元: 1 + floor(r*15)）
+  // 例：通常みるぽでも増える / 上位・レアはガッツリ増える
+  const count = clamp(
+    Math.floor((2 + r * 24) * mul * babyMul),
+    2,
+    60
+  );
 
-      return { count, pickTier };
+  // ✅ 最大ティア：0〜3（元: floor(r*6) だったけど assets は 0..3）
+  // rとmulで上に寄せる
+  const maxTier = clamp(
+    Math.floor(r * 3 + mul * 0.35),
+    0,
+    ASSETS.coins.length - 1
+  );
+
+  const pickTier = () => {
+    if (maxTier <= 0) return 0;
+
+    // ✅ 高ティア優遇を強める（元: (t+1)^2）
+    // さらに mul が高いほど上振れしやすい
+    const p = 2.2 + mul * 0.35; // ここを上げるほど上位コインが出やすい
+    let sum = 0;
+    const w = [];
+    for (let t = 0; t <= maxTier; t++) {
+      const wt = Math.pow(t + 1, p);
+      w.push(wt);
+      sum += wt;
     }
+    let x = Math.random() * sum;
+    for (let t = 0; t <= maxTier; t++) {
+      x -= w[t];
+      if (x <= 0) return t;
+    }
+    return maxTier;
+  };
+
+  return { count, pickTier };
+}
+
 
     getWrapWidth() {
       const w1 = this.wrap.offsetWidth || 0;
