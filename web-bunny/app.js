@@ -17,6 +17,7 @@
 
 (() => {
   "use strict";
+console.log("[app.js] loaded", "version=v11-wrapCss", Date.now());
 
   /* =========================
    * Helpers
