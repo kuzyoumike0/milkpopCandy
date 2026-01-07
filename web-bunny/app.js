@@ -2,108 +2,68 @@
   "use strict";
 
   /* =========================
-   * Bunny牧場 app.js（本体）— FIX: 画面外に出ない + 連携復活
-   * - 初期baby排除
-   * - ボタン連携（お迎え/旅立ち/リセット/お洒落）
-   * - WBイベントバス（on/off/emit）
+   * Bunny牧場 app.js（本体）— FIX
+   * - coinLayerがクリックを吸う問題を根絶
+   * - うさぎクリック復活（wrapで拾う）
+   * - お洒落ボタンをHUDへ自動追加
+   * - 起動時：babyを即大人化
+   * - 初期bunny2体スポーンを廃止（＝初期2体削除）
    * ========================= */
 
-  /* ===== Assets ===== */
   const ASSETS = {
     babyBunny: "./assets/babybunny.png",
-    hart: "./assets/hart.png",
-
     coinSE: "./assets/coin.mp3",
     poyoSE: "./assets/poyo.mp3",
     babySE: "./assets/babybunny.mp3",
     tabidatiSE: "./assets/tabidati.mp3",
-
-    ougonUnchi: "./assets/ougonunchi.png",
-
-    coins: [
-      "./assets/coin1.png",
-      "./assets/coin2.png",
-      "./assets/coin3.png",
-      "./assets/coin4.png",
-    ],
   };
 
-  /* ===== Bunny defs ===== */
   const BUNNY_DEFS = {
-    bunny1: { img: "./assets/bunny1.png", coinMul: 0.55 },
-    bunny3: { img: "./assets/bunny3.png", coinMul: 1.0 },
-    bunny4: { img: "./assets/bunny4.png", coinMul: 1.8 },
-    bunny5: { img: "./assets/bunny5.png", coinMul: 2.8 },
-    reabunny: { img: "./assets/reabunny.png", coinMul: 4.0 },
+    bunny1: { img: "./assets/bunny1.png" },
+    bunny3: { img: "./assets/bunny3.png" },
+    bunny4: { img: "./assets/bunny4.png" },
+    bunny5: { img: "./assets/bunny5.png" },
+    reabunny: { img: "./assets/reabunny.png" },
   };
 
-  /* ===== Balance ===== */
   const BABY_DURATION_MS = 3 * 60 * 1000;
   const BABY_SPEED_MUL = 0.65;
   const REA_EVOLVE_RATE = 0.01;
   const DEPART_COST = 10;
 
-  /* ===== Storage ===== */
   const LS = {
     coins: "wb_coins_v6",
     bunnies: "wb_bunnies_v6",
-    dex: "wb_dex_v1",
-    unchi: "wb_unchi_v1",
-    title: "wb_title_v1",
-    titleList: "wb_title_list_v1",
   };
 
-  /* ===== DOM ===== */
   const field = document.getElementById("field");
   const bunnyLayer = document.getElementById("bunnyLayer");
   const coinLayer = document.getElementById("coinLayer");
   const coinValueEl = document.getElementById("coinValue");
 
+  const hud = document.getElementById("hud");
   const shopBtn = document.getElementById("shopBtn");
   const departBtn = document.getElementById("departBtn");
   const resetBtn = document.getElementById("resetBtn");
   const rankBtn = document.getElementById("rankBtn");
-  const hud = document.getElementById("hud");
 
-  if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
-    console.error("[app.js] 必要DOMが見つかりません");
-    return;
-  }
+  if (!field || !bunnyLayer || !coinLayer || !coinValueEl) return;
 
   /* =========================
-   * HUDが押せない対策：最前面 + クリック可能を明示
-   * （CSSがあっても上書きで安全側へ）
+   * CSS保険：coinLayer吸い込み根絶
    * ========================= */
   (() => {
     const st = document.createElement("style");
     st.textContent = `
-      #hud{ position:fixed; z-index:2147483000; pointer-events:auto; }
-      #hud *{ pointer-events:auto; }
-      #field{ position:fixed; inset:0; }
-      #bunnyLayer{ position:absolute; inset:0; z-index:30; pointer-events:auto; }
-      #coinLayer{ position:absolute; inset:0; z-index:40; pointer-events:auto; }
-
-      .bunnyWrap{ position:absolute; width:140px; height:140px; pointer-events:auto; z-index:35; }
-      .bunny{ pointer-events:none; user-select:none; -webkit-user-drag:none; }
+      #coinLayer{ pointer-events:none !important; } /* ←最重要 */
+      .coin, .ougonunchi{ pointer-events:auto !important; }
+      .bunnyWrap{ pointer-events:auto !important; z-index:35; }
+      .bunny{ pointer-events:none !important; }
+      #hud{ z-index:2147483000 !important; pointer-events:auto !important; }
+      #hud *{ pointer-events:auto !important; }
     `;
     document.head.appendChild(st);
   })();
-
-  /* ===== Utils ===== */
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const rand = (a, b) => a + Math.random() * (b - a);
-
-  /* ===== field rect cache ===== */
-  let FIELD_W = 0;
-  let FIELD_H = 0;
-  function refreshFieldSize() {
-    FIELD_W = Math.max(1, field.clientWidth || field.getBoundingClientRect().width || 1);
-    FIELD_H = Math.max(1, field.clientHeight || field.getBoundingClientRect().height || 1);
-  }
-  refreshFieldSize();
-  window.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
-
-  function groundY() { return FIELD_H - 60; }
 
   /* =========================
    * Event bus（WB互換）
@@ -118,7 +78,9 @@
     __events.get(ev)?.forEach((fn) => { try { fn(payload); } catch {} });
   }
 
-  /* ===== Audio ===== */
+  /* =========================
+   * Audio
+   * ========================= */
   const sePoyo = new Audio(ASSETS.poyoSE);
   const seBaby = new Audio(ASSETS.babySE);
   const seCoin = new Audio(ASSETS.coinSE);
@@ -142,35 +104,69 @@
     try { a.currentTime = 0; a.play().catch(() => {}); } catch {}
   }
 
-  /* ===== State ===== */
+  /* =========================
+   * Field size
+   * ========================= */
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rand = (a, b) => a + Math.random() * (b - a);
+
+  let FIELD_W = 1, FIELD_H = 1;
+  function refreshFieldSize() {
+    FIELD_W = Math.max(1, field.clientWidth || field.getBoundingClientRect().width || 1);
+    FIELD_H = Math.max(1, field.clientHeight || field.getBoundingClientRect().height || 1);
+  }
+  function groundY() { return FIELD_H - 60; }
+  refreshFieldSize();
+  window.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
+
+  /* =========================
+   * Coins
+   * ========================= */
   let coins = parseInt(localStorage.getItem(LS.coins) || "0", 10);
   if (!Number.isFinite(coins)) coins = 0;
 
-  const bunnies = [];
-  let lastFrame = performance.now();
-
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
+  function updateHud() { coinValueEl.textContent = String(coins); }
 
-  function updateHud() {
-    coinValueEl.textContent = String(coins);
-    emit("hudUpdated", { coins });
+  /* =========================
+   * Bunny meta load/save
+   * ========================= */
+  function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
+
+  function loadBunnyMeta() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(LS.bunnies) || "null");
+      if (!Array.isArray(arr)) return [];
+      return arr.map(x => ({
+        kind: safeKind(x?.kind),
+        bornAt: Number(x?.bornAt) || Date.now(),
+      }));
+    } catch { return []; }
+  }
+
+  function saveBunnyMeta() {
+    localStorage.setItem(
+      LS.bunnies,
+      JSON.stringify(bunnies.map(b => ({ kind: b.kind, bornAt: b.bornAt })))
+    );
   }
 
   /* =========================
-   * Bunny class
+   * Bunny
    * ========================= */
+  const bunnies = [];
+
   class Bunny {
-    constructor(kind = "bunny1", bornAt = Date.now()) {
-      this.kind = kind;
+    constructor(kind, bornAt) {
+      this.kind = safeKind(kind);
       this.bornAt = bornAt;
 
-      // ★ isBaby を bornAt から決める（初期baby排除の土台）
+      // 起動時のbabyは「即大人化」したいので、init側でbornAtを補正する
       this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
 
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
-      this.wrap.style.left = "0px";
-      this.wrap.style.top = "0px";
+      this.wrap.style.position = "absolute";
 
       this.el = document.createElement("img");
       this.el.className = "bunny";
@@ -182,52 +178,37 @@
       refreshFieldSize();
       this.x = rand(20, Math.max(21, FIELD_W - 140));
       this.y = groundY() - 120;
-
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
-      this.vx = 0;
 
       this.syncSprite();
 
-      // 画像ロード後に実測幅でclamp
-      this.el.addEventListener("load", () => {
-        this.clampInside();
-        this.applyPos();
-      });
-
-      // ★クリック（旅立ちモードでtabidati.jsがキャプチャしてても、通常はここで反応）
-      const tap = (e) => {
+      // クリック確実（wrapで拾う）
+      this.wrap.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
         emit("bunny:click", { bunny: this });
-      };
-      this.wrap.addEventListener("pointerdown", tap);
+      });
 
       this.clampInside();
       this.applyPos();
     }
 
     syncSprite() {
-      if (this.isBaby) {
-        this.el.src = ASSETS.babyBunny;
-      } else {
-        this.el.src = BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img;
-      }
+      if (this.isBaby) this.el.src = ASSETS.babyBunny;
+      else this.el.src = BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img;
     }
 
     getWrapWidth() {
-      const w1 = this.wrap.offsetWidth || 0;
-      if (w1 > 0) return w1;
-      const w2 = this.wrap.getBoundingClientRect().width || 0;
-      return Math.max(1, w2 || 140);
+      const w = this.wrap.getBoundingClientRect().width || 140;
+      return Math.max(60, w);
     }
 
     clampInside() {
       refreshFieldSize();
       const w = this.getWrapWidth();
       const PAD = 6;
-
       const minX = PAD;
       const maxX = Math.max(minX, FIELD_W - w - PAD);
       this.x = clamp(this.x, minX, maxX);
@@ -240,18 +221,16 @@
 
       this.isBaby = false;
       if (Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
-
       this.syncSprite();
-
-      // 進化で幅変わるので即clamp
       this.clampInside();
       this.applyPos();
+      saveBunnyMeta();
     }
 
     applyPos() {
       this.wrap.classList.toggle("flip", this.dir < 0);
       this.wrap.style.left = `${this.x}px`;
-      this.wrap.style.top = `${this.y}px`;
+      this.wrap.style.top  = `${this.y}px`;
     }
 
     update(dt) {
@@ -262,7 +241,6 @@
 
       const w = this.getWrapWidth();
       const PAD = 6;
-
       const minX = PAD;
       const maxX = Math.max(minX, FIELD_W - w - PAD);
 
@@ -273,12 +251,10 @@
     }
   }
 
-  /* =========================
-   * Bunny ops（他モジュール用）
-   * ========================= */
   function spawnBunny(kind = "bunny1", bornAt = Date.now()) {
     const b = new Bunny(kind, bornAt);
     bunnies.push(b);
+    saveBunnyMeta();
     emit("bunnyCountChanged", { count: bunnies.length });
     return b;
   }
@@ -288,56 +264,60 @@
     if (idx < 0) return false;
     try { b.wrap.remove(); } catch {}
     bunnies.splice(idx, 1);
+    saveBunnyMeta();
     emit("bunnyCountChanged", { count: bunnies.length });
     return true;
   }
 
   /* =========================
-   * Buttons（押せない問題の核をここで復活）
+   * お洒落ボタンをHUDへ強制追加
    * ========================= */
-  // 旅立ちボタン：tabidati.jsに渡すイベント
-  departBtn?.addEventListener("click", (e) => {
-    e.preventDefault();
-    unlockAudioOnce();
-    emit("ui:depart", {});
-  });
+  function ensureIsyouBtn() {
+    if (!hud) return null;
+    let btn = document.getElementById("isyouBtn");
+    if (btn) return btn;
 
-  // お迎えボタン：omukae.js が直接 listener を貼る想定でも、保険でイベントも出す
-  shopBtn?.addEventListener("click", (e) => {
-    e.preventDefault();
-    unlockAudioOnce();
-    emit("ui:shop", {});
-  });
+    btn = document.createElement("button");
+    btn.id = "isyouBtn";
+    btn.textContent = "お洒落";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      unlockAudioOnce();
+      emit("ui:isyou", {});
+    });
 
-  // リセット（本体で処理）
+    // 右端に追加（好みで挿入位置変えてOK）
+    hud.appendChild(btn);
+    return btn;
+  }
+  const isyouBtn = ensureIsyouBtn();
+
+  /* =========================
+   * ボタンイベント（他モジュールが拾えるように）
+   * ========================= */
+  shopBtn?.addEventListener("click", (e) => { e.preventDefault(); unlockAudioOnce(); emit("ui:shop", {}); });
+  departBtn?.addEventListener("click", (e) => { e.preventDefault(); unlockAudioOnce(); emit("ui:depart", {}); });
+
   resetBtn?.addEventListener("click", (e) => {
     e.preventDefault();
     unlockAudioOnce();
     if (!confirm("リセットしますか？")) return;
     localStorage.removeItem(LS.coins);
     localStorage.removeItem(LS.bunnies);
-    localStorage.removeItem(LS.dex);
-    localStorage.removeItem(LS.unchi);
-    localStorage.removeItem(LS.title);
-    localStorage.removeItem(LS.titleList);
     emit("resetRequested", {});
     location.reload();
   });
 
   /* =========================
-   * WB export（上書きじゃなく “核” を提供）
+   * WB API（isyou/tabidati/omukaeが使う土台）
    * ========================= */
   window.WB = {
-    // event bus
     on, off, emit,
-
-    // defs
     ASSETS, BUNNY_DEFS, LS, DEPART_COST,
+    field, hud,
+    shopBtn, departBtn, resetBtn, rankBtn,
+    isyouBtn,
 
-    // dom
-    field, shopBtn, departBtn, resetBtn, rankBtn, hud,
-
-    // coins互換
     getCoin: () => coins,
     spendCoin: (n) => {
       n = Math.floor(Number(n) || 0);
@@ -349,7 +329,6 @@
       return true;
     },
 
-    // state
     get coins() { return coins; },
     set coins(v) {
       coins = Math.max(0, Math.floor(Number(v) || 0));
@@ -357,36 +336,55 @@
       updateHud();
     },
 
-    // ui/audio
     updateHud,
     unlockAudioOnce,
     playSE,
     seTabidati,
 
-    // bunnies
     bunnies,
     spawnBunny,
     removeBunnyInstance,
+    saveBunnyMeta,
   };
 
   /* =========================
-   * Loop
+   * Init / Loop
    * ========================= */
+  let lastFrame = performance.now();
+
+  function initBunnies() {
+    const meta = loadBunnyMeta();
+
+    // ★要望：初期2体は削除 → 保存が無い場合は「自動スポーンしない」
+    // （最低1匹欲しいなら、ここで1匹だけ大人をspawnに変えてOK）
+    if (!meta || meta.length === 0) {
+      // 何も出さない（ユーザー要望：初期2体削除）
+      return;
+    }
+
+    // ★保存データにbabyが残ってても「即大人化」
+    const t = Date.now();
+    const adultBornAt = t - BABY_DURATION_MS - 1000;
+
+    meta.forEach((m, i) => {
+      const isBaby = (t - m.bornAt) < BABY_DURATION_MS;
+      const bornAt = isBaby ? (adultBornAt - i * 500) : m.bornAt;
+      spawnBunny(m.kind, bornAt);
+    });
+
+    // “baby残留” を確実に潰すため保存し直す
+    saveBunnyMeta();
+  }
+
   function tick(ts) {
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
-
     for (const b of bunnies) b.update(dt);
-
     requestAnimationFrame(tick);
   }
 
   function init() {
-    // ★初期2体は必ず大人（bornAtを過去にする）
-    const t = Date.now();
-    spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
-    spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
-
+    initBunnies();
     updateHud();
     requestAnimationFrame(tick);
 
