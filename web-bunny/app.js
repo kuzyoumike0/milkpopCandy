@@ -84,6 +84,33 @@
   const resetBtn = document.getElementById("resetBtn");
   const rankBtn = document.getElementById("rankBtn");
 
+  // ===== お洒落ボタンをHUDに必ず出す（isyou.jsが無くても表示される） =====
+const hud = document.getElementById("hud");
+let isyouBtn = document.getElementById("isyouBtn");
+
+if (hud && !isyouBtn) {
+  isyouBtn = document.createElement("button");
+  isyouBtn.id = "isyouBtn";
+  isyouBtn.textContent = "お洒落";
+  // なるべく左側に出したいなら coin の次あたりに挿入
+  const coinBox = document.getElementById("coin");
+  if (coinBox && coinBox.parentElement === hud) {
+    hud.insertBefore(isyouBtn, coinBox.nextSibling);
+  } else {
+    hud.appendChild(isyouBtn);
+  }
+}
+
+// 押したらイベントを飛ばす（isyou.js側で拾える）
+isyouBtn?.addEventListener("click", (e) => {
+  e.preventDefault();
+  unlockAudioOnce?.();
+  emit("ui:isyou", {});          // ←統一イベント（推奨）
+  emit("isyou:open", {});        // ←旧互換（保険）
+  window.WB?.isyou?.open?.();    // ←もし isyou.js がAPIを生やしてたら直接呼ぶ
+});
+
+  
   if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
     console.error("必要なDOMが見つかりません: #field / #bunnyLayer / #coinLayer / #coinValue");
     return;
