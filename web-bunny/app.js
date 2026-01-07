@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v14.8 (charge consume on click + heart when ready)", Date.now());
+  console.log("[app.js] LOADED FIX v14.9 (consume charge on click + heart when full)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -42,17 +42,15 @@
 
   /* =========================
    * Charge（表示しない）
-   * - クリック時にゲージ量に応じて「枚数＆ティア」を決定
-   * - クリックしたらゲージは消費（0に戻る）
-   * - 満タン到達時に hart.png を表示（かわいく上下ゆれ）
+   * - クリック時：現在のゲージ量で枚数&ティア決定 → ドロップ → ゲージ消費(0)
+   * - ゲージMAX到達：hart.png を表示
    * ========================= */
   const CHARGE_MAX = 100;
-
   const CHARGE_GAIN_ON_BUNNY_TAP     = 8;
   const CHARGE_GAIN_ON_COIN_COLLECT = 3;
 
   let charge = 0;
-  let chargeReady = false; // 満タン到達状態（ハート表示済みフラグ）
+  let chargeReady = false; // MAX到達状態
 
   /* =========================
    * Storage
@@ -164,7 +162,7 @@
       }
       @keyframes wbHartBob {
         0%   { transform: translate(-50%, -50%) translateY(0px) scale(1); }
-        50%  { transform: translate(-50%, -50%) translateY(-7px) scale(1.02); }
+        50%  { transform: translate(-50%, -50%) translateY(-7px) scale(1.03); }
         100% { transform: translate(-50%, -50%) translateY(0px) scale(1); }
       }
     `;
@@ -172,23 +170,22 @@
   })();
 
   /* =========================
-   * Heart pop（満タン到達時に出す）
+   * Heart pop（MAX到達時）
    * ========================= */
   const heartsOnField = [];
+
   class HeartPop {
     constructor(x, y) {
       this.x = x; this.y = y;
       this.age = 0;
       this.life = 2.0;
-      this.vy = -22 - Math.random() * 10; // ふわっと
-      this.vx = (Math.random() * 2 - 1) * 8;
 
       const el = document.createElement("img");
       el.className = "wbHart";
       el.src = ASSETS.hart;
       el.draggable = false;
-      el.style.width = "46px";
-      el.style.height = "46px";
+      el.style.width = "48px";
+      el.style.height = "48px";
       this.el = el;
 
       coinLayer.appendChild(el);
@@ -200,14 +197,8 @@
     }
     update(dt) {
       this.age += dt;
-      this.x += this.vx * dt;
-      this.y += this.vy * dt;
-
       const t = clamp(this.age / this.life, 0, 1);
-      // 最後は自然にフェードアウト
       this.el.style.opacity = String(1 - t);
-
-      this.render();
       if (this.age >= this.life) {
         try { this.el.remove(); } catch {}
         return false;
@@ -223,8 +214,8 @@
   function spawnHeart(bunny) {
     const r  = bunny.wrap.getBoundingClientRect();
     const fr = field.getBoundingClientRect();
-    const x = (r.left - fr.left) + r.width * 0.5 + rand(-6, 6);
-    const y = (r.top  - fr.top)  + r.height * 0.10 + rand(-4, 4);
+    const x = (r.left - fr.left) + r.width * 0.5 + rand(-8, 8);
+    const y = (r.top  - fr.top)  + r.height * 0.10 + rand(-6, 6);
     heartsOnField.push(new HeartPop(x, y));
   }
 
@@ -232,7 +223,9 @@
    * Charge helpers
    * ========================= */
   function addCharge(delta, sourceBunny = null) {
-    if (chargeReady) return; // 満タンになったら次クリックまで増やさない
+    // ✅ MAX到達中は増やさない（次クリックで消費するまで待つ）
+    if (chargeReady) return;
+
     delta = Math.floor(Number(delta) || 0);
     if (delta <= 0) return;
 
@@ -241,8 +234,10 @@
     if (charge >= CHARGE_MAX) {
       charge = CHARGE_MAX;
       chargeReady = true;
+
       const b = sourceBunny || pickRandomBunny();
       if (b) spawnHeart(b);
+
       emit("chargeReady", {});
     }
   }
@@ -257,23 +252,25 @@
     return clamp(charge / CHARGE_MAX, 0, 1);
   }
 
-  // ✅ チャージ量に応じて「枚数」と「ティア」を決める（消費はクリック後）
+  // ✅ チャージ量に応じて「枚数」と「ティア」を決める
   function getDropPlanFromCharge() {
     const r = getChargeRatio(); // 0..1
 
-    // 枚数：通常 1枚、満タンで最大 10枚
+    // 枚数：1〜10
     const count = 1 + Math.floor(r * 9);
 
-    // 最大ティア：0〜3（coin1..coin4）
-    const maxTier = Math.floor(r * 3 + 1e-9); // 0..3
+    // 最大ティア：0〜3
+    const maxTier = Math.floor(r * 3 + 1e-9);
 
-    // 0..maxTier から「高いほど出やすい」重み
+    // 高ティア優遇（maxTierの範囲内）
     const pickTier = () => {
       if (maxTier <= 0) return 0;
+
+      // w(t) = (t+1)^2
       let sum = 0;
       const w = [];
       for (let t = 0; t <= maxTier; t++) {
-        const wt = (t + 1) * (t + 1); // 高ティア優遇
+        const wt = (t + 1) * (t + 1);
         w.push(wt);
         sum += wt;
       }
@@ -385,7 +382,7 @@
       updateHud();
       playSE(seCoin);
 
-      // ✅ 回収でチャージ増加（満タンになったらハート＆次クリック待ち）
+      // ✅ 回収でゲージ増加（MAXになったらハート＆次クリック待ち）
       addCharge(CHARGE_GAIN_ON_COIN_COLLECT, null);
 
       try { this.el.remove(); } catch {}
@@ -450,14 +447,14 @@
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        // ✅ いまのゲージ量で「枚数＆ティア」決定 → ドロップ → ゲージ消費
+        // ✅ クリック時に「現在のゲージ」で決定して吐く
         const { count, pickTier } = getDropPlanFromCharge();
         spawnClickCoins(this, count, pickTier);
 
-        // ✅ クリックしたら消費（0へ）
+        // ✅ クリックでゲージ消費（0に戻す）
         consumeCharge();
 
-        // ✅ クリック自体でも次のゲージが少し貯まる
+        // ✅ 次周回のため、クリック自体で少し貯める（満タンになったら停止）
         addCharge(CHARGE_GAIN_ON_BUNNY_TAP, this);
       };
 
@@ -496,7 +493,6 @@
       this.y = groundY() - 120;
     }
 
-    // ✅ babyは3分で進化（保存の放置時間も反映）
     evolveIfNeeded(isInit = false) {
       if (!this.isBaby) return;
 
@@ -669,6 +665,7 @@
     addCharge: (n) => addCharge(n, null),
     getCharge: () => charge,
     isChargeReady: () => !!chargeReady,
+    consumeCharge,
   };
 
   /* =========================
