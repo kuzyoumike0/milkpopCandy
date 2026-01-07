@@ -30,15 +30,11 @@
     <div id="hudButtons">
       <button id="shopBtn" type="button">お迎え</button>
       <button id="slotBtn" type="button">スロット</button>
-
-      <!-- ★ここを「図鑑」ボタンとして使う（zukan.jsの自動追加はオフ運用） -->
-      <button id="rankBtn" type="button">図鑑</button>
-
       <button id="departBtn" type="button">旅立ち</button>
       <button id="resetBtn" type="button">リセット</button>
     </div>
 
-    <!-- ★称号の常時表示枠（syougou.js がここに出す想定） -->
+    <!-- ★称号の常時表示枠（syougou.js がここに表示する想定） -->
     <div id="title" aria-label="current-title"></div>
   </header>
 
@@ -79,6 +75,10 @@
   <script src="./app.js"></script>
 
   <!-- ===== 拡張（WB依存） ===== -->
+
+  <!-- お洒落（衣装）※WB依存なので app.js の後に置く -->
+  <script src="./isyou.js"></script>
+
   <script src="./zisseki.js"></script>
   <script src="./syougou.js"></script>
   <script src="./omukae.js"></script>
