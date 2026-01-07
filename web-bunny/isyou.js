@@ -1,10 +1,9 @@
 // isyou.js
-// お洒落（衣装）システム：購入・装備・永続化・表示
-// - HUDに「お洒落」ボタン追加
-// - お洒落パネルで購入/装備
-// - うさぎ（.bunnyWrap）に帽子画像（assets/isyou/partyhat.png）を重ねる
-// - うさぎ増減に追従（MutationObserver）
-// - クリック/旅立ちモードを邪魔しない（pointer-events:none）
+// お洒落（衣装）: partyhat を購入→「どのウサギに付けるか」クリックで選択
+// - assets/isyou/partyhat.png を頭に重ねる（bunnyWrap 内にabsolute配置）
+// - 購入は HUD に「お洒落」ボタンを追加（既にあればそれを使う）
+// - 購入済みは永続化（localStorage）
+// - 付け替え: お洒落パネルから「装着モード」にして、付けたいウサギをクリック
 
 (() => {
   if (!window.WB) return;
@@ -14,32 +13,34 @@
    * Config
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v1",   // string[]
-    equip: "wb_isyou_equip_v1",   // string (equipped item id)
+    owned: "wb_isyou_owned_v1",     // { partyhat: true }
+    equip: "wb_isyou_equip_v1",     // { [bunnyId]: { partyhat: true } }
   };
 
-  // お洒落アイテム定義（増やすならここに追加）
   const ITEMS = [
     {
-      id: "partyhat",
-      name: "パーティ帽",
-      desc: "お祝い気分の定番帽子",
-      price: 5000,
-      type: "hat",
+      key: "partyhat",
+      name: "パーティーハット",
+      emoji: "🎉",
+      price: 2500,
       src: "./assets/isyou/partyhat.png",
+      // うさぎ頭への相対位置（調整用）
+      // bunnyWrap を基準に absolute で置く
+      // 基本は「上にちょい出して頭に被せる」位置
+      style: {
+        // % は bunnyWrap の幅/高さに対する比率
+        leftPct: 50,     // 中央寄せ
+        topPct: 6,       // 上の方
+        widthPct: 38,    // 帽子の大きさ
+        rotateDeg: -8,   // 少し傾ける
+      },
     },
   ];
 
-  const WRAP_SEL = ".bunnyWrap";
-  const HAT_CLASS = "wbHat";
-
   /* =========================
-   * State (storage)
+   * Helpers
    * ========================= */
-  const state = {
-    owned: [],
-    equip: "", // item id
-  };
+  const $ = (q, p = document) => p.querySelector(q);
 
   function loadJson(key, def) {
     try {
@@ -52,204 +53,134 @@
   function saveJson(key, v) {
     localStorage.setItem(key, JSON.stringify(v));
   }
-  function loadStr(key, def = "") {
-    const v = localStorage.getItem(key);
-    return v == null ? def : String(v);
-  }
-  function saveStr(key, v) {
-    localStorage.setItem(key, String(v ?? ""));
-  }
 
-  function loadState() {
-    const owned = loadJson(LS.owned, []);
-    state.owned = Array.isArray(owned) ? owned : [];
-    state.equip = loadStr(LS.equip, "");
-  }
-  function saveState() {
-    saveJson(LS.owned, state.owned);
-    saveStr(LS.equip, state.equip);
-  }
+  // bunny の永続IDを用意（wrapにdata-idが無い場合でも安定させる）
+  function ensureBunnyId(bunny) {
+    if (!bunny) return null;
+    if (bunny.id) return String(bunny.id);
 
-  function isOwned(id) {
-    return state.owned.includes(id);
-  }
-  function getEquipped() {
-    return String(state.equip || "");
-  }
-  function setEquipped(id) {
-    state.equip = String(id || "");
-    saveState();
-    refreshAllBunnies();
-    WB.updateHud?.();
-    refreshUI();
-  }
-
-  /* =========================
-   * Coin helpers
-   * ========================= */
-  function getCoin() {
+    // wrapに付与されていればそれを使う
     try {
-      if (WB && typeof WB.coins === "number") return WB.coins;
+      const w = bunny.wrap;
+      const existed = w?.dataset?.bid;
+      if (existed) {
+        bunny.id = existed;
+        return existed;
+      }
     } catch {}
-    const el = document.getElementById("coinValue");
-    return el ? Number(el.textContent) || 0 : 0;
-  }
-  function setCoin(v) {
-    const nv = Math.max(0, Math.floor(v));
-    try {
-      WB.coins = nv;
-      WB.saveCoins?.();
-      WB.updateHud?.();
-    } catch {}
-    const el = document.getElementById("coinValue");
-    if (el) el.textContent = String(nv);
+
+    const id = `b_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    bunny.id = id;
+    try { if (bunny.wrap) bunny.wrap.dataset.bid = id; } catch {}
+    return id;
   }
 
-  /* =========================
-   * Toast
-   * ========================= */
-  function ensureToastStyles() {
-    if (document.getElementById("isyouToastStyleV1")) return;
-    const s = document.createElement("style");
-    s.id = "isyouToastStyleV1";
-    s.textContent = `
-.isyouToast{
-  position: fixed;
-  left: 50%;
-  top: 12%;
-  transform: translate(-50%, -50%);
-  z-index: 2147483647;
-  background: rgba(0,0,0,.78);
-  color:#fff;
-  border-radius: 16px;
-  padding: 10px 14px;
-  font-weight: 900;
-  box-shadow: 0 18px 50px rgba(0,0,0,.26);
-  max-width: min(92vw, 520px);
-  text-align:center;
-  opacity: 0;
-  animation: isyouToastIn .18s ease-out forwards, isyouToastOut .28s ease-in forwards;
-  animation-delay: 0ms, 1.3s;
-}
-@keyframes isyouToastIn{
-  from { opacity:0; transform:translate(-50%,-80%); }
-  to   { opacity:1; transform:translate(-50%,-50%); }
-}
-@keyframes isyouToastOut{
-  from { opacity:1; transform:translate(-50%,-50%); }
-  to   { opacity:0; transform:translate(-50%,-30%); }
-}
-`;
-    document.head.appendChild(s);
-  }
-  function toast(msg) {
-    ensureToastStyles();
-    const t = String(msg ?? "").trim();
-    if (!t) return;
+  function toast(msg, ms = 1600) {
+    // 既存の toast があっても最低限見えるように
     const el = document.createElement("div");
-    el.className = "isyouToast";
-    el.textContent = t;
+    el.className = "farewellMilestone";
+    el.textContent = msg;
     document.body.appendChild(el);
-    setTimeout(() => { try { el.remove(); } catch {} }, 1800);
+    setTimeout(() => { try { el.remove(); } catch {} }, ms);
+  }
+
+  function getCoins() {
+    return Number(WB.coins || 0);
+  }
+  function spendCoins(n) {
+    const v = Math.max(0, Math.floor(n));
+    WB.coins = Math.max(0, getCoins() - v);
+    WB.saveCoins?.();
+    WB.updateHud?.();
+  }
+  function addCoins(n) {
+    const v = Math.max(0, Math.floor(n));
+    WB.coins = getCoins() + v;
+    WB.saveCoins?.();
+    WB.updateHud?.();
   }
 
   /* =========================
-   * Hat display
+   * State
    * ========================= */
-  function injectHatStyles() {
-    if (document.getElementById("isyouHatStyleV1")) return;
+  const state = {
+    owned: loadJson(LS.owned, {}),   // {partyhat:true}
+    equip: loadJson(LS.equip, {}),   // { bunnyId: {partyhat:true}}
+    attachMode: null,               // "partyhat" | null
+    uiOpen: false,
+  };
+
+  function saveAll() {
+    saveJson(LS.owned, state.owned);
+    saveJson(LS.equip, state.equip);
+  }
+
+  function isOwned(key) {
+    return !!state.owned?.[key];
+  }
+
+  function isEquipped(bunnyId, key) {
+    return !!state.equip?.[bunnyId]?.[key];
+  }
+
+  function setEquipped(bunnyId, key, on) {
+    if (!bunnyId) return;
+    if (!state.equip[bunnyId]) state.equip[bunnyId] = {};
+    state.equip[bunnyId][key] = !!on;
+    saveAll();
+  }
+
+  /* =========================
+   * Styles
+   * ========================= */
+  function injectStyles() {
+    if (document.getElementById("isyouStyleV1")) return;
     const s = document.createElement("style");
-    s.id = "isyouHatStyleV1";
+    s.id = "isyouStyleV1";
     s.textContent = `
-${WRAP_SEL} .${HAT_CLASS}{
+/* 帽子レイヤ（うさぎに重ねる） */
+.bunnyWrap{ position: relative; } /* 念のため */
+.bunnyWrap .isyouLayer{
   position:absolute;
-  left:50%;
-  top:-10px;
-  width:48px;
-  height:48px;
-  transform: translateX(-50%) rotate(-10deg);
-  transform-origin: 50% 90%;
+  inset:0;
   pointer-events:none;
-  user-select:none;
-  z-index: 10;
-  filter: drop-shadow(0 6px 8px rgba(0,0,0,.20));
+  z-index: 6; /* うさぎ画像より上を想定 */
 }
-`;
-    document.head.appendChild(s);
-  }
+.bunnyWrap .isyouHat{
+  position:absolute;
+  transform-origin: 50% 70%;
+  image-rendering: auto;
+  filter: drop-shadow(0 6px 8px rgba(0,0,0,.18));
+  opacity: 1;
+}
 
-  function ensureHat(wrap) {
-    if (!wrap || !wrap.matches?.(WRAP_SEL)) return;
+/* 装着モード時：対象選択を分かりやすく */
+.isyouAttachOn .bunnyWrap{
+  outline: 2px dashed rgba(255, 120, 160, .85);
+  outline-offset: 6px;
+  border-radius: 18px;
+}
+.isyouAttachOn .bunnyWrap:hover{
+  outline: 3px solid rgba(255, 60, 60, .95);
+  outline-offset: 6px;
+}
 
-    // 装備中が partyhat で、かつ所持しているときだけ表示
-    const eq = getEquipped();
-    const ok = (eq === "partyhat") && isOwned("partyhat");
-
-    const existing = wrap.querySelector(`.${HAT_CLASS}`);
-    if (!ok) {
-      if (existing) {
-        try { existing.remove(); } catch {}
-      }
-      return;
-    }
-
-    if (existing) return;
-
-    const img = document.createElement("img");
-    img.className = HAT_CLASS;
-    img.src = "./assets/isyou/partyhat.png";
-    img.alt = "hat";
-    img.decoding = "async";
-    img.loading = "eager";
-    wrap.appendChild(img);
-  }
-
-  function refreshAllBunnies() {
-    document.querySelectorAll(WRAP_SEL).forEach(ensureHat);
-  }
-
-  function observeBunnies() {
-    const layer = document.getElementById("bunnyLayer") || document.getElementById("field") || document.body;
-    const mo = new MutationObserver((muts) => {
-      for (const m of muts) {
-        m.addedNodes?.forEach?.((n) => {
-          if (!(n instanceof HTMLElement)) return;
-          if (n.matches?.(WRAP_SEL)) ensureHat(n);
-          n.querySelectorAll?.(WRAP_SEL).forEach(ensureHat);
-        });
-      }
-    });
-    mo.observe(layer, { childList: true, subtree: true });
-  }
-
-  /* =========================
-   * UI (お洒落パネル)
-   * ========================= */
-  let uiEl = null;
-
-  function injectUIStyles() {
-    if (document.getElementById("isyouUiStyleV1")) return;
-    const s = document.createElement("style");
-    s.id = "isyouUiStyleV1";
-    s.textContent = `
+/* お洒落パネル */
 #isyouPanel{
   position: fixed;
-  inset: 0;
+  inset:0;
   z-index: 2147483647;
-  display: none;
-  user-select: none;
+  display:none;
+  user-select:none;
 }
-#isyouPanel .bg{
-  position:absolute; inset:0;
-  background: rgba(0,0,0,.38);
-}
+#isyouPanel .bg{ position:absolute; inset:0; background: rgba(0,0,0,.38); }
 #isyouPanel .card{
   position:absolute;
   left:50%; top:50%;
-  transform: translate(-50%, -50%);
-  width: min(680px, 92vw);
-  max-height: min(78vh, 760px);
-  overflow: hidden;
+  transform: translate(-50%,-50%);
+  width: min(640px, 92vw);
+  max-height: min(78vh, 720px);
+  overflow:hidden;
   background: rgba(255,255,255,.97);
   border-radius: 18px;
   box-shadow: 0 20px 60px rgba(0,0,0,.24);
@@ -261,10 +192,7 @@ ${WRAP_SEL} .${HAT_CLASS}{
   padding: 14px 14px 10px;
   border-bottom: 1px solid rgba(0,0,0,.08);
 }
-#isyouPanel .title{
-  font-weight: 1000;
-  letter-spacing: .02em;
-}
+#isyouPanel .title{ font-weight: 1000; letter-spacing:.02em; }
 #isyouPanel .close{
   border:none; background: rgba(0,0,0,.06);
   border-radius: 12px;
@@ -272,68 +200,28 @@ ${WRAP_SEL} .${HAT_CLASS}{
   font-weight: 900;
   cursor:pointer;
 }
-#isyouPanel .body{
-  padding: 12px 14px;
-  overflow:auto;
+#isyouPanel .body{ padding: 12px 14px; overflow:auto; }
+#isyouPanel .section{
+  background: rgba(0,0,0,.03);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+#isyouPanel .row{
+  display:flex; gap: 10px;
+  flex-wrap: wrap;
+  align-items:center;
+  justify-content: space-between;
 }
 #isyouPanel .pill{
   display:inline-flex;
   align-items:center;
   gap:8px;
-  background: rgba(0,0,0,.04);
+  background: rgba(255,255,255,.92);
   border-radius: 999px;
   padding: 8px 10px;
-  font-weight: 900;
-}
-#isyouPanel .grid{
-  margin-top: 12px;
-  display:grid;
-  grid-template-columns: repeat(2, minmax(0,1fr));
-  gap: 12px;
-}
-@media (max-width: 520px){
-  #isyouPanel .grid{ grid-template-columns: 1fr; }
-}
-#isyouPanel .item{
-  background: rgba(255,255,255,.92);
-  border-radius: 16px;
-  padding: 12px;
   box-shadow: 0 10px 22px rgba(0,0,0,.08);
-  display:flex;
-  gap: 12px;
-  align-items: center;
-}
-#isyouPanel .thumb{
-  width: 64px;
-  height: 64px;
-  border-radius: 14px;
-  background: rgba(0,0,0,.04);
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  overflow:hidden;
-  flex: 0 0 auto;
-}
-#isyouPanel .thumb img{
-  width: 78%;
-  height: 78%;
-  object-fit: contain;
-  display:block;
-}
-#isyouPanel .info{
-  display:flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1 1 auto;
-}
-#isyouPanel .name{ font-weight: 1000; }
-#isyouPanel .desc{ opacity:.78; font-weight: 800; font-size: 12px; }
-#isyouPanel .meta{ opacity:.78; font-weight: 900; font-size: 12px; }
-#isyouPanel .actions{
-  display:flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: stretch;
+  font-weight: 900;
 }
 #isyouPanel .btn{
   border:none;
@@ -343,14 +231,25 @@ ${WRAP_SEL} .${HAT_CLASS}{
   cursor:pointer;
   background: #fff;
   box-shadow: 0 10px 22px rgba(0,0,0,.10);
-  min-width: 110px;
 }
-#isyouPanel .btn.primary{ background:#ffd6e7; }
+#isyouPanel .btn.primary{ background: #ffd6e7; }
 #isyouPanel .btn.danger{ background: rgba(255,80,80,.12); }
-#isyouPanel .badge{
-  display:inline-flex;
+#isyouPanel .grid{ display:grid; grid-template-columns: 1fr; gap: 10px; }
+#isyouPanel .item{
+  background: rgba(255,255,255,.92);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 10px 22px rgba(0,0,0,.08);
+  display:flex;
   align-items:center;
-  gap:6px;
+  justify-content: space-between;
+  gap: 10px;
+}
+#isyouPanel .item .left{ display:flex; flex-direction: column; gap: 4px; }
+#isyouPanel .item .name{ font-weight: 1000; }
+#isyouPanel .item .meta{ font-size: 12px; opacity: .75; font-weight: 900; }
+#isyouPanel .badge{
+  display:inline-flex; align-items:center; gap: 6px;
   border-radius: 999px;
   padding: 6px 10px;
   background: rgba(0,0,0,.06);
@@ -362,8 +261,73 @@ ${WRAP_SEL} .${HAT_CLASS}{
     document.head.appendChild(s);
   }
 
+  /* =========================
+   * Hat DOM mount
+   * ========================= */
+  function ensureIsyouLayer(wrap) {
+    if (!wrap) return null;
+    let layer = wrap.querySelector(":scope > .isyouLayer");
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.className = "isyouLayer";
+      wrap.appendChild(layer);
+    }
+    return layer;
+  }
+
+  function applyPartyHatToWrap(wrap, on) {
+    if (!wrap) return;
+    const layer = ensureIsyouLayer(wrap);
+    if (!layer) return;
+
+    // 既存を掃除
+    const existed = layer.querySelector(".isyouHat.partyhat");
+    if (existed) {
+      if (!on) {
+        try { existed.remove(); } catch {}
+      }
+      // on ならそのまま
+      if (on) return;
+    }
+
+    if (!on) return;
+
+    const item = ITEMS.find(x => x.key === "partyhat");
+    if (!item) return;
+
+    const img = document.createElement("img");
+    img.className = "isyouHat partyhat";
+    img.alt = item.name;
+    img.src = item.src;
+
+    // 位置：頭に被せる（wrap基準）
+    // left=50% / top=6% / width=38% をデフォ
+    const st = item.style || {};
+    img.style.left = (st.leftPct ?? 50) + "%";
+    img.style.top = (st.topPct ?? 6) + "%";
+    img.style.width = (st.widthPct ?? 38) + "%";
+    img.style.transform = `translate(-50%, 0) rotate(${st.rotateDeg ?? -8}deg)`;
+
+    layer.appendChild(img);
+  }
+
+  function applyAllEquips() {
+    // bunnies 全員に反映
+    (WB.bunnies || []).forEach((b) => {
+      const id = ensureBunnyId(b);
+      const wrap = b.wrap;
+      if (!id || !wrap) return;
+      applyPartyHatToWrap(wrap, isEquipped(id, "partyhat"));
+    });
+  }
+
+  /* =========================
+   * UI (Panel)
+   * ========================= */
+  let uiEl = null;
+
   function buildUI() {
-    injectUIStyles();
+    injectStyles();
     if (uiEl && document.body.contains(uiEl)) return uiEl;
 
     uiEl = document.createElement("div");
@@ -372,7 +336,7 @@ ${WRAP_SEL} .${HAT_CLASS}{
       <div class="bg"></div>
       <div class="card" role="dialog" aria-modal="true">
         <div class="head">
-          <div class="title">✨ お洒落</div>
+          <div class="title">🧢 お洒落</div>
           <button class="close" type="button">閉じる</button>
         </div>
         <div class="body"></div>
@@ -398,70 +362,112 @@ ${WRAP_SEL} .${HAT_CLASS}{
     const body = p.querySelector(".body");
     if (!body) return;
 
-    const coin = getCoin();
-    const eq = getEquipped();
+    const have = getCoins();
+    const attach = state.attachMode;
 
-    const html = `
-      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between;">
-        <div class="pill">所持：<b>${coin}</b> 🪙</div>
-        <div class="pill">装備中：<b>${eq ? eq : "（なし）"}</b></div>
-        <button class="btn danger" type="button" data-unequip="1">装備解除</button>
+    const itemsHtml = ITEMS.map((it) => {
+      const owned = isOwned(it.key);
+      const isAttach = attach === it.key;
+
+      const right = owned
+        ? `
+          <span class="badge ${isAttach ? "on" : ""}">${isAttach ? "装着モード中" : "購入済み"}</span>
+          <button class="btn primary" type="button" data-attach="${it.key}">
+            ${isAttach ? "装着モード解除" : "どの🐰に付ける？"}
+          </button>
+        `
+        : `
+          <span class="badge">未購入</span>
+          <button class="btn primary" type="button" data-buy="${it.key}">
+            購入（-${it.price}🪙）
+          </button>
+        `;
+
+      return `
+        <div class="item">
+          <div class="left">
+            <div class="name">${escapeHtml(it.emoji)} ${escapeHtml(it.name)}</div>
+            <div class="meta">帽子（頭に重ねて表示） / 価格：${it.price}🪙</div>
+          </div>
+          <div class="right">${right}</div>
+        </div>
+      `;
+    }).join("");
+
+    body.innerHTML = `
+      <div class="section">
+        <div class="row">
+          <div class="pill">所持：<b>${have}</b> 🪙</div>
+          <div class="pill">状態：<b>${attach ? "装着モード（🐰をクリック）" : "通常"}</b></div>
+          <div class="row" style="gap:8px">
+            <button class="btn danger" type="button" data-cancel="1">装着モード解除</button>
+          </div>
+        </div>
+        <div style="height:10px"></div>
+        <div class="mini" style="font-weight:900; opacity:.8;">
+          購入後「どの🐰に付ける？」→付けたいウサギをクリック。もう一度クリックで外せます。
+        </div>
       </div>
 
-      <div class="grid">
-        ${ITEMS.map((it) => {
-          const owned = isOwned(it.id);
-          const isOn = eq === it.id && owned;
-          const price = it.price | 0;
-
-          return `
-            <div class="item" data-item="${it.id}">
-              <div class="thumb"><img src="${it.src}" alt=""></div>
-              <div class="info">
-                <div class="name">${escapeHtml(it.name)}</div>
-                <div class="desc">${escapeHtml(it.desc)}</div>
-                <div class="meta">価格：${price} 🪙</div>
-                <div>
-                  <span class="badge ${owned ? "on" : ""}">${owned ? "所持" : "未所持"}</span>
-                  <span class="badge ${isOn ? "on" : ""}">${isOn ? "装備中" : "未装備"}</span>
-                </div>
-              </div>
-              <div class="actions">
-                ${
-                  owned
-                    ? `<button class="btn primary" type="button" data-equip="${it.id}">${isOn ? "装備中" : "装備"}</button>`
-                    : `<button class="btn primary" type="button" data-buy="${it.id}">購入</button>`
-                }
-              </div>
-            </div>
-          `;
-        }).join("")}
+      <div class="section">
+        <div class="row">
+          <div class="title">🧺 アイテム</div>
+          <button class="btn" type="button" data-refresh="1">更新</button>
+        </div>
+        <div style="height:10px"></div>
+        <div class="grid">${itemsHtml}</div>
       </div>
     `;
 
-    body.innerHTML = html;
-
+    // bind buy
     body.querySelectorAll("[data-buy]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
-        const id = btn.getAttribute("data-buy");
-        buyItem(id);
+        const key = btn.getAttribute("data-buy") || "";
+        const it = ITEMS.find(x => x.key === key);
+        if (!it) return;
+
+        if (getCoins() < it.price) {
+          toast("コインが足りない…！", 1600);
+          return;
+        }
+        spendCoins(it.price);
+        state.owned[key] = true;
+        saveAll();
+        toast(`購入！ ${it.emoji} ${it.name}`, 1800);
+
+        // 購入した瞬間に装着モードへ
+        setAttachMode(key);
+        renderUI();
       });
     });
 
-    body.querySelectorAll("[data-equip]").forEach((btn) => {
+    // bind attach toggle
+    body.querySelectorAll("[data-attach]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
-        const id = btn.getAttribute("data-equip");
-        equipItem(id);
+        const key = btn.getAttribute("data-attach") || "";
+        if (!isOwned(key)) return;
+
+        if (state.attachMode === key) setAttachMode(null);
+        else setAttachMode(key);
+
+        renderUI();
       });
     });
 
-    body.querySelectorAll("[data-unequip]").forEach((btn) => {
+    body.querySelectorAll("[data-cancel]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
-        setEquipped("");
-        toast("装備を解除しました");
+        setAttachMode(null);
+        renderUI();
+      });
+    });
+
+    body.querySelectorAll("[data-refresh]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        renderUI();
       });
     });
   }
@@ -476,69 +482,76 @@ ${WRAP_SEL} .${HAT_CLASS}{
   }
 
   function openPanel() {
-    buildUI();
+    const p = buildUI();
     renderUI();
-    uiEl.style.display = "block";
+    p.style.display = "block";
   }
   function closePanel() {
-    if (!uiEl) return;
-    uiEl.style.display = "none";
-  }
-  function refreshUI() {
-    if (uiEl && uiEl.style.display !== "none") renderUI();
+    const p = uiEl || document.getElementById("isyouPanel");
+    if (!p) return;
+    p.style.display = "none";
   }
 
   /* =========================
-   * Purchase / Equip
+   * Attach mode (click bunny to equip)
    * ========================= */
-  function getItem(id) {
-    return ITEMS.find((x) => x.id === id) || null;
+  function setAttachMode(keyOrNull) {
+    state.attachMode = keyOrNull ? String(keyOrNull) : null;
+
+    // 画面側に状態を出す（hover赤縁もここでON）
+    document.documentElement.classList.toggle("isyouAttachOn", !!state.attachMode);
+
+    if (state.attachMode) {
+      toast("🧢 装着モード：付けたい🐰をクリック", 1800);
+      WB.unlockAudioOnce?.();
+    } else {
+      toast("🧢 装着モード：解除", 1200);
+    }
   }
 
-  function buyItem(id) {
-    const it = getItem(id);
-    if (!it) return;
+  function onPointerDownCapture(e) {
+    if (!state.attachMode) return;
 
-    if (isOwned(it.id)) {
-      toast("すでに所持しています");
-      return;
+    // 左クリック/タップのみ
+    if (e.button != null && e.button !== 0) return;
+
+    const wrap = e.target?.closest?.(".bunnyWrap");
+    if (!wrap) return;
+
+    // 他のクリック処理（コイン生成など）を止める
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+
+    const bunny = (WB.bunnies || []).find(b => b.wrap === wrap);
+    if (!bunny) return;
+
+    const id = ensureBunnyId(bunny);
+    if (!id) return;
+
+    const key = state.attachMode;
+
+    // トグル装着
+    const next = !isEquipped(id, key);
+    setEquipped(id, key, next);
+
+    if (key === "partyhat") {
+      applyPartyHatToWrap(wrap, next);
     }
 
-    const coin = getCoin();
-    if (coin < it.price) {
-      toast(`コイン不足（必要：${it.price}🪙）`);
-      return;
-    }
-
-    // 支払い
-    setCoin(coin - it.price);
-
-    // 所持化
-    state.owned.push(it.id);
-    saveState();
-
-    toast(`購入しました：${it.name}`);
-    // 購入したら自動装備
-    setEquipped(it.id);
+    toast(next ? "🎉 帽子をかぶせた！" : "🎈 帽子を外した！", 1400);
+    renderUI();
   }
 
-  function equipItem(id) {
-    const it = getItem(id);
-    if (!it) return;
-    if (!isOwned(it.id)) {
-      toast("未所持です（購入してください）");
-      return;
-    }
-    setEquipped(it.id);
-    toast(`装備しました：${it.name}`);
-  }
+  // キャプチャで横取り（装着モード中だけ）
+  document.addEventListener("pointerdown", onPointerDownCapture, true);
 
   /* =========================
    * HUD button
    * ========================= */
   function injectHudButton() {
-    const hudButtons = document.getElementById("hudButtons") || document.getElementById("hud");
-    if (!hudButtons) return;
+    const hud = document.getElementById("hudButtons") || document.getElementById("hud");
+    if (!hud) return;
 
     if (document.getElementById("isyouBtn")) return;
 
@@ -548,40 +561,53 @@ ${WRAP_SEL} .${HAT_CLASS}{
     btn.textContent = "お洒落";
     btn.addEventListener("click", (e) => {
       e.preventDefault();
-      WB.unlockAudioOnce?.();
       openPanel();
     });
+    hud.appendChild(btn);
+  }
 
-    // できれば「図鑑/称号」の近くに差し込み
-    const rankBtn = document.getElementById("rankBtn");
-    if (rankBtn && rankBtn.parentElement === hudButtons) {
-      hudButtons.insertBefore(btn, rankBtn.nextSibling);
-    } else {
-      hudButtons.appendChild(btn);
-    }
+  /* =========================
+   * Hook: bunny 생성/更新時に反映
+   * ========================= */
+  function hookBunnyChanges() {
+    // もしWBがイベントemitを持ってるなら拾う（無ければ無視）
+    try {
+      WB.on?.("bunnyCountChanged", () => applyAllEquips());
+      WB.on?.("bunnySpawned", () => applyAllEquips());
+    } catch {}
   }
 
   /* =========================
    * Boot
    * ========================= */
-  loadState();
-  injectHatStyles();
+  injectStyles();
+  injectHudButton();
+  hookBunnyChanges();
 
+  // 初期反映（ロード後）
   window.addEventListener("load", () => {
     injectHudButton();
-    refreshAllBunnies();
-    observeBunnies();
+    setTimeout(() => applyAllEquips(), 50);
+
+    // 既存ボタンを拾う
+    const btn =
+      document.getElementById("isyouBtn") ||
+      [...document.querySelectorAll("button")].find(b => (b.textContent || "").includes("お洒落"));
+    if (btn) {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        openPanel();
+      });
+    }
   });
 
-  /* =========================
-   * Public
-   * ========================= */
-  window.ISYOU = {
+  // 外部公開（デバッグ用）
+  WB.isyou = {
     openPanel,
     closePanel,
-    buyItem,
-    equipItem,
-    getEquipped,
-    isOwned,
+    setAttachMode,
+    applyAllEquips,
+    get owned() { return { ...state.owned }; },
+    get equip() { return loadJson(LS.equip, {}); },
   };
 })();
