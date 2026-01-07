@@ -1,24 +1,17 @@
-/* app.js — Milkpop牧場（v13.0 V6-SPEC PORT）
- * 目的：貼りコード(v6)の仕様を、現状環境(index.html/他js)で動く形に適用
- *
- * ✅ 反映した仕様（v6由来）
- * - kind 管理（bunny1/bunny3/bunny4/bunny5/reabunny）
- * - bornAtで baby 判定（3分）
- * - 初期2体は必ず大人（bornAtを過去にして生成） → 初期baby2体バグ解消
- * - babyクリック：コイン1枚（tier1）
- * - 大人クリック：ゲージに応じて「雨」ドロップ（tier混合）
- * - 黄金うんち：ドロップ毎に確率出現、拾うと +10000 & カウント加算
- * - コイン：hover/クリック/タップスライド回収
- * - WB互換：on/off/emit、bunnies配列、spawnBunny/removeBunnyInstance、coins getter/setter 等
- *
- * ⚠️ 注意
- * - 旅立ちは tabidati.js 側が WB.removeBunnyInstance / WB.bunnies を使う想定で互換済み
- * - 既存v12.8の保存（wb_bunnies_v12_8_baby / wb_coin_v1）は読みません
+/* app.js — Milkpop牧場（v13.1 FIX: NO-INIT-BABY + CLICKABLE + DEPART-EVENT）
+ * ✅ 修正点
+ * - 初期から babybunny が出る問題を根絶：
+ *    - 起動時に復元データを正規化（bornAt が新しすぎる個体は大人扱いへ）
+ *    - 初期2体は必ず大人
+ * - うさぎがクリックできない問題対策：
+ *    - bunnyWrap をクリック可能に（z-index / pointer-events を明示）
+ * - 旅立ちできない問題対策：
+ *    - departBtn クリックで WB.emit("ui:depart") を発火（tabidati.js 側が拾える）
  */
 
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v13.0 (V6-SPEC PORT)", Date.now());
+  console.log("[app.js] LOADED v13.1 FIX", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -42,52 +35,21 @@
   };
 
   const BUNNY_DEFS = {
-    bunny1: {
-      label: "通常みるぽ",
-      img: "./assets/bunny1.png",
-      price: 300,
-      coinMul: 0.55,
-      desc: "基本のうさぎ。コインは控えめ。",
-    },
-    bunny3: {
-      label: "毒タイプみるぽ",
-      img: "./assets/bunny3.png",
-      price: 1800,
-      coinMul: 1.0,
-      desc: "安定してコインを稼ぐ中級うさぎ。",
-    },
-    bunny4: {
-      label: "水タイプみるぽ",
-      img: "./assets/bunny4.png",
-      price: 6000,
-      coinMul: 1.8,
-      desc: "大量のコインを生み出す上級うさぎ。",
-    },
-    bunny5: {
-      label: "お正月みるぽ",
-      img: "./assets/bunny5.png",
-      price: 20000,
-      coinMul: 2.8,
-      desc: "牧場最上級クラス。圧倒的生産力。",
-    },
-    reabunny: {
-      label: "黄金レアみるぽ",
-      img: "./assets/reabunny.png",
-      price: 0,
-      coinMul: 4.0,
-      desc: "突然変異でのみ現れる幻のうさぎ。",
-    },
+    bunny1: { label: "通常みるぽ", img: "./assets/bunny1.png", price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3: { label: "毒タイプみるぽ", img: "./assets/bunny3.png", price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4: { label: "水タイプみるぽ", img: "./assets/bunny4.png", price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5: { label: "お正月みるぽ", img: "./assets/bunny5.png", price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,    coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
   /* =========================
    * Balance
    * ========================= */
   const BABY_DURATION_MS = 3 * 60 * 1000;
-
   const BABY_SPEED_MUL = 0.65;
   const REA_EVOLVE_RATE = 0.01;
 
-  const OUGON_UNCHI_RATE_PER_DROP = 0.0015; // 0.15%
+  const OUGON_UNCHI_RATE_PER_DROP = 0.0015;
   const OUGON_UNCHI_VALUE = 10000;
 
   const BABY_FOLLOW_GAP = 46;
@@ -122,7 +84,7 @@
   const shopBtn = document.getElementById("shopBtn");
   const departBtn = document.getElementById("departBtn");
   const resetBtn = document.getElementById("resetBtn");
-  const rankBtn = document.getElementById("rankBtn"); // 無くてもOK
+  const rankBtn = document.getElementById("rankBtn");
 
   if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
     console.error("必要なDOMが見つかりません: #field / #bunnyLayer / #coinLayer / #coinValue");
@@ -130,26 +92,32 @@
   }
 
   /* =========================
-   * Minimal CSS（heart + baby 位置安定）
+   * CSS（クリック復活のため z-index/pointer 明示）
    * ========================= */
   (() => {
     const css = `
-      .bunnyWrap{ position:absolute; width:140px; height:140px; }
+      #bunnyLayer{ position:relative; z-index:30; pointer-events:auto; }
+      #coinLayer{ position:relative; z-index:40; pointer-events:auto; }
+
+      .bunnyWrap{
+        position:absolute;
+        width:140px; height:140px;
+        z-index:35;
+        pointer-events:auto;
+      }
       .bunnyWrap.flip{ transform: scaleX(-1); }
+
       .bunnyWrap .bunny{
         position:absolute;
-        left:0;
-        bottom:0;
-        width:140px;
-        height:auto;
+        left:0; bottom:0;
+        width:140px; height:auto;
         user-select:none;
         -webkit-user-drag:none;
-        pointer-events:none;
+        pointer-events:none; /* 画像は透過。クリックはwrapで拾う */
       }
       .bunnyWrap .bunnyHeart{
         position:absolute;
-        left:50%;
-        top:-22px;
+        left:50%; top:-22px;
         width:28px;
         transform: translateX(-50%);
         opacity:0;
@@ -157,7 +125,6 @@
       }
       .bunnyWrap .bunnyHeart.show{ opacity:1; }
 
-      /* baby: wrapはそのまま、画像だけ小さくして bottom:0 固定 */
       .bunnyWrap.baby .bunny{
         width:92px;
         left:14px;
@@ -166,14 +133,13 @@
 
       .coin, .ougonunchi{
         position:absolute;
-        width:66px;
-        height:66px;
+        width:66px; height:66px;
         user-select:none;
         -webkit-user-drag:none;
         cursor:pointer;
-        z-index:40;
+        z-index:45;
       }
-      .ougonunchi{ width:86px; height:86px; z-index:45; }
+      .ougonunchi{ width:86px; height:86px; z-index:48; }
     `;
     const st = document.createElement("style");
     st.textContent = css;
@@ -188,35 +154,22 @@
   const seCoin = new Audio(ASSETS.coinSE);
   const seTabidati = new Audio(ASSETS.tabidatiSE);
 
-  sePoyo.preload = "auto";
-  seBaby.preload = "auto";
-  seCoin.preload = "auto";
-  seTabidati.preload = "auto";
-
   let audioUnlocked = false;
   function unlockAudioOnce() {
     if (audioUnlocked) return;
     audioUnlocked = true;
     try {
-      // iOS対策：無音再生で解禁
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
       sePoyo.play()
-        .then(() => {
-          sePoyo.pause();
-          sePoyo.currentTime = 0;
-          sePoyo.muted = false;
-        })
+        .then(() => { sePoyo.pause(); sePoyo.currentTime = 0; sePoyo.muted = false; })
         .catch(() => (sePoyo.muted = false));
     } catch {}
   }
   window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
 
   function playSE(a) {
-    try {
-      a.currentTime = 0;
-      a.play().catch(() => {});
-    } catch {}
+    try { a.currentTime = 0; a.play().catch(() => {}); } catch {}
   }
 
   /* =========================
@@ -237,7 +190,6 @@
    * ========================= */
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const rand = (a, b) => a + Math.random() * (b - a);
-
   function fieldRect() { return field.getBoundingClientRect(); }
   function groundY() { return fieldRect().height - 60; }
 
@@ -265,18 +217,40 @@
 
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
-  function loadBunnyMeta() {
+  function loadBunnyMetaRaw() {
     try {
       const arr = JSON.parse(localStorage.getItem(LS.bunnies) || "null");
       if (!Array.isArray(arr)) return null;
-      return arr
-        .map((x) => ({
-          bornAt: Number(x?.bornAt) || (Date.now() - BABY_DURATION_MS - 9999),
-          kind: safeKind(x?.kind),
-        }))
-        .filter(Boolean);
+      return arr.map((x) => ({
+        bornAt: Number(x?.bornAt) || Date.now(),
+        kind: safeKind(x?.kind),
+      }));
     } catch { return null; }
   }
+
+  // ★ここが重要：保存データに baby が残ってても、起動時に「大人化」して排除
+  function normalizeBunnyMeta(meta) {
+    if (!Array.isArray(meta) || meta.length === 0) return meta;
+
+    const t = Date.now();
+    const mustAdultBornAt = t - BABY_DURATION_MS - 2000;
+
+    // 「起動しても初期がbaby2体」の典型：bornAtが新しすぎる
+    // → 全個体を大人化するのは極端なので、まず "bunny1" の初期枠だけ矯正
+    // ただし「全部baby」なら全員大人化してOK（ユーザー要望：baby初期は削除）
+    const allBaby = meta.every(m => (t - m.bornAt) < BABY_DURATION_MS);
+    if (allBaby) {
+      return meta.map((m, i) => ({ ...m, bornAt: mustAdultBornAt - i * 1000 }));
+    }
+
+    // 個別に「bornAtが新しすぎてbabyになる」ものは大人へ矯正（希望：初期baby削除）
+    return meta.map((m, i) => {
+      const isBaby = (t - m.bornAt) < BABY_DURATION_MS;
+      if (!isBaby) return m;
+      return { ...m, bornAt: mustAdultBornAt - i * 700 };
+    });
+  }
+
   function saveBunnyMeta() {
     localStorage.setItem(
       LS.bunnies,
@@ -288,9 +262,7 @@
     const n = parseInt(localStorage.getItem(LS.unchi) || "0", 10);
     return Number.isFinite(n) ? n : 0;
   }
-  function saveGoldenUnchiCount() {
-    localStorage.setItem(LS.unchi, String(goldenUnchiCount));
-  }
+  function saveGoldenUnchiCount() { localStorage.setItem(LS.unchi, String(goldenUnchiCount)); }
 
   /* =========================
    * HUD
@@ -301,7 +273,7 @@
   }
 
   /* =========================
-   * Drops（Coin / OugonUnchi）
+   * Drops
    * ========================= */
   function coinValueFromTier(t) {
     if (t === 4) return 100;
@@ -366,7 +338,6 @@
 
       dropByEl.set(el, this);
 
-      // PC: hover / click
       el.addEventListener("pointerenter", () => this.collect());
       el.addEventListener("click", () => this.collect());
       el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
@@ -397,16 +368,8 @@
 
       dropByEl.set(el, this);
 
-      el.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.collect();
-      });
-      el.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.collect();
-      });
+      el.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); this.collect(); });
+      el.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); this.collect(); });
 
       coinLayer.appendChild(el);
       this.render();
@@ -435,26 +398,15 @@
     return false;
   }
 
-  function gaugeToTier(g01) {
-    return clamp(Math.ceil(clamp(g01, 0, 1) * 4), 1, 4);
-  }
+  function gaugeToTier(g01) { return clamp(Math.ceil(clamp(g01, 0, 1) * 4), 1, 4); }
 
   function pickTierMixed(maxTier) {
-    const wTable = {
-      1: [0, 1],
-      2: [0, 1, 2],
-      3: [0, 1, 2, 3],
-      4: [0, 1, 2, 3, 6],
-    };
+    const wTable = { 1: [0, 1], 2: [0, 1, 2], 3: [0, 1, 2, 3], 4: [0, 1, 2, 3, 6] };
     const w = wTable[maxTier];
     let sum = 0;
     for (let t = 1; t <= maxTier; t++) sum += w[t];
-
     let roll = Math.random() * sum;
-    for (let t = 1; t <= maxTier; t++) {
-      roll -= w[t];
-      if (roll <= 0) return t;
-    }
+    for (let t = 1; t <= maxTier; t++) { roll -= w[t]; if (roll <= 0) return t; }
     return maxTier;
   }
 
@@ -468,7 +420,6 @@
 
     const fr = fieldRect();
     const r = bunny.wrap.getBoundingClientRect();
-
     const baseX = (r.left - fr.left) + r.width * 0.5;
     const baseY = (r.top - fr.top) + r.height * 0.78;
 
@@ -479,9 +430,7 @@
       setTimeout(() => {
         const x = baseX + (Math.random() * 2 - 1) * spreadX;
         const y = baseY + (Math.random() * 2 - 1) * 10;
-
         if (maybeSpawnOugonUnchi(x, y)) return;
-
         const tier = pickTierMixed(maxTier);
         const c = new Coin(x, y, tier);
         dropsOnField.push(c);
@@ -494,7 +443,6 @@
     const r = bunny.wrap.getBoundingClientRect();
     const x = (r.left - fr.left) + r.width * 0.55 + rand(-8, 8);
     const y = (r.top - fr.top) + r.height * 0.82;
-
     const c = new Coin(x, y, 1);
     dropsOnField.push(c);
   }
@@ -511,12 +459,10 @@
 
       this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
 
-      // dex seen 更新
       if (!dex[this.kind]) dex[this.kind] = { seen: true, farewell: 0 };
       else dex[this.kind].seen = true;
       saveDex();
 
-      // DOM
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
 
@@ -534,22 +480,26 @@
 
       const fr = fieldRect();
       this.x = rand(30, Math.max(30, fr.width - 170));
-      this.y = groundY() - 140; // wrap高に合わせて
+      this.y = groundY() - 140;
       this.dir = Math.random() < 0.5 ? -1 : 1;
 
       this.baseSpeed = 55 + Math.random() * 60;
-      this.gauge = 0; // 0..1
+      this.gauge = 0;
       this.gaugePeriod = rand(GAUGE_PERIOD_RANGE[0], GAUGE_PERIOD_RANGE[1]);
       this.charged = false;
       this.vx = 0;
 
       this.syncSprite();
 
-      this.wrap.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
+      // ★ クリック復活：pointerdown + click 両方で拾う
+      const tap = (e) => {
+        e?.preventDefault?.();
+        e?.stopPropagation?.();
         unlockAudioOnce();
         this.onClick();
-      });
+      };
+      this.wrap.addEventListener("pointerdown", tap);
+      this.wrap.addEventListener("click", tap);
     }
 
     syncSprite() {
@@ -565,7 +515,6 @@
 
       this.isBaby = false;
 
-      // reabunny 進化
       if (Math.random() < REA_EVOLVE_RATE) {
         this.kind = "reabunny";
         if (!dex.reabunny) dex.reabunny = { seen: true, farewell: 0 };
@@ -589,7 +538,6 @@
         this.heart.classList.remove("show");
         return;
       }
-
       if (!this.charged) {
         this.gauge += dt / this.gaugePeriod;
         if (this.gauge >= 1) {
@@ -597,7 +545,6 @@
           this.charged = true;
         }
       }
-
       if (this.charged) this.heart.classList.add("show");
       else this.heart.classList.remove("show");
     }
@@ -606,12 +553,12 @@
       playSE(this.isBaby ? seBaby : sePoyo);
 
       if (this.isBaby) {
+        // ★ 要望：初期babyは消すが、もし居た場合クリックは1枚
         spawnBabyCoin(this);
         return;
       }
 
       spawnRainFromBunny(this, this.gauge);
-
       this.gauge = 0;
       this.charged = false;
       this.gaugePeriod = rand(GAUGE_PERIOD_RANGE[0], GAUGE_PERIOD_RANGE[1]);
@@ -626,10 +573,7 @@
         const canLead = (!b.isBaby) || (b.isBaby && b.bornAt < this.bornAt);
         if (!canLead) continue;
         const d = Math.abs(b.x - this.x);
-        if (d < bestD) {
-          bestD = d;
-          best = b;
-        }
+        if (d < bestD) { bestD = d; best = b; }
       }
       return best;
     }
@@ -640,7 +584,6 @@
 
       const fr = fieldRect();
       const wrapWidth = 140;
-
       const minX = 0;
       const maxX = Math.max(0, fr.width - wrapWidth);
 
@@ -651,10 +594,8 @@
         if (leader) {
           const desiredX = leader.x - leader.dir * BABY_FOLLOW_GAP;
           const dx = desiredX - this.x;
-
           const targetV = clamp(dx * BABY_FOLLOW_FORCE, -BABY_FOLLOW_MAX_SPEED, BABY_FOLLOW_MAX_SPEED);
           this.vx = clamp(targetV, -babySpeedCap, babySpeedCap);
-
           this.x += this.vx * dt;
 
           if (Math.abs(this.vx) > 6) this.dir = this.vx >= 0 ? 1 : -1;
@@ -666,16 +607,8 @@
         this.x += this.dir * this.baseSpeed * dt;
       }
 
-      if (this.x <= minX) {
-        this.x = minX;
-        this.dir = 1;
-        this.vx = Math.abs(this.vx || 0);
-      }
-      if (this.x >= maxX) {
-        this.x = maxX;
-        this.dir = -1;
-        this.vx = -Math.abs(this.vx || 0);
-      }
+      if (this.x <= minX) { this.x = minX; this.dir = 1; this.vx = Math.abs(this.vx || 0); }
+      if (this.x >= maxX) { this.x = maxX; this.dir = -1; this.vx = -Math.abs(this.vx || 0); }
 
       this.wrap.classList.toggle("flip", this.dir < 0);
       this.wrap.style.left = `${this.x}px`;
@@ -684,7 +617,7 @@
   }
 
   /* =========================
-   * Touch collect (iPad/スマホ)
+   * Touch collect
    * ========================= */
   let touchCollectActive = false;
   let touchPointerId = null;
@@ -697,7 +630,6 @@
         ? el
         : el.closest?.(".coin, .ougonunchi");
     if (!target) return;
-
     const drop = dropByEl.get(target);
     if (drop && typeof drop.collect === "function") drop.collect();
   }
@@ -731,7 +663,7 @@
   }, { passive: true });
 
   /* =========================
-   * Bunny spawn/remove for modules
+   * Bunny ops
    * ========================= */
   function spawnBunny(kind, bornAt = Date.now()) {
     const b = new Bunny(bornAt, kind);
@@ -770,7 +702,7 @@
   }
 
   /* =========================
-   * Loop
+   * State / Loop
    * ========================= */
   let coins = loadCoins();
   let dex = loadDex();
@@ -778,13 +710,18 @@
   let lastFrame = performance.now();
 
   function initBunnies() {
-    const meta = loadBunnyMeta();
+    const raw = loadBunnyMetaRaw();
+    const meta = normalizeBunnyMeta(raw);
+
     if (meta && meta.length >= 1) {
+      // 正規化後で復元
       meta.forEach((m) => spawnBunny(m.kind, m.bornAt));
+      // ★ここで保存し直して “baby残留” を確実に潰す
+      saveBunnyMeta();
       return;
     }
 
-    // ★ 初期2体は必ず大人（bornAtを過去にして baby 判定を外す）
+    // 保存が無いなら初期2体（必ず大人）
     const t = Date.now();
     spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
     spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
@@ -821,74 +758,45 @@
   }
 
   /* =========================
-   * WB public API（tabidati/omukae/zukan/syougou が使う）
+   * WB public API（tabidati.js が使えるように）
    * ========================= */
   window.WB = {
-    // events
     on, off, emit,
+    ASSETS, BUNNY_DEFS, LS, DEPART_COST,
+    field, shopBtn, departBtn, rankBtn,
 
-    // const/defs
-    ASSETS,
-    BUNNY_DEFS,
-    LS,
-    DEPART_COST,
-
-    // dom
-    field,
-    shopBtn,
-    departBtn,
-    rankBtn,
-
-    // state
     get coins() { return coins; },
     set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
+
     get dex() { return dex; },
     set dex(v) { dex = v || {}; saveDex(); },
+
     get goldenUnchiCount() { return goldenUnchiCount; },
 
-    // storage
     saveCoins,
     saveBunnyMeta,
     loadDex,
     saveDex,
     saveGoldenUnchiCount,
 
-    // ui/audio
     updateHud,
     unlockAudioOnce,
     playSE,
     seTabidati,
 
-    // bunnies
     bunnies,
     spawnBunny,
     removeBunnyInstance,
   };
 
   /* =========================
-   * saku.png 左右表示（v6仕様）
+   * 旅立ちボタン：イベント発火（これが無いと旅立ちが動かない）
    * ========================= */
-  (function mountSakuSides() {
-    const SRC = "./assets/saku.png";
-    if (document.getElementById("sakuLeft")) return;
-
-    const make = (id, side) => {
-      const img = document.createElement("img");
-      img.id = id;
-      img.src = SRC;
-      img.alt = "saku";
-      img.draggable = false;
-      img.decoding = "async";
-      img.loading = "eager";
-      img.className = `saku ${side}`;
-      img.addEventListener("error", () => {
-        console.error("[saku] load failed:", img.src);
-      });
-      document.body.appendChild(img);
-    };
-    make("sakuLeft", "left");
-    make("sakuRight", "right");
-  })();
+  departBtn?.addEventListener("click", () => {
+    unlockAudioOnce();
+    // tabidati.js がこれを拾って処理する想定
+    emit("ui:depart", {});
+  });
 
   init();
 })();
