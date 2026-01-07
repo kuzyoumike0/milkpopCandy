@@ -1,5 +1,5 @@
 // tabidati.js
-// 旅立ちモード：視認性UP / 赤縁ホバー / 旅立ちメッセージ / 空白バグ対策済み
+// 旅立ちモード：視認性UP / 赤縁ホバー / 旅立ちメッセージ / 空白バグ対策（farewellMilestone不使用）
 
 (() => {
   if (!window.WB) return;
@@ -13,44 +13,7 @@
   let lastHoverWrap = null;
 
   const OVERLAY_ID = "wbDepartOverlayV1";
-  const STYLE_ID   = "wbDepartStyleV1";
-
-  /* =========================
-   * Toast（空白対策済み）
-   * ========================= */
-  function toast(msg, ms = 1600) {
-    const el = document.createElement("div");
-    el.className = "farewellMilestone";
-    el.textContent = msg;
-
-    // ★ レイアウトに参加させない（重要）
-    Object.assign(el.style, {
-      position: "fixed",
-      left: "50%",
-      top: "14%",
-      transform: "translate(-50%, -50%)",
-      zIndex: "2147483647",
-      pointerEvents: "none",
-      background: "rgba(255,255,255,.96)",
-      borderRadius: "16px",
-      padding: "12px 16px",
-      fontWeight: "900",
-      boxShadow: "0 16px 40px rgba(0,0,0,.18)",
-      whiteSpace: "nowrap",
-      opacity: "0",
-      transition: "opacity .18s ease, transform .18s ease",
-    });
-
-    document.body.appendChild(el);
-    requestAnimationFrame(() => (el.style.opacity = "1"));
-
-    setTimeout(() => {
-      el.style.opacity = "0";
-      el.style.transform = "translate(-50%, -35%)";
-    }, Math.max(0, ms - 260));
-
-    setTimeout(() => { try { el.remove(); } catch {} }, ms + 120);
-  }
+  const STYLE_ID   = "wbDepartStyleV2";
 
   /* =========================
    * Style
@@ -60,6 +23,35 @@
     const s = document.createElement("style");
     s.id = STYLE_ID;
     s.textContent = `
+/* ===== toast（独自クラス：既存CSSと衝突しない） ===== */
+.wbToast{
+  position: fixed;
+  left: 50%;
+  top: 14%;
+  transform: translate(-50%, -50%);
+  z-index: 2147483647;
+  pointer-events: none;
+  background: rgba(255,255,255,.96);
+  border-radius: 16px;
+  padding: 12px 16px;
+  font-weight: 900;
+  color: #222;
+  box-shadow: 0 16px 40px rgba(0,0,0,.18);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity .18s ease, transform .18s ease, filter .18s ease;
+  filter: blur(0px);
+}
+.wbToast.on{
+  opacity: 1;
+}
+.wbToast.out{
+  opacity: 0;
+  transform: translate(-50%, -35%);
+  filter: blur(1px);
+}
+
+/* ボタン点灯 */
 #departBtn.on{
   background:#ffd6e7;
   outline:3px solid rgba(255,120,180,.55);
@@ -80,10 +72,12 @@ body.wbDepartModeOn, body.wbDepartModeOn *{
   width:min(760px,94vw);
   padding:12px 14px;
   border-radius:16px;
-  background:rgba(255,255,255,.96);
-  box-shadow:0 18px 60px rgba(0,0,0,.22);
+  background:rgba(255,255,255,.86);
+  box-shadow:0 18px 60px rgba(0,0,0,.18);
   display:none;
   pointer-events:none;
+  font-weight: 900;
+  color:#222;
 }
 #${OVERLAY_ID}.on{ display:block; }
 
@@ -117,6 +111,32 @@ body.wbDepartModeOn .bunnyWrap.wbDepartHover::before{
   }
 
   /* =========================
+   * Toast（空白が出ない）
+   * ========================= */
+  function toast(msg, ms = 1600) {
+    if (!msg) return;
+    ensureStyles();
+
+    const el = document.createElement("div");
+    el.className = "wbToast";
+    el.textContent = msg;
+
+    // 念のため：既存CSSに何があってもレイアウト参加しないよう固定
+    el.style.position = "fixed";
+    el.style.display = "inline-block";
+    el.style.margin = "0";
+    el.style.height = "auto";
+    el.style.minHeight = "0";
+    el.style.maxHeight = "none";
+
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("on"));
+
+    setTimeout(() => el.classList.add("out"), Math.max(0, ms - 260));
+    setTimeout(() => { try { el.remove(); } catch {} }, ms + 140);
+  }
+
+  /* =========================
    * Overlay
    * ========================= */
   function ensureOverlay() {
@@ -146,7 +166,7 @@ body.wbDepartModeOn .bunnyWrap.wbDepartHover::before{
 
     WB.showFarewellMessage = (kind) => {
       const arr = FALLBACK[kind] || ["旅立ちは静かに訪れる。"];
-      toast(`🕊️ ${arr[(Math.random()*arr.length)|0]}`, 2600);
+      toast(`🕊️ ${arr[(Math.random() * arr.length) | 0]}`, 2600);
     };
   }
 
@@ -172,6 +192,7 @@ body.wbDepartModeOn .bunnyWrap.wbDepartHover::before{
     WB.departBtn?.classList.toggle("on", departMode);
 
     ensureOverlay().classList.toggle("on", departMode);
+
     if (departMode) toast("✈️ 旅立ちモード：ON");
     else {
       toast("🛑 旅立ちモード：OFF");
@@ -231,7 +252,7 @@ body.wbDepartModeOn .bunnyWrap.wbDepartHover::before{
     e.stopImmediatePropagation();
 
     setHoverWrap(wrap);
-    const bunny = WB.bunnies.find(b => b.wrap === wrap);
+    const bunny = WB.bunnies.find((b) => b.wrap === wrap);
     if (bunny) departBunny(bunny);
   }
 
