@@ -106,7 +106,7 @@
   position:absolute;
 
   left: var(--hatX, 52%);
-  top:  var(--hatY, 0px);     /* ★下にずらす */
+  top:  var(--hatY, 80px);     /* ★下にずらす */
 
   width: var(--hatW, 56px);   /* ★大きめ */
   height:auto;
