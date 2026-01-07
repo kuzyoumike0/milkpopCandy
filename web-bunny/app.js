@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.1 (baby small + baby no charge + baby idle coin1 + smaller heart)", Date.now());
+  console.log("[app.js] LOADED v16.2 (idle drop OFF)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -42,22 +42,11 @@
 
   /* =========================
    * Charge（個体ごと / UIなし）
-   * - 時間経過で貯まる（少し早く）
-   * - クリック：その個体のチャージ量で「枚数/ティア」を決めてドロップ→その個体のチャージを消費
-   * - チャージMAX中は、その個体の頭上に hart.png（小さめ＆ゆらゆら）
-   * ※ baby はチャージしない（ゲージ無し・ハート無し）
+   * - baby はチャージしない（ゲージ無し・ハート無し）
    * ========================= */
   const CHARGE_MAX = 100;
   const CHARGE_PER_SEC = 3.0;
   const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
-
-  /* =========================
-   * Idle Drop（放置排出）
-   * - baby：常に coin1 を1枚だけ
-   * - 大人：種類に応じて枚数/ティアを少しだけ増やす（クリックのチャージ爆発とは別枠）
-   * ========================= */
-  const IDLE_DROP_BABY_SEC  = 7.5;  // babyは遅め＆1枚
-  const IDLE_DROP_ADULT_SEC = 5.0;  // 大人はやや早め
 
   /* =========================
    * Storage
@@ -314,7 +303,6 @@
       this.bornAt = Number(bornAt) || Date.now();
       this.kind   = safeKind(kind);
 
-      // ✅ 保存に baby が残ってた場合も「経過3分」を計算して自然に進化する
       this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
 
       this.wrap = document.createElement("div");
@@ -330,15 +318,10 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      // ★個体ごとのチャージ（babyは使わない）
-      this.charge = 0;        // 0..CHARGE_MAX
+      this.charge = 0;
       this.chargeReady = false;
 
-      // ★個体ごとのハート
       this.hartEl = null;
-
-      // ★放置排出タイマー
-      this.idleAcc = 0;
 
       refreshFieldSize();
       this.x = rand(20, Math.max(21, FIELD_W - 140));
@@ -346,7 +329,6 @@
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
 
-      // 初期化時に進化チェック
       this.evolveIfNeeded(true);
       this.syncSprite();
 
@@ -355,20 +337,15 @@
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        // ✅ babyは coin1 を1枚だけ（チャージも消費しない）
         if (this.isBaby) {
-          spawnClickCoins(this, 1, () => 0); // tier=0 → coin1
+          spawnClickCoins(this, 1, () => 0);
           return;
         }
 
-        // ✅ その個体のチャージ量でドロップ決定
         const plan = this.getDropPlanFromOwnCharge();
         spawnClickCoins(this, plan.count, plan.pickTier);
 
-        // ✅ クリックでその個体のチャージ消費（ハートも消える）
         this.consumeOwnCharge();
-
-        // ✅ 次周回の少しだけ加算
         this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
       };
 
@@ -386,9 +363,7 @@
     }
 
     syncSprite() {
-      // ✅ baby クラス付与（小さくする）
       this.el.classList.toggle("baby", this.isBaby);
-
       this.el.src = this.isBaby
         ? ASSETS.babyBunny
         : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
@@ -401,7 +376,7 @@
       el.src = ASSETS.hart;
       el.draggable = false;
       el.style.display = "none";
-      field.appendChild(el); // field直下（最前面＆overflow事故回避）
+      field.appendChild(el);
       this.hartEl = el;
       return el;
     }
@@ -428,9 +403,7 @@
     }
 
     addOwnCharge(delta) {
-      // ✅ babyはチャージしない（ゲージ無し）
       if (this.isBaby) return;
-
       if (this.chargeReady) return;
       delta = Number(delta) || 0;
       if (delta <= 0) return;
@@ -455,17 +428,14 @@
       return clamp(this.charge / CHARGE_MAX, 0, 1);
     }
 
-    // ✅ クリック時：チャージ量が高いほど「枚数が増える＆高ティアが出やすい」
     getDropPlanFromOwnCharge() {
-      const r0 = this.getChargeRatio(); // 0..1
+      const r0 = this.getChargeRatio();
 
       const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
-      const babyMul = this.isBaby ? 0.6 : 1.0;
-
       const r = Math.min(1, r0 * (1.15 + mul * 0.15));
 
       const count = clamp(
-        Math.floor((2 + r * 24) * mul * babyMul),
+        Math.floor((2 + r * 24) * mul),
         2,
         60
       );
@@ -498,52 +468,8 @@
       return { count, pickTier };
     }
 
-    // ✅ 放置排出（babyは coin1 固定）
-    idleDrop(dt) {
-      this.idleAcc += dt;
-
-      if (this.isBaby) {
-        if (this.idleAcc < IDLE_DROP_BABY_SEC) return;
-        this.idleAcc = 0;
-        spawnClickCoins(this, 1, () => 0); // baby放置=coin1だけ
-        return;
-      }
-
-      // 大人：種類で少し増える
-      const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
-      const interval = Math.max(1.2, IDLE_DROP_ADULT_SEC / Math.max(0.6, mul)); // 強いうさぎほど少し早い
-      if (this.idleAcc < interval) return;
-      this.idleAcc = 0;
-
-      // 放置は「少量」設計（クリックのチャージ爆発が主役）
-      const count = clamp(Math.round(1 + mul * 1.2), 1, 12);
-
-      const maxTier = clamp(
-        Math.floor(mul * 0.9), // 0..3 に収まる想定
-        0,
-        ASSETS.coins.length - 1
-      );
-
-      const pickTier = () => {
-        if (maxTier <= 0) return 0;
-        // ちょい上振れ：上位ほど出やすく
-        const w = [];
-        let sum = 0;
-        for (let t = 0; t <= maxTier; t++) {
-          const wt = (t + 1) * (t + 1);
-          w.push(wt);
-          sum += wt;
-        }
-        let x = Math.random() * sum;
-        for (let t = 0; t <= maxTier; t++) {
-          x -= w[t];
-          if (x <= 0) return t;
-        }
-        return maxTier;
-      };
-
-      spawnClickCoins(this, count, pickTier);
-    }
+    // ✅ 放置排出は無効化（何もしない）
+    idleDrop(dt) { /* idle drop OFF */ }
 
     getWrapWidth() {
       const w1 = this.wrap.offsetWidth || 0;
@@ -562,14 +488,12 @@
       this.y = groundY() - 120;
     }
 
-    // ✅ babyは3分で進化（保存がbabyでも経過時間で判定される）
     evolveIfNeeded(isInit = false) {
       if (!this.isBaby) return;
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
       this.isBaby = false;
 
-      // （任意）突然変異
       if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) {
         this.kind = "reabunny";
       }
@@ -589,10 +513,9 @@
     update(dt) {
       this.evolveIfNeeded(false);
 
-      // ✅ 放置排出（babyは coin1 固定）
-      this.idleDrop(dt);
+      // ✅ 放置排出しない
+      // this.idleDrop(dt);
 
-      // ★時間経過で個体チャージ（babyは addOwnCharge 内で無効化）
       this.addOwnCharge(CHARGE_PER_SEC * dt);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
@@ -608,7 +531,6 @@
 
       this.applyPos();
 
-      // ★満タン中はハート追従（babyは除外）
       if (!this.isBaby && this.chargeReady) this.positionHeart();
     }
   }
@@ -740,7 +662,6 @@
 
     updateHud,
 
-    // ★個体チャージ参照（デバッグ用。UI表示はしない）
     getBunnyCharge: (bornAt) => {
       const t = Number(bornAt);
       const b = bunnies.find(x => x && x.bornAt === t);
