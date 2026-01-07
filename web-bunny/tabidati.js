@@ -1,10 +1,10 @@
-// tabidati.js（互換強化版）
+// tabidati.js（v12.7互換）
 // - 旅立ちモードON/OFF
 // - 旅立ち時：コスト支払い / SE / 記録 / メッセージ / うさぎ削除
 // - 旅立ちモード中：うさぎホバーで赤縁取り
 // - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（はみ出し防止）
 // - 「長い空白メッセージ」対策：専用トーストCSSで表示
-// - ✅ WB新旧互換：getBunnies/getCoin/spendCoin 優先
+// - ✅ WB新API対応：getBunnies / getCoin / spendCoin
 
 (() => {
   if (!window.WB) return;
@@ -17,49 +17,57 @@
   let clampTimer = null;
 
   /* =========================
-   * 互換ヘルパ
+   * WB互換ヘルパ
    * ========================= */
-  const getBunnies = () => {
-    if (typeof WB.getBunnies === "function") return WB.getBunnies();
-    if (Array.isArray(WB.bunnies)) return WB.bunnies;
+  function getBunnies() {
+    try {
+      if (typeof WB.getBunnies === "function") {
+        const arr = WB.getBunnies();
+        return Array.isArray(arr) ? arr : [];
+      }
+    } catch {}
+    try {
+      if (Array.isArray(WB.bunnies)) return WB.bunnies;
+    } catch {}
     return [];
-  };
+  }
 
-  const getCoins = () => {
-    if (typeof WB.getCoin === "function") return WB.getCoin();
-    if (typeof WB.coins === "number") return WB.coins;
-    return 0;
-  };
+  function getCoin() {
+    try {
+      if (typeof WB.getCoin === "function") return WB.getCoin();
+    } catch {}
+    try {
+      if (typeof WB.coins === "number") return WB.coins;
+    } catch {}
+    // 最後の保険
+    const el = document.getElementById("coinValue");
+    return el ? (Number(el.textContent) || 0) : 0;
+  }
 
-  const spendCoins = (amount) => {
-    amount = Math.floor(Number(amount) || 0);
-    if (amount <= 0) return true;
-
+  function spendCoin(amount) {
     // 新API優先
-    if (typeof WB.spendCoin === "function") return !!WB.spendCoin(amount);
-
-    // 旧互換
-    if (typeof WB.coins === "number" && WB.coins >= amount) {
-      WB.coins -= amount;
-      try { WB.saveCoins?.(); } catch {}
-      try { WB.updateHud?.(); } catch {}
-      return true;
-    }
+    try {
+      if (typeof WB.spendCoin === "function") return WB.spendCoin(amount);
+    } catch {}
+    // 旧API互換
+    try {
+      if (typeof WB.coins === "number" && WB.coins >= amount) {
+        WB.coins -= amount;
+        WB.saveCoins?.();
+        WB.updateHud?.();
+        return true;
+      }
+    } catch {}
     return false;
-  };
-
-  const emitBunnyCountChanged = () => {
-    const list = getBunnies();
-    try { WB.emit?.("bunnyCountChanged", { count: list.length }); } catch {}
-  };
+  }
 
   /* =========================
    * Toast（専用CSSで空白バグ回避）
    * ========================= */
   function ensureToastStyles() {
-    if (document.getElementById("tabidatiToastStyleV2")) return;
+    if (document.getElementById("tabidatiToastStyleV1")) return;
     const s = document.createElement("style");
-    s.id = "tabidatiToastStyleV2";
+    s.id = "tabidatiToastStyleV1";
     s.textContent = `
 .tabidatiToast{
   position: fixed;
@@ -79,7 +87,6 @@
   opacity: 0;
   animation: tabToastIn .18s ease-out forwards, tabToastOut .28s ease-in forwards;
   animation-delay: 0ms, 1.25s;
-  white-space: pre-wrap;
 }
 @keyframes tabToastIn{
   from { opacity:0; transform:translate(-50%,-80%); }
@@ -91,9 +98,7 @@
 }
 
 /* ===== 旅立ちモード：ホバー赤縁取り ===== */
-body.departModeOn .bunnyWrap{
-  outline: none;
-}
+body.departModeOn .bunnyWrap{ outline: none; }
 body.departModeOn .bunnyWrap:hover{
   outline: 4px solid rgba(255, 64, 64, .85);
   outline-offset: 3px;
@@ -129,13 +134,9 @@ body.departModeOn .bunnyWrap:hover{
   function setDepartMode(on) {
     departMode = !!on;
 
-    // ボタン見た目
     try { WB.departBtn?.classList.toggle("on", departMode); } catch {}
-
-    // bodyにクラス（ホバー赤縁取りなど）
     try { document.body.classList.toggle("departModeOn", departMode); } catch {}
 
-    // はみ出し防止をON/OFF
     if (departMode) startClamp();
     else stopClamp();
 
@@ -143,7 +144,7 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   function toggleDepartMode() {
-    try { WB.unlockAudioOnce?.(); } catch {}
+    WB.unlockAudioOnce?.();
     setDepartMode(!departMode);
   }
 
@@ -157,7 +158,6 @@ body.departModeOn .bunnyWrap:hover{
     const layer = document.getElementById("bunnyLayer") || field;
     if (!layer) return;
 
-    // 100msごとに「うさぎwrap」がフィールド外へ出ていないか補正
     clampTimer = setInterval(() => {
       if (!departMode) return;
 
@@ -180,14 +180,8 @@ body.departModeOn .bunnyWrap:hover{
         if (overL <= 0 && overR <= 0 && overT <= 0 && overB <= 0) continue;
 
         const cs = getComputedStyle(w);
-
-        // ★ left/top が auto（= レイアウト制御が別）の場合は触らない（事故防止）
-        const leftStr = (w.style.left || cs.left || "").trim();
-        const topStr  = (w.style.top  || cs.top  || "").trim();
-        if (!leftStr || !topStr || leftStr === "auto" || topStr === "auto") continue;
-
-        const left = parseFloat(leftStr) || 0;
-        const top  = parseFloat(topStr)  || 0;
+        const left = parseFloat(w.style.left || cs.left || "0") || 0;
+        const top  = parseFloat(w.style.top  || cs.top  || "0") || 0;
 
         let nx = left;
         let ny = top;
@@ -224,37 +218,40 @@ body.departModeOn .bunnyWrap:hover{
       return false;
     }
 
+    const cost = Number(WB.DEPART_COST ?? 10);
+
     // コスト不足
-    const cost = Number(WB.DEPART_COST ?? 0) || 0;
-    if (getCoins() < cost) {
+    if (getCoin() < cost) {
       toast(`コイン不足（必要：${cost}🪙）`);
       return false;
     }
 
-    // 支払い（新API優先）
-    if (!spendCoins(cost)) {
+    // 支払い
+    if (!spendCoin(cost)) {
       toast(`コイン不足（必要：${cost}🪙）`);
       return false;
     }
 
-    // 追加UI更新（あれば）
-    try { WB.updateHud?.(); } catch {}
-    try { WB.omukae?.refreshShopUI?.(); } catch {}
-    try { WB.refreshShopUI?.(); } catch {}
+    // SE（あれば）
+    try {
+      if (typeof WB.playSE === "function" && WB.seTabidati) WB.playSE(WB.seTabidati);
+    } catch {}
 
-    // SE
-    try { WB.playSE?.(WB.seTabidati); } catch {}
-
-    // 記録＆メッセージ（あれば）
+    // 記録＆メッセージ
     try { WB.recordFarewell?.(bunny.kind); } catch {}
     try { WB.showFarewellMessage?.(bunny.kind); } catch {}
 
-    // 配列から外して、以降の移動/ロジック対象から除外
-    const idx = list.indexOf(bunny);
-    if (idx >= 0) list.splice(idx, 1);
-    emitBunnyCountChanged();
+    // ✅ 図鑑/連動用イベント（zukan.jsが拾える）
+    try { WB.emit?.("bunnyDeparted", { kind: bunny.kind }); } catch {}
+    try { WB.emit?.("tabidachi", { kind: bunny.kind }); } catch {}
 
-    // 旅立ち演出：軽くフェードしてからDOM削除
+    // 配列から外す（新旧両対応）
+    try {
+      const idx = list.indexOf(bunny);
+      if (idx >= 0) list.splice(idx, 1);
+    } catch {}
+
+    // フェードしてDOM削除
     try {
       const w = bunny.wrap;
       if (w) {
@@ -266,13 +263,10 @@ body.departModeOn .bunnyWrap:hover{
       try { bunny.wrap?.remove(); } catch {}
     }
 
-    // 保存＆実績チェック（あれば）
-    try { WB.saveBunnies?.(); } catch {}
-    try { WB.saveBunnyMeta?.(); } catch {}
-    try { WB.checkUnlocks?.(); } catch {}
-
-    // イベント通知（任意で他モジュールが追従できる）
-    try { WB.emit?.("bunnyDeparted", { kind: bunny.kind, bornAt: bunny.bornAt }); } catch {}
+    // うさぎ数変化通知（実績/ショップ更新用）
+    try { WB.emit?.("bunnyCountChanged", { count: getBunnies().length }); } catch {}
+    try { WB.zisseki?.checkUnlocks?.(); } catch {}
+    try { WB.omukae?.refreshShopUI?.(); } catch {}
 
     return true;
   }
@@ -282,20 +276,17 @@ body.departModeOn .bunnyWrap:hover{
    * ========================= */
   function onPointerDownCapture(e) {
     if (!departMode) return;
-
-    // 左クリック/タップのみ
     if (e.button != null && e.button !== 0) return;
 
     const wrap = e.target?.closest?.(".bunnyWrap");
     if (!wrap) return;
 
-    // ★通常のクリック処理（コイン生成）を止める
+    // 通常クリック（コイン生成）を止める
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
 
-    const list = getBunnies();
-    const bunny = list.find(b => b?.wrap === wrap);
+    const bunny = getBunnies().find(b => b?.wrap === wrap);
     if (!bunny) return;
 
     departBunny(bunny);
@@ -304,15 +295,11 @@ body.departModeOn .bunnyWrap:hover{
   /* =========================
    * Hook
    * ========================= */
-  // departBtn が WB に無い場合もあるので、DOMからも拾う
-  const domDepartBtn = WB.departBtn || document.getElementById("departBtn");
-  if (domDepartBtn) {
-    domDepartBtn.addEventListener("click", (e) => {
+  if (WB.departBtn) {
+    WB.departBtn.addEventListener("click", (e) => {
       e.preventDefault();
       toggleDepartMode();
     });
-    // WBにも載せておく（他モジュール用）
-    try { WB.departBtn = domDepartBtn; } catch {}
   }
 
   // うさぎクリック横取り（キャプチャが重要）
