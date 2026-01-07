@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v14.0", Date.now());
+  console.log("[app.js] LOADED FIX v14.1", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -24,50 +24,50 @@
   };
 
   const BUNNY_DEFS = {
-    bunny1: { label: "通常みるぽ", img: "./assets/bunny1.png", price: 300, coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3: { label: "毒タイプみるぽ", img: "./assets/bunny3.png", price: 1800, coinMul: 1.0, desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4: { label: "水タイプみるぽ", img: "./assets/bunny4.png", price: 6000, coinMul: 1.8, desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5: { label: "お正月みるぽ", img: "./assets/bunny5.png", price: 20000, coinMul: 2.8, desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0, coinMul: 4.0, desc: "突然変異でのみ現れる幻のうさぎ。" },
+    bunny1:  { label: "通常みるぽ",   img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
   /* =========================
    * Balance
    * ========================= */
   const BABY_DURATION_MS = 3 * 60 * 1000;
-  const BABY_SPEED_MUL = 0.65;
-  const REA_EVOLVE_RATE = 0.01;
+  const BABY_SPEED_MUL   = 0.65;
+  const REA_EVOLVE_RATE  = 0.01;
 
-  const DEPART_COST = 10; // tabidati.jsが使う
+  const DEPART_COST = 10; // tabidati.js が使う
 
   /* =========================
    * Storage
    * ========================= */
   const LS = {
-    coins: "wb_coins_v6",
-    bunnies: "wb_bunnies_v6",
-    dex: "wb_dex_v1",
-    unchi: "wb_unchi_v1",
-    title: "wb_title_v1",
+    coins:     "wb_coins_v6",
+    bunnies:   "wb_bunnies_v6",
+    dex:       "wb_dex_v1",
+    unchi:     "wb_unchi_v1",
+    title:     "wb_title_v1",
     titleList: "wb_title_list_v1",
   };
 
   /* =========================
    * DOM
    * ========================= */
-  const field = document.getElementById("field");
+  const field      = document.getElementById("field");
   const bunnyLayer = document.getElementById("bunnyLayer");
-  const coinLayer = document.getElementById("coinLayer");
-  const coinValueEl = document.getElementById("coinValue");
+  const coinLayer  = document.getElementById("coinLayer");
+  const coinValueEl= document.getElementById("coinValue");
 
-  const shopBtn   = document.getElementById("shopBtn");
-  const departBtn = document.getElementById("departBtn");
-  const resetBtn  = document.getElementById("resetBtn");
-  const rankBtn   = document.getElementById("rankBtn");
-  const slotBtn   = document.getElementById("slotBtn");
+  const shopBtn    = document.getElementById("shopBtn");
+  const departBtn  = document.getElementById("departBtn");
+  const resetBtn   = document.getElementById("resetBtn");
+  const rankBtn    = document.getElementById("rankBtn");
+  const slotBtn    = document.getElementById("slotBtn");
 
   if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
-    console.error("必要DOMが見つかりません");
+    console.error("[app.js] 必要DOMが見つかりません");
     return;
   }
 
@@ -88,7 +88,7 @@
    * Utils / Field size cache
    * ========================= */
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const rand = (a, b) => a + Math.random() * (b - a);
+  const rand  = (a, b) => a + Math.random() * (b - a);
 
   let FIELD_W = 1, FIELD_H = 1;
   function refreshFieldSize() {
@@ -161,21 +161,23 @@
     );
   }
 
-  // ★要望：「初期にbabyがいたら即大人へ」
+  // ✅ 保存に baby が残ってても「起動時に必ず大人化」
   function normalizeMetaMakeAdults(meta) {
-    if (!Array.isArray(meta)) return null;
+    if (!Array.isArray(meta) || meta.length === 0) return null;
     const t = Date.now();
     const adultBornAt = t - BABY_DURATION_MS - 2000;
     return meta.map((m, i) => {
-      const bornAt = Number(m?.bornAt) || adultBornAt - i * 700;
       const kind = safeKind(m?.kind);
-      const isBaby = (t - bornAt) < BABY_DURATION_MS;
-      return isBaby ? { bornAt: adultBornAt - i * 700, kind } : { bornAt, kind };
+      const bornAtRaw = Number(m?.bornAt) || adultBornAt - i * 700;
+      const isBaby = (t - bornAtRaw) < BABY_DURATION_MS;
+      return isBaby
+        ? { kind, bornAt: adultBornAt - i * 700 }
+        : { kind, bornAt: bornAtRaw };
     });
   }
 
   /* =========================
-   * Drops（最低限：クリックでコイン出す）
+   * Drops（最低限：クリックで1コイン落とす）
    * ========================= */
   const dropsOnField = [];
   const dropByEl = new WeakMap();
@@ -187,8 +189,8 @@
       this.vx = (Math.random() * 2 - 1) * 110;
       this.vy = -(420 + Math.random() * 240);
       this.gravity = 2200;
-      this.bounce = 0.22 + Math.random() * 0.12;
-      this.floor = groundY();
+      this.bounce  = 0.22 + Math.random() * 0.12;
+      this.floor   = groundY();
 
       const el = document.createElement("img");
       el.className = "coin";
@@ -211,8 +213,8 @@
     update(dt) {
       this.floor = groundY();
       this.vy += this.gravity * dt;
-      this.x += this.vx * dt;
-      this.y += this.vy * dt;
+      this.x  += this.vx * dt;
+      this.y  += this.vy * dt;
 
       if (this.y >= this.floor) {
         this.y = this.floor;
@@ -239,11 +241,11 @@
   }
 
   function spawnClickCoin(bunny) {
-    const r = bunny.wrap.getBoundingClientRect();
+    const r  = bunny.wrap.getBoundingClientRect();
     const fr = field.getBoundingClientRect();
-    const x = (r.left - fr.left) + r.width * 0.55 + rand(-8, 8);
-    const y = (r.top - fr.top) + r.height * 0.82;
-    const c = new CoinDrop(x, y);
+    const x  = (r.left - fr.left) + r.width  * 0.55 + rand(-8, 8);
+    const y  = (r.top  - fr.top)  + r.height * 0.82;
+    const c  = new CoinDrop(x, y);
     dropsOnField.push(c);
   }
 
@@ -255,7 +257,7 @@
   class Bunny {
     constructor(bornAt, kind = "bunny1") {
       this.bornAt = Number(bornAt) || Date.now();
-      this.kind = safeKind(kind);
+      this.kind   = safeKind(kind);
 
       this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
 
@@ -280,7 +282,7 @@
 
       this.syncSprite();
 
-      // ★クリック：pointerdown + click（止めない＝旅立ち側のcaptureが生きる）
+      // ✅ クリック：wrapで拾う（stopPropagationしない＝旅立ち側captureを邪魔しない）
       const tap = (e) => {
         e?.preventDefault?.();
         unlockAudioOnce();
@@ -290,7 +292,6 @@
       this.wrap.addEventListener("pointerdown", tap);
       this.wrap.addEventListener("click", tap);
 
-      // 画像読み込み後にclamp
       this.el.addEventListener("load", () => {
         this.clampInside();
         this.applyPos();
@@ -301,7 +302,9 @@
     }
 
     syncSprite() {
-      this.el.src = this.isBaby ? ASSETS.babyBunny : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
+      this.el.src = this.isBaby
+        ? ASSETS.babyBunny
+        : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
     }
 
     getWrapWidth() {
@@ -382,10 +385,9 @@
   function collectAtClientPoint(clientX, clientY) {
     const el = document.elementFromPoint(clientX, clientY);
     if (!el) return;
-    const target =
-      (el.classList?.contains("coin") || el.classList?.contains("ougonunchi"))
-        ? el
-        : el.closest?.(".coin, .ougonunchi");
+    const target = (el.classList?.contains("coin") || el.classList?.contains("ougonunchi"))
+      ? el
+      : el.closest?.(".coin, .ougonunchi");
     if (!target) return;
     const drop = dropByEl.get(target);
     if (drop && typeof drop.collect === "function") drop.collect();
@@ -420,12 +422,12 @@
   }, { passive: true });
 
   /* =========================
-   * Buttons (emit only)
+   * Buttons（emit only）
    * ========================= */
-  shopBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:shop", {}); });
-  departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
-  rankBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:rank", {}); });
-  slotBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:slot", {}); });
+  shopBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:shop",  {}); });
+  departBtn?.addEventListener("click",() => { unlockAudioOnce(); emit("ui:depart",{}); });
+  rankBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:rank",  {}); });
+  slotBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:slot",  {}); });
 
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
@@ -458,7 +460,7 @@
       updateHud();
     },
 
-    // coin api
+    // coin api（omukae/tabidati互換）
     getCoin: () => coins,
     spendCoin: (n) => {
       n = Math.floor(Number(n) || 0);
@@ -493,18 +495,22 @@
    * Init / Loop
    * ========================= */
   function initBunnies() {
-    const raw = loadBunnyMeta();
+    const raw  = loadBunnyMeta();
     const meta = normalizeMetaMakeAdults(raw);
 
-    // ★保存があるなら復元（babyはここで大人化済み）
+    // ✅ 保存があるなら復元（babyはここで大人化済み）
     if (meta && meta.length) {
       meta.forEach(m => spawnBunny(m.kind, m.bornAt));
-      // 念のため正規化した状態で保存し直し
-      saveBunnyMeta();
+      saveBunnyMeta(); // 正規化した状態で保存し直し
       return;
     }
 
-
+    // ✅ 保存が無いなら「初期に大人bunnyを2体」
+    const t = Date.now();
+    spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
+    spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
+    saveBunnyMeta();
+  }
 
   let lastFrame = performance.now();
   function tick(ts) {
@@ -522,6 +528,7 @@
     initBunnies();
     updateHud();
     emit("bunnyCountChanged", { count: bunnies.length });
+
     requestAnimationFrame(tick);
 
     window.addEventListener("resize", () => {
