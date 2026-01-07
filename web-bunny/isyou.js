@@ -2,8 +2,8 @@
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
-// ✅ 赤枠は見えるように選択中だけ z-index を上げる
-// ✅ 反転しても帽子がズレない（isyouLayer を transform から保護）
+// ✅ 赤枠は選択中だけ z-index を上げる
+// ✅ 反転しても帽子がズレない（レイヤーを逆反転して座標を固定）
 // ✅ partyhat は頭の上（anchorYマイナス）＋ポン演出
 
 (() => {
@@ -32,28 +32,20 @@
     });
   }
 
-  function waitForWB() {
-    return waitFor(() => (window.WB && typeof window.WB.on === "function" ? window.WB : null));
-  }
-  function waitForHUD() {
-    return waitFor(() => document.getElementById("hud"));
-  }
+  const waitForWB  = () => waitFor(() => (window.WB && typeof window.WB.on === "function" ? window.WB : null));
+  const waitForHUD = () => waitFor(() => document.getElementById("hud"));
 
   Promise.all([waitForWB(), waitForHUD()])
     .then(([WB, hud]) => {
-      if (window.__ISYOU_INITED__) {
-        console.log("[isyou] already inited");
-        return;
-      }
+      if (window.__ISYOU_INITED__) return;
       window.__ISYOU_INITED__ = true;
-      console.log("[isyou] init");
 
       /* =========================
        * Config
        * ========================= */
       const LS = {
-        owned: "wb_isyou_owned_v2",          // { itemKey: number }
-        equipped: "wb_isyou_equipped_v2",    // { bornAt: { itemKey:true } }
+        owned: "wb_isyou_owned_v2",
+        equipped: "wb_isyou_equipped_v2",
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
@@ -62,9 +54,11 @@
           label: "パーティーハット",
           img: "/assets/isyou/partyhat.png",
           price: 500,
+
+          // ここは微調整点
           anchorY: -0.58,
           offsetX: 10,
-          offsetY: 16,   // ★頭に乗せる
+          offsetY: 18,      // ★16→18（ちょい沈める）
           scale: 0.34,
           z: 30,
         },
@@ -94,9 +88,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV2")) return;
+        if (document.getElementById("isyouStyleFinalV3")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV2";
+        s.id = "isyouStyleFinalV3";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -146,9 +140,7 @@ body.isyouEquipMode .bunnyWrap:hover{
   inset:0;
   pointer-events:none;
   z-index:50;
-
-  /* ★重要：親のtransform/反転の影響を受けないようにする */
-  transform:none !important;
+  transform-origin:50% 50%;
 }
 .isyouItem{
   position:absolute;
@@ -497,18 +489,24 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
        * ========================= */
       function ensureLayer(bunny) {
         if (!bunny?.wrap) return null;
+
         let layer = bunny.wrap.querySelector(".isyouLayer");
         if (!layer) {
           layer = document.createElement("div");
           layer.className = "isyouLayer";
           bunny.wrap.appendChild(layer);
         }
+
+        // ★ここが本命：親がflipならレイヤーを逆反転して「位置の左右反転」を相殺する
+        const flip = !!bunny.wrap.classList.contains("flip");
+        layer.style.transform = flip ? "scaleX(-1)" : "none";
+
         return layer;
       }
 
-      // ★確定版：flipでも座標は同じ / 画像だけscaleXで反転
       function applyTransform(imgEl, bunny, it) {
         const flip = !!bunny?.wrap?.classList?.contains("flip");
+        // レイヤーが逆反転で座標は常に同じになるので、画像の見た目だけ反転
         const fx = flip ? -1 : 1;
 
         const ox = Number(it.offsetX) || 0;
@@ -564,7 +562,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         saveAll();
         drawAllForBunny(bunny);
 
-        // 「ポンッ」演出（partyhatのときだけ）
         if (itemKey === "partyhat") {
           bunny.wrap.classList.add("isyouPopHat");
           setTimeout(() => bunny.wrap?.classList?.remove("isyouPopHat"), 260);
@@ -572,12 +569,10 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       /* =========================
-       * Equip mode click (赤枠選択→同じ子再クリックで装着)
+       * Equip mode click
        * ========================= */
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
-
-        // モーダル内クリックは無視（帽子選択を邪魔しない）
         if (e.target?.closest?.(".isyouModal")) return;
 
         const wrap = e.target?.closest?.(".bunnyWrap");
@@ -606,11 +601,8 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       WB.on?.("bunnyCountChanged", redrawAll);
       WB.on?.("resize", redrawAll);
 
-      // 初回
       redrawAll();
       console.log("[isyou] ready");
     })
-    .catch((err) => {
-      console.warn("[isyou] init failed:", err?.message || err);
-    });
+    .catch((err) => console.warn("[isyou] init failed:", err?.message || err));
 })();
