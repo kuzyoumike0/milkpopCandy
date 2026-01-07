@@ -1,13 +1,13 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v14.3 (charge->tier burst)", Date.now());
+  console.log("[app.js] LOADED FIX v14.6 (save-baby-elapsed + coin small + charge->count+tier)", Date.now());
 
   /* =========================
    * Assets / Defs
    * ========================= */
   const ASSETS = {
     babyBunny: "./assets/babybunny.png",
-    hart: "./assets/hart.png", // ※今回の仕様では未使用（残してOK）
+    hart: "./assets/hart.png",
 
     coinSE: "./assets/coin.mp3",
     poyoSE: "./assets/poyo.mp3",
@@ -16,10 +16,10 @@
 
     ougonUnchi: "./assets/ougonunchi.png",
     coins: [
-      "./assets/coin1.png", // tier 0
+      "./assets/coin1.png", // tier 0 (low)
       "./assets/coin2.png", // tier 1
       "./assets/coin3.png", // tier 2
-      "./assets/coin4.png", // tier 3
+      "./assets/coin4.png", // tier 3 (high)
     ],
   };
 
@@ -36,43 +36,21 @@
    * ========================= */
   const BABY_DURATION_MS = 3 * 60 * 1000;
   const BABY_SPEED_MUL   = 0.65;
-
-  // 進化時の突然変異（不要なら 0）
   const REA_EVOLVE_RATE  = 0.01;
-
-  const DEPART_COST = 10; // tabidati.js が使う
+  const DEPART_COST = 10;
 
   /* =========================
    * Charge Gauge（表示しない）
-   * - MAXになったら「チャージ状態」
-   * - 次に「うさぎをクリックした人」が高ティア複数ドロップ
+   * - 貯まってるほど「コイン枚数↑＆ティア↑」
+   * - うさぎクリックで現在のチャージを消費してドロップ
+   * - 満タン到達時に hart.png を出す（1回）
    * ========================= */
   const CHARGE_MAX = 100;
-
-  // どれで貯めるか（お好みで調整）
-  const CHARGE_GAIN_ON_BUNNY_TAP     = 8; // うさぎクリック
-  const CHARGE_GAIN_ON_COIN_COLLECT = 3; // コイン回収
+  const CHARGE_GAIN_ON_BUNNY_TAP     = 8;  // 次周回用に少しだけ入れる
+  const CHARGE_GAIN_ON_COIN_COLLECT = 3;
 
   let charge = 0;
-  let chargeReady = false;
-
-  function addCharge(delta) {
-    if (chargeReady) return; // チャージ済みなら追加しない（次クリック待ち）
-    delta = Math.floor(Number(delta) || 0);
-    if (delta <= 0) return;
-    charge = Math.min(CHARGE_MAX, charge + delta);
-    if (charge >= CHARGE_MAX) {
-      chargeReady = true;
-      charge = CHARGE_MAX;
-      emit("chargeReady", {}); // 演出したければ他JSで拾える
-    }
-  }
-
-  function consumeCharge() {
-    chargeReady = false;
-    charge = 0;
-    emit("chargeConsumed", {});
-  }
+  let chargeReady = false; // 満タン到達済み（ハート済み）フラグ
 
   /* =========================
    * Storage
@@ -161,6 +139,159 @@
   }
 
   /* =========================
+   * CSS injection（コイン小さく / ハートゆれ）
+   * ========================= */
+  (function injectCssOnce() {
+    if (document.getElementById("wbCoinHeartCss")) return;
+    const st = document.createElement("style");
+    st.id = "wbCoinHeartCss";
+    st.textContent = `
+      /* ✅ coin.png を小さく */
+      .coin{
+        width:22px !important;
+        height:22px !important;
+      }
+
+      .wbHart {
+        position: absolute;
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-drag: none;
+        will-change: transform, opacity;
+        transform: translate(-50%, -50%);
+        animation: wbHartBob 0.9s ease-in-out infinite;
+        opacity: 1;
+      }
+      @keyframes wbHartBob {
+        0%   { transform: translate(-50%, -50%) translateY(0px) scale(1); }
+        50%  { transform: translate(-50%, -50%) translateY(-7px) scale(1.02); }
+        100% { transform: translate(-50%, -50%) translateY(0px) scale(1); }
+      }
+    `;
+    document.head.appendChild(st);
+  })();
+
+  /* =========================
+   * Heart pop（満タン到達時）
+   * ========================= */
+  const heartsOnField = [];
+
+  class HeartPop {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.age = 0;
+      this.life = 1.6;
+      this.vy = -42 - Math.random() * 18;
+      this.vx = (Math.random() * 2 - 1) * 10;
+
+      const el = document.createElement("img");
+      el.className = "wbHart";
+      el.src = ASSETS.hart;
+      el.draggable = false;
+      el.style.width = "46px";
+      el.style.height = "46px";
+
+      this.el = el;
+      coinLayer.appendChild(el);
+      this.render();
+    }
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+    update(dt) {
+      this.age += dt;
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+
+      const t = clamp(this.age / this.life, 0, 1);
+      this.el.style.opacity = String(1 - t);
+      this.render();
+
+      if (this.age >= this.life) {
+        try { this.el.remove(); } catch {}
+        return false;
+      }
+      return true;
+    }
+  }
+
+  function pickRandomBunny() {
+    return bunnies.length ? bunnies[Math.floor(Math.random() * bunnies.length)] : null;
+  }
+
+  function spawnHeart(bunny) {
+    const r  = bunny.wrap.getBoundingClientRect();
+    const fr = field.getBoundingClientRect();
+    const x = (r.left - fr.left) + r.width * 0.5 + rand(-6, 6);
+    const y = (r.top  - fr.top)  + r.height * 0.15 + rand(-4, 4);
+    heartsOnField.push(new HeartPop(x, y));
+  }
+
+  /* =========================
+   * Charge helpers
+   * ========================= */
+  function addCharge(delta, sourceBunny = null) {
+    delta = Math.floor(Number(delta) || 0);
+    if (delta <= 0) return;
+
+    const before = charge;
+    charge = clamp(charge + delta, 0, CHARGE_MAX);
+
+    // ✅ 初めて満タン到達した瞬間だけハート
+    if (!chargeReady && before < CHARGE_MAX && charge >= CHARGE_MAX) {
+      chargeReady = true;
+      const b = sourceBunny || pickRandomBunny();
+      if (b) spawnHeart(b);
+      emit("chargeReady", {});
+    }
+  }
+
+  function consumeCharge() {
+    charge = 0;
+    chargeReady = false;
+    emit("chargeConsumed", {});
+  }
+
+  function getChargeRatio() {
+    return clamp(charge / CHARGE_MAX, 0, 1);
+  }
+
+  // ✅ チャージ量に応じて「枚数」と「ティア」を決める
+  function getDropPlanFromCharge() {
+    const r = getChargeRatio(); // 0..1
+
+    // 枚数：1〜8（お好みで調整）
+    const count = 1 + Math.floor(r * 7);
+
+    // 最大ティア：0〜3（coin1..coin4）
+    const maxTier = Math.floor(r * 3 + 1e-9); // 0..3
+
+    // ティア選択：上の方ほど出やすく（maxTierの範囲内）
+    const pickTier = () => {
+      if (maxTier <= 0) return 0;
+      // 0..maxTier の中で「高い方が出やすい」重み
+      // w(t) = (t+1)^2
+      const weights = [];
+      let sum = 0;
+      for (let t = 0; t <= maxTier; t++) {
+        const w = (t + 1) * (t + 1);
+        weights.push(w);
+        sum += w;
+      }
+      let x = Math.random() * sum;
+      for (let t = 0; t <= maxTier; t++) {
+        x -= weights[t];
+        if (x <= 0) return t;
+      }
+      return maxTier;
+    };
+
+    return { count, pickTier };
+  }
+
+  /* =========================
    * State / Storage helpers
    * ========================= */
   let coins = (() => {
@@ -193,21 +324,6 @@
       LS.bunnies,
       JSON.stringify(bunnies.map(b => ({ bornAt: b.bornAt, kind: b.kind })))
     );
-  }
-
-  // ✅ 保存に baby が残ってても「起動時に必ず大人化」
-  function normalizeMetaMakeAdults(meta) {
-    if (!Array.isArray(meta) || meta.length === 0) return null;
-    const t = Date.now();
-    const adultBornAt = t - BABY_DURATION_MS - 2000;
-    return meta.map((m, i) => {
-      const kind = safeKind(m?.kind);
-      const bornAtRaw = Number(m?.bornAt) || adultBornAt - i * 700;
-      const isBaby = (t - bornAtRaw) < BABY_DURATION_MS;
-      return isBaby
-        ? { kind, bornAt: adultBornAt - i * 700 }
-        : { kind, bornAt: bornAtRaw };
-    });
   }
 
   /* =========================
@@ -272,8 +388,8 @@
       updateHud();
       playSE(seCoin);
 
-      // ✅ コイン回収でもチャージが貯まる
-      addCharge(CHARGE_GAIN_ON_COIN_COLLECT);
+      // ✅ 回収でチャージ増加（満タン到達時はランダムうさぎがハート）
+      addCharge(CHARGE_GAIN_ON_COIN_COLLECT, null);
 
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
@@ -296,15 +412,6 @@
     }
   }
 
-  // coin2〜coin4（tier 1..3）を coin4寄りに出す
-  function tierPickerHigh() {
-    // 重み: coin2:1 / coin3:2 / coin4:5
-    const r = Math.random();
-    if (r < 1 / 8) return 1;   // coin2
-    if (r < 3 / 8) return 2;   // coin3
-    return 3;                 // coin4
-  }
-
   /* =========================
    * Bunny
    * ========================= */
@@ -315,6 +422,7 @@
       this.bornAt = Number(bornAt) || Date.now();
       this.kind   = safeKind(kind);
 
+      // ✅ 保存にbabyが残ってても「経過時間」で判定（3分経ってたら最初から大人）
       this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
 
       this.wrap = document.createElement("div");
@@ -336,25 +444,24 @@
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
 
+      // 起動直後に進化チェックして見た目確定
+      this.evolveIfNeeded(true);
       this.syncSprite();
 
-      // ✅ クリック：wrapで拾う（stopPropagationしない＝旅立ち側captureを邪魔しない）
       const tap = (e) => {
         e?.preventDefault?.();
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        // ✅ チャージ済みなら「高ティア複数」
-        if (chargeReady) {
-          const count = 3 + Math.floor(Math.random() * 5); // 3〜7枚
-          spawnClickCoins(this, count, tierPickerHigh);
-          consumeCharge();
-        } else {
-          // 通常：coin1を1枚
-          spawnClickCoins(this, 1, () => 0);
-          addCharge(CHARGE_GAIN_ON_BUNNY_TAP);
-        }
+        // ✅ チャージ量に応じて「枚数＆ティア」
+        const { count, pickTier } = getDropPlanFromCharge();
+        spawnClickCoins(this, count, pickTier);
+
+        // ✅ クリックでチャージ消費 → 次周回用に少しだけ入れる（0にしたければこの1行を消す）
+        consumeCharge();
+        addCharge(CHARGE_GAIN_ON_BUNNY_TAP, this);
       };
+
       this.wrap.addEventListener("pointerdown", tap);
       this.wrap.addEventListener("click", tap);
 
@@ -390,11 +497,13 @@
       this.y = groundY() - 120;
     }
 
-    // ✅ babyは3分で「進化先(kind)」に進化
-    evolveIfNeeded() {
+    evolveIfNeeded(isInit = false) {
       if (!this.isBaby) return;
-      if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
+      const elapsed = Date.now() - this.bornAt;
+      if (elapsed < BABY_DURATION_MS) return;
+
+      // ✅ 3分経過していたら進化（保存の放置分もここで反映）
       this.isBaby = false;
 
       // （任意）突然変異：進化時だけ reabunny へ
@@ -404,6 +513,9 @@
 
       this.syncSprite();
       this.clampInside();
+
+      // 初期化時に進化した場合も保存し直しておく（次回起動で安定）
+      if (isInit) saveBunnyMeta();
     }
 
     applyPos() {
@@ -413,7 +525,7 @@
     }
 
     update(dt) {
-      this.evolveIfNeeded();
+      this.evolveIfNeeded(false);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
       this.x += this.dir * this.baseSpeed * speedMul * dt;
@@ -562,22 +674,22 @@
     // ui
     updateHud,
 
-    // charge（他JSから加算したい時用・表示はしない）
-    addCharge: (n) => addCharge(n),
-    isChargeReady: () => !!chargeReady,
+    // charge（表示しない）
+    addCharge: (n) => addCharge(n, null),
+    getCharge: () => charge,
+    getChargeRatio: () => getChargeRatio(),
   };
 
   /* =========================
    * Init / Loop
    * ========================= */
   function initBunnies() {
-    const raw  = loadBunnyMeta();
-    const meta = normalizeMetaMakeAdults(raw);
+    const meta = loadBunnyMeta();
 
-    // ✅ 保存があるなら復元（babyはここで大人化済み）
+    // ✅ 保存があるなら bornAt をそのまま復元（放置分で3分超なら最初から大人）
     if (meta && meta.length) {
       meta.forEach(m => spawnBunny(m.kind, m.bornAt));
-      saveBunnyMeta(); // 正規化した状態で保存し直し
+      saveBunnyMeta();
       return;
     }
 
@@ -595,6 +707,10 @@
 
     for (const b of bunnies) b.update(dt);
     for (const d of dropsOnField) d.update(dt);
+
+    for (let i = heartsOnField.length - 1; i >= 0; i--) {
+      if (!heartsOnField[i].update(dt)) heartsOnField.splice(i, 1);
+    }
 
     requestAnimationFrame(tick);
   }
