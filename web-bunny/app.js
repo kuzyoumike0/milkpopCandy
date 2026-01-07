@@ -149,8 +149,8 @@
     st.id = "wbPerBunnyChargeCss";
     st.textContent = `
       .coin{
-        width:22px !important;
-        height:22px !important;
+        width:26px !important;
+        height:26px !important;
       }
       .wbChargeHart {
         position:absolute;
