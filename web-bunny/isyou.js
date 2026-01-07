@@ -57,17 +57,18 @@
       };
 
       const ITEMS = {
-        partyhat: {
+       partyhat: {
   label: "パーティーハット",
   img: "/assets/isyou/partyhat.png",
   price: 500,
 
-  anchorY: -0.28,  // ★もっと上（頭頂〜耳の付け根）
-  offsetX: 0,      // ★中央
-  offsetY: -8,     // ★頭にちょい乗せ（-4〜-14で微調整）
-  scale: 0.36,     // ★少し小さめ
+  anchorY: -0.50,  // ★顔→頭上へ大きく上げる
+  offsetX: 10,     // ★右へ（耳の間に寄せる）
+  offsetY: 8,      // ★少し下げて頭に“乗せる”
+  scale: 0.34,     // ★少し小さめ
   z: 30,
 },
+
 
         crown: {
           label: "王冠",
