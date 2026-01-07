@@ -107,18 +107,20 @@
         },
 
         // ✅ aimasuku：うさぎと同じ大きさ＆同じ位置（完全一致）
-        aimasuku: {
-          label: "アイマスク",
-          img: "/assets/isyou/aimasuku.png",
-          price: 1200,
-          slot: "hat",
-          fitToBunny: true,
-          offsetX: 0,
-          offsetY: 0,
-          scale: 1,
-          z: 1,
-          keepUpright: true, // ←目線の向き固定（flip時だけ打ち消す）
-        },
+        // ✅ aimasuku：うさぎと同じ大きさ＆同じ位置（完全一致）
+aimasuku: {
+  label: "アイマスク",
+  img: "/assets/isyou/aimasuku.png",
+  price: 1200,
+  slot: "hat",
+  fitToBunny: true,
+  offsetX: 0,
+  offsetY: 0,
+  scale: 1,
+  z: 1,
+  keepUpright: false, // ← ★ここを false にする
+},
+
 
         // ✅ ahiru：hatと同じ部類（置き換え対象）
         ahiru: {
