@@ -67,7 +67,7 @@
     anchorX: 0.74,
     anchorY: 0.10,
     offsetX: 10,
-    offsetY: 55,   // ★さらに下へ（+25px）
+    offsetY: 25,   // ★さらに下へ（+25px）
     z: 9999,
   },
 };
