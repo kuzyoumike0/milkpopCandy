@@ -1,17 +1,15 @@
-/* app.js — Milkpop牧場（v13.1 FIX: NO-INIT-BABY + CLICKABLE + DEPART-EVENT）
- * ✅ 修正点
- * - 初期から babybunny が出る問題を根絶：
- *    - 起動時に復元データを正規化（bornAt が新しすぎる個体は大人扱いへ）
- *    - 初期2体は必ず大人
- * - うさぎがクリックできない問題対策：
- *    - bunnyWrap をクリック可能に（z-index / pointer-events を明示）
- * - 旅立ちできない問題対策：
- *    - departBtn クリックで WB.emit("ui:depart") を発火（tabidati.js 側が拾える）
+/* app.js — Milkpop牧場（v13.1 FIX+）
+ * ✅ FIX:
+ * - 初期 baby 根絶（保存データ正規化 + 初期2体は必ず大人）
+ * - うさぎクリック復活（wrapで拾う / imgはpointer-events:none）
+ * - 旅立ち不能 FIX（tabidati.js互換APIをWBに生やす）
+ *   - WB.getBunnies / WB.getCoin / WB.spendCoin / WB.saveBunnyMeta
+ * ⚠️ departBtn の click は app.js 側で触らない（tabidati.js がトグルを張る）
  */
 
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v13.1 FIX", Date.now());
+  console.log("[app.js] LOADED v13.1 FIX+", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -35,11 +33,11 @@
   };
 
   const BUNNY_DEFS = {
-    bunny1: { label: "通常みるぽ", img: "./assets/bunny1.png", price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3: { label: "毒タイプみるぽ", img: "./assets/bunny3.png", price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4: { label: "水タイプみるぽ", img: "./assets/bunny4.png", price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5: { label: "お正月みるぽ", img: "./assets/bunny5.png", price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,    coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+    bunny1:  { label: "通常みるぽ",   img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,    coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
   /* =========================
@@ -179,6 +177,7 @@
   function on(ev, fn) {
     if (!__events.has(ev)) __events.set(ev, new Set());
     __events.get(ev).add(fn);
+    return () => off(ev, fn);
   }
   function off(ev, fn) { __events.get(ev)?.delete(fn); }
   function emit(ev, payload) {
@@ -228,22 +227,18 @@
     } catch { return null; }
   }
 
-  // ★ここが重要：保存データに baby が残ってても、起動時に「大人化」して排除
+  // ★起動時に「babyが初期から居る」を潰す
   function normalizeBunnyMeta(meta) {
     if (!Array.isArray(meta) || meta.length === 0) return meta;
 
     const t = Date.now();
     const mustAdultBornAt = t - BABY_DURATION_MS - 2000;
 
-    // 「起動しても初期がbaby2体」の典型：bornAtが新しすぎる
-    // → 全個体を大人化するのは極端なので、まず "bunny1" の初期枠だけ矯正
-    // ただし「全部baby」なら全員大人化してOK（ユーザー要望：baby初期は削除）
     const allBaby = meta.every(m => (t - m.bornAt) < BABY_DURATION_MS);
     if (allBaby) {
       return meta.map((m, i) => ({ ...m, bornAt: mustAdultBornAt - i * 1000 }));
     }
 
-    // 個別に「bornAtが新しすぎてbabyになる」ものは大人へ矯正（希望：初期baby削除）
     return meta.map((m, i) => {
       const isBaby = (t - m.bornAt) < BABY_DURATION_MS;
       if (!isBaby) return m;
@@ -491,7 +486,6 @@
 
       this.syncSprite();
 
-      // ★ クリック復活：pointerdown + click 両方で拾う
       const tap = (e) => {
         e?.preventDefault?.();
         e?.stopPropagation?.();
@@ -553,7 +547,6 @@
       playSE(this.isBaby ? seBaby : sePoyo);
 
       if (this.isBaby) {
-        // ★ 要望：初期babyは消すが、もし居た場合クリックは1枚
         spawnBabyCoin(this);
         return;
       }
@@ -714,14 +707,11 @@
     const meta = normalizeBunnyMeta(raw);
 
     if (meta && meta.length >= 1) {
-      // 正規化後で復元
       meta.forEach((m) => spawnBunny(m.kind, m.bornAt));
-      // ★ここで保存し直して “baby残留” を確実に潰す
-      saveBunnyMeta();
+      saveBunnyMeta(); // 正規化を固定
       return;
     }
 
-    // 保存が無いなら初期2体（必ず大人）
     const t = Date.now();
     spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
     spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
@@ -758,45 +748,64 @@
   }
 
   /* =========================
-   * WB public API（tabidati.js が使えるように）
+   * WB public API（既存WBがあれば merge）
    * ========================= */
-  window.WB = {
-    on, off, emit,
-    ASSETS, BUNNY_DEFS, LS, DEPART_COST,
-    field, shopBtn, departBtn, rankBtn,
+  const WB = (window.WB = window.WB || {});
+  // event bus
+  WB.on = WB.on || on;
+  WB.off = WB.off || off;
+  WB.emit = WB.emit || emit;
 
-    get coins() { return coins; },
-    set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
+  // const/defs
+  WB.ASSETS = ASSETS;
+  WB.BUNNY_DEFS = BUNNY_DEFS;
+  WB.LS = LS;
+  WB.DEPART_COST = DEPART_COST;
 
-    get dex() { return dex; },
-    set dex(v) { dex = v || {}; saveDex(); },
+  // dom
+  WB.field = field;
+  WB.shopBtn = shopBtn;
+  WB.departBtn = departBtn;
+  WB.rankBtn = rankBtn;
 
-    get goldenUnchiCount() { return goldenUnchiCount; },
-
-    saveCoins,
-    saveBunnyMeta,
-    loadDex,
-    saveDex,
-    saveGoldenUnchiCount,
-
-    updateHud,
-    unlockAudioOnce,
-    playSE,
-    seTabidati,
-
-    bunnies,
-    spawnBunny,
-    removeBunnyInstance,
+  // state access (tabidati.js互換)
+  WB.getCoin = () => coins;
+  WB.addCoin = (n) => { coins = Math.max(0, coins + Math.floor(Number(n) || 0)); saveCoins(); updateHud(); };
+  WB.spendCoin = (n) => {
+    n = Math.max(0, Math.floor(Number(n) || 0));
+    if (coins < n) return false;
+    coins -= n;
+    saveCoins();
+    updateHud();
+    return true;
   };
 
-  /* =========================
-   * 旅立ちボタン：イベント発火（これが無いと旅立ちが動かない）
-   * ========================= */
-  departBtn?.addEventListener("click", () => {
-    unlockAudioOnce();
-    // tabidati.js がこれを拾って処理する想定
-    emit("ui:depart", {});
-  });
+  WB.coins = coins; // 旧互換（読まれる場合用）
+
+  // dex/unchi
+  WB.get dex() { return dex; };
+  WB.set dex(v) { dex = v || {}; saveDex(); };
+
+  WB.get goldenUnchiCount() { return goldenUnchiCount; };
+
+  // storage
+  WB.saveCoins = saveCoins;
+  WB.saveBunnyMeta = saveBunnyMeta; // ★tabidati.js が呼ぶ
+  WB.loadDex = loadDex;
+  WB.saveDex = saveDex;
+  WB.saveGoldenUnchiCount = saveGoldenUnchiCount;
+
+  // ui/audio
+  WB.updateHud = updateHud;
+  WB.unlockAudioOnce = unlockAudioOnce;
+  WB.playSE = playSE;
+  WB.seTabidati = seTabidati;
+
+  // bunny ops
+  WB.bunnies = bunnies; // 旧互換
+  WB.getBunnies = () => bunnies; // ★tabidati.js が使う
+  WB.spawnBunny = spawnBunny;
+  WB.removeBunnyInstance = removeBunnyInstance;
 
   init();
 })();
