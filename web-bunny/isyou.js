@@ -1,6 +1,6 @@
 // isyou.js — お洒落（ショップ＋複数装着＋flip補正＋称号連動＋赤枠）完全版（WB待機つき）
-// ★修正：partyhatが表示されない対策（画像パスfallback）
-// ★追加：装着時「ポンッ」と被るアニメ
+// ★修正：partyhat は「/assets/isyou/partyhat.png」を優先（あなたの実パス）
+// ★追加：装着時「ポンッ」と被るアニメ（isyouPop）
 
 (() => {
   "use strict";
@@ -47,11 +47,12 @@
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
-      // ★画像が見つからない環境があるので、候補を複数持つ
+      // ★あなたの実パスは「/assets/isyou/partyhat.png」
+      // なので先頭は必ず /assets... にする（相対 ./assets... は保険で残す）
       const ITEM_IMAGES = {
-        partyhat: ["./assets/isyou/partyhat.png", "./assets/partyhat.png"],
-        crown:   ["./assets/isyou/crown.png", "./assets/crown.png"],
-        ribbon:  ["./assets/isyou/ribbon.png", "./assets/ribbon.png"],
+        partyhat: ["/assets/isyou/partyhat.png", "./assets/isyou/partyhat.png"],
+        crown:   ["/assets/isyou/crown.png", "./assets/isyou/crown.png"],
+        ribbon:  ["/assets/isyou/ribbon.png", "./assets/isyou/ribbon.png"],
       };
 
       const ITEMS = {
@@ -59,10 +60,11 @@
           label: "パーティーハット",
           img: ITEM_IMAGES.partyhat[0],
           price: 500,
-          anchorY: 0.03,  // 頭頂部
+
+          anchorY: 0.03,
           offsetX: 14,
           offsetY: -6,
-          scale: 0.60,    // ★小さく
+          scale: 0.60,   // 小さめ
           z: 25,
         },
         crown: {
@@ -105,9 +107,9 @@
        * CSS inject
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleV7")) return;
+        if (document.getElementById("isyouStyleV8")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleV7";
+        s.id = "isyouStyleV8";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{ pointer-events:auto; z-index:2147483647; }
@@ -126,7 +128,7 @@ body.isyouEquipMode .bunnyWrap:hover{
   box-shadow: 0 0 0 2px rgba(255,255,255,.65) inset;
 }
 
-/* 装着時の赤枠点滅 */
+/* 装着した瞬間の点滅 */
 .bunnyWrap.isyouJustEquipped{
   outline: 4px solid rgba(255,64,64,.92);
   outline-offset: 3px;
@@ -139,14 +141,14 @@ body.isyouEquipMode .bunnyWrap:hover{
   100%{ filter: brightness(1.0); }
 }
 
-/* ★ポンッアニメ（アイテムに付与） */
+/* ★ポンッ（実際のtransformはJSで入れるので、ここはscaleの弾みだけ） */
 .isyouItem.isyouPop{
   animation: isyouPop 220ms cubic-bezier(.2,.9,.2,1);
 }
 @keyframes isyouPop{
-  0%   { transform: translate(-50%, 0) scale(0.65); }
-  70%  { transform: translate(-50%, 0) scale(1.12); }
-  100% { transform: translate(-50%, 0) scale(1.00); }
+  0%   { transform: translate(var(--isyou-tx, -50%), var(--isyou-ty, 0px)) scale(var(--isyou-sc0, .70)); }
+  70%  { transform: translate(var(--isyou-tx, -50%), var(--isyou-ty, 0px)) scale(var(--isyou-sc1, 1.12)); }
+  100% { transform: translate(var(--isyou-tx, -50%), var(--isyou-ty, 0px)) scale(var(--isyou-sc2, 1.00)); }
 }
 
 /* アクセサリレイヤ */
@@ -154,7 +156,7 @@ body.isyouEquipMode .bunnyWrap:hover{
   position:absolute;
   inset:0;
   pointer-events:none;
-  z-index:50; /* ★前面に出して「見えない」を回避（zはitem側で調整） */
+  z-index:50;
 }
 .isyouItem{
   position:absolute;
@@ -205,7 +207,6 @@ body.isyouEquipMode .bunnyWrap:hover{
 .isyouBtn.primary{ background:#ffe6f2; }
 .isyouSmall{ font-size:12px; opacity:.85; }
 
-/* 装着モード中：背景は薄く、うさぎ側クリックはJSで処理（モーダル内クリックは無視） */
 body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
         `;
         document.head.appendChild(s);
@@ -377,6 +378,13 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
               img.className = "isyouThumb";
               img.src = it.img;
 
+              // サムネもフォールバック（念のため）
+              img.onerror = () => {
+                const c = ITEM_IMAGES[key] || [];
+                if (c[1]) img.src = c[1];
+                img.onerror = null;
+              };
+
               const name = document.createElement("div");
               name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${owned[key] || 0}</div>`;
 
@@ -462,6 +470,11 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
               const img = document.createElement("img");
               img.className = "isyouThumb";
               img.src = it.img;
+              img.onerror = () => {
+                const c = ITEM_IMAGES[key] || [];
+                if (c[1]) img.src = c[1];
+                img.onerror = null;
+              };
 
               const name = document.createElement("div");
               name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${count}</div>`;
@@ -539,14 +552,24 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
         const sc = (Number(it.scale) || 1);
         const fx = flip ? -1 : 1;
 
-        // anchorY（高さ）を反映
         imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
 
-        imgEl.style.transform = `translate(calc(-50% + ${ox}px), ${oy}px) scale(${sc}) scaleX(${fx})`;
+        // ★ポンッ用に変数に分解して CSS keyframes へ渡す
+        const tx = `calc(-50% + ${ox}px)`;
+        const ty = `${oy}px`;
+
+        imgEl.style.setProperty("--isyou-tx", tx);
+        imgEl.style.setProperty("--isyou-ty", ty);
+
+        // pop中のスケールはCSS側で弾ませ、ここは最終形を変数で渡す
+        imgEl.style.setProperty("--isyou-sc2", String(sc));
+        imgEl.style.setProperty("--isyou-sc0", String(Math.max(0.01, sc * 0.70)));
+        imgEl.style.setProperty("--isyou-sc1", String(sc * 1.12));
+
+        imgEl.style.transform = `translate(${tx}, ${ty}) scale(${sc}) scaleX(${fx})`;
         imgEl.style.zIndex = String(it.z || 10);
       }
 
-      // ★画像パスfallback付き
       function setImgWithFallback(imgEl, itemKey) {
         const candidates = ITEM_IMAGES[itemKey] || [ITEMS[itemKey]?.img].filter(Boolean);
         if (!candidates || candidates.length === 0) return;
@@ -598,7 +621,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
             img.dataset.itemKey = itemKey;
             img.draggable = false;
 
-            // ★表示されない対策：fallbackで必ず探す
+            // ★表示されない対策：あなたのパス(/assets/...)を最優先
             setImgWithFallback(img, itemKey);
 
             layer.appendChild(img);
@@ -618,7 +641,6 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
         const list = getBunnyList();
         (list || []).forEach(drawAllForBunny);
 
-        // 選択ターゲットが消えたら解除
         if (selectedBornAt != null) {
           const still = (list || []).some(b => b && b.bornAt === selectedBornAt);
           if (!still) setSelectedTarget(null);
@@ -647,8 +669,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
       }
 
       /* =========================
-       * 装着モード：クリック
-       * - モーダル内クリックは無視
+       * 装着モード：クリック（モーダル内は無視）
        * ========================= */
       function getBunnyFromWrap(wrap) {
         const list = getBunnyList();
@@ -657,8 +678,6 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
 
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
-
-        // モーダル内は無視
         if (e.target?.closest?.(".isyouModal")) return;
 
         const wrap = e.target?.closest?.(".bunnyWrap");
@@ -682,7 +701,7 @@ body.isyouEquipMode .isyouBackdrop{ background: rgba(0,0,0,.25); }
       }, { capture: true });
 
       /* =========================
-       * Title linkage（残しておく）
+       * Title linkage
        * ========================= */
       function getCurrentTitle() {
         try {
