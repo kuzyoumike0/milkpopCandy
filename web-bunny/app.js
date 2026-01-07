@@ -10,11 +10,17 @@
  *  - babyは小さめ表示（.baby）
  *  - babyのドロップは常に1枚
  *  - 画面外に行きがち対策：状態ごとの幅でclamp
+ *
+ * ✅ v12.8 PATCH（今回の修正）:
+ *  - babyの「上に浮く」原因だった wrap の transform(scale) を廃止
+ *  - babyは wrap を縮めず「画像だけ」小さくして足元(bottom:0)固定
+ *  - babyだけ大きい/小さいが混ざる見た目ブレを解消（CSSを統一）
+ *  - clamp幅は wrap 基準に統一（babyだけ幅110扱いをやめる）
  */
 
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v12.8", Date.now());
+  console.log("[app.js] LOADED v12.8 PATCH", Date.now());
 
   /* ===== helpers ===== */
   const $ = (q, p = document) => p.querySelector(q);
@@ -38,7 +44,7 @@
     return;
   }
 
-  /* ===== inject CSS（heart sway + float + baby scale） ===== */
+  /* ===== inject CSS（heart sway + float + baby FIX） ===== */
   (() => {
     const css = `
       @keyframes wbHeartSway {
@@ -60,10 +66,23 @@
         animation: wbHeartFloat 1.1s ease-in-out 2, wbHeartSway 2.2s ease-in-out infinite;
       }
 
-      /* baby: 小さく（見た目だけ） */
+      /* =========================
+         baby FIX：wrapは縮めない（浮きバグ/当たり判定ズレを防ぐ）
+         - 見た目だけ「画像」を小さくする
+         - 足元は bottom:0 で必ず地面
+      ========================= */
       .bunnyWrap.baby{
-        transform: scale(0.78);
-        transform-origin: left top;
+        transform: none !important;
+      }
+      .bunnyWrap.baby .bunny{
+        width: 92px !important;
+        height: auto !important;
+        bottom: 0 !important;
+        left: 14px !important; /* 中央寄せ気味 */
+      }
+      .bunnyWrap.baby .bunnyHeart{
+        width: 24px !important;
+        top: -18px !important;
       }
     `;
     const st = document.createElement("style");
@@ -142,9 +161,9 @@
   // ★ baby成長
   const BABY_GROW_MS = 3 * 60 * 1000;
 
-  // ★当たり判定・画面外対策用：状態ごとの“想定幅”
+  // ★当たり判定・画面外対策用：wrap基準に統一（babyもwrap幅でクランプする）
   const BUNNY_W_ADULT = 140;
-  const BUNNY_W_BABY  = 110; // babyは小さめ扱い
+  const BUNNY_W_BABY  = 140; // ← PATCH：babyだけ幅110扱いをやめる（wrapは縮めないため）
   const BUNNY_H       = 140;
 
   /* ===== Audio ===== */
@@ -354,7 +373,7 @@
     b.x = clamp(b.x, 0, maxX);
 
     const floorY = getFloorY();
-    // 高さも“想定”で揃える（見た目がscaleされてても、床から浮きにくくする）
+    // wrap基準で床に揃える（babyは画像だけ小さいので浮かない）
     b.y = clamp(floorY - BUNNY_H + 22, 0, floorY);
 
     const lx = (b._lx ?? NaN), ly = (b._ly ?? NaN);
@@ -424,7 +443,6 @@
       );
     }
 
-    // babyでもゲージは減らして良い（演出テンポ調整）
     b.gauge = clamp(b.gauge - GAUGE.drainOnDrop, 0, GAUGE.max);
     updateHeart(b);
     saveBunnies();
@@ -435,7 +453,6 @@
     b.isBaby = false;
     b.babyUntil = 0;
 
-    // 成長先が指定されていればそれへ
     const nextSrc = (b.targetAdultSrc || b.adultSrc || ASSET.bunny);
     b.adultSrc = nextSrc;
     b.img.src = nextSrc;
@@ -466,17 +483,14 @@
     wrap.appendChild(heart);
     bunnyLayer.appendChild(wrap);
 
-    // ★ isBaby / targetAdultSrc 対応
     const bornAt = Number.isFinite(opts.bornAt) ? opts.bornAt : now();
     const isBaby = !!opts.isBaby;
 
-    // 成体の見た目（将来）
     const targetAdultSrc =
       (typeof opts.targetAdultSrc === "string" && opts.targetAdultSrc) ? opts.targetAdultSrc :
       (typeof opts.adultSrc === "string" && opts.adultSrc) ? opts.adultSrc :
       ASSET.bunny;
 
-    // 今表示する画像
     const currentSrc = isBaby ? (ASSET.babybunny || targetAdultSrc) : targetAdultSrc;
     img.src = currentSrc;
 
@@ -487,7 +501,7 @@
       bornAt,
       x: Number.isFinite(opts.x) ? opts.x : rand(40, Math.max(41, field.clientWidth - 180)),
       y: 0,
-      vx: rand(16, 30), // px/sec
+      vx: rand(16, 30),
       dir: Number.isFinite(opts.dir) ? Math.sign(opts.dir) || 1 : (Math.random() < 0.5 ? -1 : 1),
       lastClickAt: 0,
       gauge: 0,
@@ -506,7 +520,6 @@
     placeWrap(b);
     updateHeart(b);
 
-    // ★復元時、既に成長時間を過ぎていたら即成長
     if (b.isBaby) {
       const remain = b.babyUntil - now();
       if (remain <= 0) {
@@ -551,7 +564,6 @@
 
       // --- bunny ---
       for (const b of bunnies) {
-        // 成長チェック（念のため）
         if (b.isBaby && b.babyUntil && now() >= b.babyUntil) {
           growUp(b);
         }
@@ -582,7 +594,7 @@
           continue;
         }
 
-        // ✅ マグネットは「地面付近」だけ効く（散らばる前に吸わない）
+        // ✅ マグネットは「地面付近」だけ効く
         const nearGround = (c.y >= floorY - 22);
         if (nearGround) {
           const dx = mouseFx - (c.x + COIN_W / 2);
@@ -597,16 +609,13 @@
           }
         }
 
-        // gravity
         c.vy += g * dt;
 
-        // integrate
         c.x += c.vx * dt;
         c.y += c.vy * dt;
 
         c.x = clamp(c.x, 0, field.clientWidth - COIN_W);
 
-        // バウンドは軽く・最大1回
         if (c.y >= floorY) {
           c.y = floorY;
 
@@ -690,7 +699,6 @@
   const saved = loadBunnies();
   if (saved.length > 0) {
     for (const s of saved) {
-      // 復元：baby状態も復帰（期限を見て即成長もする）
       createBunny({
         bornAt: s.bornAt,
         x: Number.isFinite(s.x) ? s.x : undefined,
@@ -708,5 +716,5 @@
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(step);
 
-  WB.emit("core:ready", { version: "app.js-core-v12.8-baby-return", startBunnies: bunnies.length });
+  WB.emit("core:ready", { version: "app.js-core-v12.8-baby-return-PATCH", startBunnies: bunnies.length });
 })();
