@@ -62,12 +62,13 @@
   img: "/assets/isyou/partyhat.png",
   price: 500,
 
-  anchorY: -0.58,  // ★顔→頭上へ大きく上げる
-  offsetX: 10,     // ★右へ（耳の間に寄せる）
-  offsetY: 8,      // ★少し下げて頭に“乗せる”
-  scale: 0.34,     // ★少し小さめ
+  anchorY: -0.58,
+  offsetX: 10,
+  offsetY: 16,   // ★8 → 16（頭に乗せる）
+  scale: 0.34,
   z: 30,
 },
+
 
 
         crown: {
@@ -500,37 +501,25 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return layer;
       }
 
-      function applyTransform(imgEl, bunny, it) {
+     function applyTransform(imgEl, bunny, it) {
   const flip = !!bunny?.wrap?.classList?.contains("flip");
+  const fx = flip ? -1 : 1;
 
-  // 親(.bunnyWrap)が transform で反転してるタイプか判定（子も一緒に反転する）
-  let parentFlips = false;
-  try {
-    if (flip) {
-      const t = getComputedStyle(bunny.wrap).transform;
-      parentFlips = !!t && t !== "none"; // matrix(...) が出るなら親が反転してる可能性大
-    }
-  } catch {}
-
-  // offset/scale
-  let ox = Number(it.offsetX) || 0;
+  // flipでも座標は同じでOK（レイヤを反転させないため）
+  const ox = Number(it.offsetX) || 0;
   const oy = Number(it.offsetY) || 0;
   const sc = Number(it.scale) || 1;
 
-  // ★分岐が重要
-  // - 親が反転する: 子は scaleX しない（ダブル反転防止）
-  //   ただし座標系が反転するので offsetX だけ反転する
-  // - 親が反転しない: アクセ側で scaleX する＆offsetXも反転
-  let fx = 1;
-  if (flip) {
-    if (parentFlips) {
-      fx = 1;
-      ox = -ox;
-    } else {
-      fx = -1;
-      ox = -ox;
-    }
-  }
+  imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
+
+  const baseT =
+    `translate(calc(-50% + ${ox}px), ${oy}px) ` +
+    `scale(${sc}) scaleX(${fx})`;
+
+  imgEl.style.setProperty("--isyouT", baseT);
+  imgEl.style.transform = baseT;
+  imgEl.style.zIndex = String(it.z || 10);
+}
 
   imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
 
