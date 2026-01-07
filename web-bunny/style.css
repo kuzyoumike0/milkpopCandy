@@ -13,7 +13,7 @@ html,body{
 }
 
 /* =========================
-   HUD
+   HUD（最重要）
 ========================= */
 #hud{
   position:fixed;
@@ -22,7 +22,8 @@ html,body{
   transform:translateX(-50%);
   display:flex;
   gap:8px;
-  z-index:10;
+  z-index:2147483647; /* ★常に最前面 */
+  pointer-events:auto;
 }
 
 #hud button{
@@ -49,26 +50,34 @@ html,body{
   position:fixed;
   inset:0;
   overflow:hidden;
-  background:#000; /* 背景ロード前の保険 */
+  background:#000;
+  z-index:0;
 }
 
+#bunnyLayer,
 #coinLayer{
-  pointer-events:none;   /* ← 透明の板がクリックを吸わないようにする */
-}
-.coin, .ougonunchi{
-  pointer-events:auto;   /* ← コイン自身だけ拾う */
+  position:absolute;
+  inset:0;
+  z-index:1;
 }
 
+/* coinLayerは透明板にならない */
+#coinLayer{
+  pointer-events:none;
+}
+.coin,
+.ougonunchi{
+  pointer-events:auto;
+}
 
 /* =========================
    COIN
 ========================= */
 .coin{
   position:absolute;
-  width:66px;         /* ✅ app.js（COIN_W/COIN_H）と一致 */
+  width:66px;
   height:66px;
   user-select:none;
-  pointer-events:auto;
   cursor:pointer;
 }
 
@@ -76,8 +85,6 @@ html,body{
   position:absolute;
   width:26px;
   height:auto;
-  user-select:none;
-  pointer-events:auto;
   cursor:pointer;
   filter:drop-shadow(0 0 12px gold);
 }
@@ -89,7 +96,7 @@ html,body{
   position:absolute;
   width:140px;
   height:140px;
-  pointer-events:auto; /* ★クリック判定はここ */
+  pointer-events:auto;
 }
 
 .bunny{
@@ -99,7 +106,7 @@ html,body{
   width:120px;
   height:auto;
   user-select:none;
-  pointer-events:none; /* ★img自体はクリック不可 */
+  pointer-events:none;
 }
 
 .bunnyWrap.flip .bunny{
@@ -119,14 +126,13 @@ html,body{
   pointer-events:none;
 }
 
-/* ✅ 表示だけ担当（アニメはapp.js側injectに任せる） */
 .bunnyHeart.show,
 .bunnyHeart.visible{
   opacity:1;
 }
 
 /* =========================
-   MODAL COMMON
+   MODAL
 ========================= */
 .modalBackdrop{
   position:fixed;
@@ -147,246 +153,14 @@ html,body{
   overflow:auto;
 }
 
-.modalHeader{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  margin-bottom:8px;
-}
-
-.modalTitle{
-  font-weight:900;
-}
-
-.modalClose{
-  border:none;
-  background:#eee;
-  border-radius:50%;
-  width:32px;
-  height:32px;
-  cursor:pointer;
-}
-
 /* =========================
-   SHOP
-========================= */
-.shopGrid{
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
-  gap:12px;
-}
-
-.shopCard{
-  background:#fff;
-  border-radius:14px;
-  padding:10px;
-  text-align:center;
-  box-shadow:0 6px 18px rgba(0,0,0,.12);
-}
-
-.shopCard.disabled{
-  opacity:.45;
-}
-
-.shopThumb{
-  width:72px;
-  height:72px;
-  object-fit:contain;
-}
-
-.shopName{
-  font-weight:900;
-}
-
-.shopDesc{
-  font-size:12px;
-  opacity:.8;
-}
-
-.shopPrice{
-  font-weight:900;
-}
-
-.shopPrice.bad{
-  color:#ff4a4a;
-}
-
-/* =========================
-   DEX
-========================= */
-.dexGrid{
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(140px,1fr));
-  gap:12px;
-}
-
-.dexCard{
-  background:#fff;
-  border-radius:14px;
-  padding:10px;
-  text-align:center;
-  box-shadow:0 6px 18px rgba(0,0,0,.12);
-}
-
-.dexCard.unknown{
-  opacity:.5;
-  filter:grayscale(1);
-}
-
-.dexCard img{
-  width:80px;
-  height:80px;
-  object-fit:contain;
-}
-
-.dexName{
-  font-weight:900;
-}
-
-.dexDesc{
-  font-size:12px;
-}
-
-/* =========================
-   ADOPT FX
-========================= */
-.adoptFxOverlay{
-  position:fixed;
-  inset:0;
-  z-index:9999;
-  pointer-events:none;
-  display:grid;
-  place-items:center;
-}
-
-.adoptFx{
-  position:relative;
-  width:220px;
-  height:220px;
-}
-
-.adoptBox{
-  position:absolute;
-  left:50%;
-  top:55%;
-  transform:translate(-50%,-50%);
-  width:150px;
-  height:110px;
-  border-radius:16px;
-  background:#fff;
-  box-shadow:0 18px 40px rgba(0,0,0,.18);
-}
-
-.adoptLid{
-  position:absolute;
-  left:50%;
-  top:55%;
-  transform:translate(-50%,-50%);
-  width:160px;
-  height:60px;
-  border-radius:18px;
-  background:#fff;
-  transform-origin:50% 100%;
-  animation:lidPop 520ms cubic-bezier(.2,.9,.2,1) forwards;
-}
-
-@keyframes lidPop{
-  to{
-    transform:translate(-50%,-75%) rotate(-35deg);
-  }
-}
-
-.adoptThumb{
-  position:absolute;
-  left:50%;
-  top:40%;
-  width:92px;
-  transform:translate(-50%,-50%) scale(.6);
-  opacity:0;
-  animation:bunnyPop 520ms 260ms cubic-bezier(.15,.9,.2,1) forwards;
-}
-
-@keyframes bunnyPop{
-  to{
-    opacity:1;
-    transform:translate(-50%,-58%) scale(1);
-  }
-}
-
-.adoptSpark{
-  position:absolute;
-  width:10px;
-  height:10px;
-  border-radius:999px;
-  animation:sparkFly 700ms forwards;
-}
-
-@keyframes sparkFly{
-  to{
-    transform:translate(var(--dx),var(--dy));
-    opacity:0;
-  }
-}
-
-/* =========================
-   SAKU（左右）
+   SAKU
 ========================= */
 .saku{
   position:fixed;
   bottom:6px;
   width:96px;
-  height:auto;
   opacity:.9;
   pointer-events:none;
   z-index:4;
-}
-
-.saku.left{ left:6px; }
-.saku.right{
-  right:6px;
-  transform:scaleX(-1);
-}
-
-@media (max-width:600px){
-  .saku{
-    width:64px;
-    bottom:4px;
-  }
-}
-
-/* =========================
-   SLOT PANEL
-========================= */
-#slotStarMachinePanel3x3{
-  position:fixed;
-  inset:0;
-  z-index:9999;
-  display:none;
-}
-
-#slotStarMachinePanel3x3.show{
-  display:block;
-}
-/* HUDは fixed のまま最前面にする（センター配置も維持） */
-#hud{
-  position: fixed;          /* stickyにしない */
-  top: 8px;                 /* 元の値を維持 */
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2147483647;      /* 最前面 */
-  pointer-events: auto;
-}
-
-/* field側は余白を付けない（fixed/inset:0 なので不要） */
-#field{
-  padding-top: 0;
-}
-
-/* bunny/coinレイヤーがHUDを覆ってもクリックを吸わないようにする */
-#bunnyLayer,
-#coinLayer{
-  z-index: 1;               /* HUDより下なら何でもOK */
-}
-#field{
-  z-index: 0;
 }
