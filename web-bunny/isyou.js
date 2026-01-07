@@ -64,13 +64,14 @@
       // flip時は anchorX を左右反転（1 - anchorX）して頭側に追従
       const SLOTS = {
   hat: {
-    anchorX: 0.74, // ★もっと右（0.70〜0.78で調整）
+    anchorX: 0.74,
     anchorY: 0.10,
-    offsetX: 10,   // ★さらに右へ（+0〜+20くらいで微調整）
-    offsetY: 30,   // ←前に「もっと下」で決めた値のままでOK
+    offsetX: 10,
+    offsetY: 55,   // ★さらに下へ（+25px）
     z: 9999,
   },
 };
+
 
 
 
