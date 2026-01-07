@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v16.1 (time-based charge)", Date.now());
+  console.log("[app.js] LOADED v16.0 (per-bunny charge + hidden gauge + heart)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -41,21 +41,18 @@
   const DEPART_COST = 10;
 
   /* =========================
-   * Charge（時間経過で貯まる / UI表示あり）
-   * - ✅ 時間経過でチャージ（クリックや回収では増えない）
-   * - 満タン中ずっと hart.png を表示（上下ゆらゆら）
-   * - 満タン中のクリック：多め＆高ティアでドロップ → ゲージ消費(0) → ハート消える
+   * Charge（個体ごと / UIなし）
+   * - 時間経過で貯まる（少し早く）
+   * - クリック：その個体のチャージ量で「枚数/ティア」を決めてドロップ→その個体のチャージを消費
+   * - チャージMAX中は、その個体の頭上に hart.png（小さめ＆ゆらゆら）
    * ========================= */
   const CHARGE_MAX = 100;
 
-  // ✅ たまる速さ（例：1秒に 2 貯まる → 50秒で満タン）
-  const CHARGE_PER_SEC = 2.0;
+  // ★少し早く：1秒あたり +3（=約34秒で満タン）
+  const CHARGE_PER_SEC = 3.0;
 
-  // ✅ 初期チャージ
-  const INITIAL_CHARGE = 0;
-
-  let charge = clamp(INITIAL_CHARGE, 0, CHARGE_MAX);
-  let chargeReady = (charge >= CHARGE_MAX);
+  // クリック後の最低保証（次が0枚感を避けたいなら1など。0でもOK）
+  const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
 
   /* =========================
    * Storage
@@ -104,7 +101,7 @@
   /* =========================
    * Utils / Field size cache
    * ========================= */
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const rand  = (a, b) => a + Math.random() * (b - a);
 
   let FIELD_W = 1, FIELD_H = 1;
@@ -144,50 +141,17 @@
   }
 
   /* =========================
-   * CSS injection（コイン小さく / ゲージUI / ハートゆらゆら）
+   * CSS injection（コイン小さく / ハート小さめ＆ゆらゆら）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbChargeUiCss")) return;
+    if (document.getElementById("wbPerBunnyChargeCss")) return;
     const st = document.createElement("style");
-    st.id = "wbChargeUiCss";
+    st.id = "wbPerBunnyChargeCss";
     st.textContent = `
-      .coin{ width:22px !important; height:22px !important; }
-
-      /* ゲージUI */
-      #wbChargeHud {
-        position: fixed;
-        top: 10px;
-        right: 10px;
-        z-index: 9998;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: rgba(255,255,255,.75);
-        backdrop-filter: blur(6px);
-        box-shadow: 0 10px 30px rgba(0,0,0,.10);
-        font-size: 12px;
+      .coin{
+        width:22px !important;
+        height:22px !important;
       }
-      #wbChargeLabel { opacity: .9; white-space: nowrap; }
-      #wbChargeBar {
-        width: 140px;
-        height: 10px;
-        border-radius: 999px;
-        background: rgba(0,0,0,.12);
-        overflow: hidden;
-      }
-      #wbChargeFill {
-        height: 100%;
-        width: 0%;
-        border-radius: 999px;
-        background: linear-gradient(90deg, rgba(255,120,190,.9), rgba(255,200,120,.95));
-        transform-origin: left center;
-        transition: width 120ms ease;
-      }
-      #wbChargePct { min-width: 36px; text-align: right; opacity: .85; }
-
-      /* ハート */
       .wbChargeHart {
         position:absolute;
         z-index:9999;
@@ -195,186 +159,19 @@
         user-select:none;
         -webkit-user-drag:none;
         transform: translate(-50%, -50%);
-        animation: wbHartFloat 1.15s ease-in-out infinite;
-        filter: drop-shadow(0 8px 14px rgba(0,0,0,.18));
-        width:30px; height:30px; /* ✅ 小さめ */
+        animation: wbHartBob 1.05s ease-in-out infinite;
+        filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
+        width:40px;
+        height:40px;
       }
-      @keyframes wbHartFloat {
-        0%   { transform: translate(-50%, -50%) translateY(0px)   rotate(-4deg) scale(1); }
-        50%  { transform: translate(-50%, -50%) translateY(-10px) rotate( 4deg) scale(1.07); }
-        100% { transform: translate(-50%, -50%) translateY(0px)   rotate(-4deg) scale(1); }
+      @keyframes wbHartBob {
+        0%   { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
+        50%  { transform: translate(-50%, -50%) translateY(-7px) rotate(3deg) scale(1.03); }
+        100% { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
       }
     `;
     document.head.appendChild(st);
   })();
-
-  /* =========================
-   * Charge UI（右上に表示）
-   * ========================= */
-  let chargeHudEl = null;
-  let chargeFillEl = null;
-  let chargePctEl = null;
-
-  function ensureChargeHud() {
-    if (chargeHudEl && chargeHudEl.isConnected) return;
-
-    const hud = document.createElement("div");
-    hud.id = "wbChargeHud";
-
-    const label = document.createElement("div");
-    label.id = "wbChargeLabel";
-    label.textContent = "⏳ チャージ";
-
-    const bar = document.createElement("div");
-    bar.id = "wbChargeBar";
-
-    const fill = document.createElement("div");
-    fill.id = "wbChargeFill";
-    bar.appendChild(fill);
-
-    const pct = document.createElement("div");
-    pct.id = "wbChargePct";
-    pct.textContent = "0%";
-
-    hud.appendChild(label);
-    hud.appendChild(bar);
-    hud.appendChild(pct);
-
-    document.body.appendChild(hud);
-
-    chargeHudEl = hud;
-    chargeFillEl = fill;
-    chargePctEl = pct;
-  }
-
-  function updateChargeHud() {
-    ensureChargeHud();
-    const r = clamp(charge / CHARGE_MAX, 0, 1);
-    const pct = Math.round(r * 100);
-    if (chargeFillEl) chargeFillEl.style.width = `${pct}%`;
-    if (chargePctEl) chargePctEl.textContent = `${pct}%`;
-  }
-
-  /* =========================
-   * Persistent Heart（満タン中ずっと表示）
-   * ========================= */
-  let chargeHartEl = null;
-  let chargeHartTargetBornAt = null;
-
-  function ensureChargeHartEl() {
-    if (chargeHartEl && chargeHartEl.isConnected) return chargeHartEl;
-    const el = document.createElement("img");
-    el.className = "wbChargeHart";
-    el.src = ASSETS.hart;
-    el.draggable = false;
-    el.style.display = "none";
-    field.appendChild(el);
-    chargeHartEl = el;
-    return el;
-  }
-
-  function getBunnyByBornAt(bornAt) {
-    const t = Number(bornAt);
-    if (!Number.isFinite(t)) return null;
-    for (const b of bunnies) if (b.bornAt === t) return b;
-    return null;
-  }
-
-  function pickRandomBunny() {
-    return bunnies.length ? bunnies[Math.floor(Math.random() * bunnies.length)] : null;
-  }
-
-  function showChargeHeart(targetBunny) {
-    const el = ensureChargeHartEl();
-    const b = targetBunny || pickRandomBunny();
-    if (!b) return;
-    chargeHartTargetBornAt = b.bornAt;
-    el.style.display = "block";
-    positionChargeHeart();
-  }
-
-  function hideChargeHeart() {
-    if (!chargeHartEl) return;
-    chargeHartEl.style.display = "none";
-    chargeHartTargetBornAt = null;
-  }
-
-  function positionChargeHeart() {
-    if (!chargeHartEl || chargeHartEl.style.display === "none") return;
-
-    const b = getBunnyByBornAt(chargeHartTargetBornAt) || pickRandomBunny();
-    if (!b) { hideChargeHeart(); return; }
-    chargeHartTargetBornAt = b.bornAt;
-
-    const r  = b.wrap.getBoundingClientRect();
-    const fr = field.getBoundingClientRect();
-
-    const x = (r.left - fr.left) + r.width * 0.5;
-    const y = (r.top  - fr.top)  + r.height * 0.05;
-
-    chargeHartEl.style.left = `${x}px`;
-    chargeHartEl.style.top  = `${y}px`;
-  }
-
-  /* =========================
-   * Charge helpers（時間経過）
-   * ========================= */
-  function setCharge(v) {
-    const prevReady = chargeReady;
-    charge = clamp(v, 0, CHARGE_MAX);
-    chargeReady = (charge >= CHARGE_MAX);
-
-    if (!prevReady && chargeReady) {
-      showChargeHeart(null);
-      emit("chargeReady", {});
-    } else if (prevReady && !chargeReady) {
-      hideChargeHeart();
-      emit("chargeConsumed", {});
-    }
-    updateChargeHud();
-  }
-
-  function addChargeByTime(dtSeconds) {
-    if (chargeReady) return;
-    const add = CHARGE_PER_SEC * dtSeconds;
-    if (add <= 0) return;
-    setCharge(charge + add);
-  }
-
-  function consumeCharge() {
-    setCharge(0);
-  }
-
-  function getChargeRatio() {
-    return clamp(charge / CHARGE_MAX, 0, 1);
-  }
-
-  function getDropPlanFromCharge() {
-    const r = getChargeRatio(); // 0..1
-    const count = 1 + Math.floor(r * 9);        // 1..10
-    const maxTier = Math.floor(r * 3 + 1e-9);   // 0..3
-
-    const pickTier = () => {
-      if (maxTier <= 0) return 0;
-
-      // 高ティア優遇：w(t)=(t+1)^2
-      let sum = 0;
-      const w = [];
-      for (let t = 0; t <= maxTier; t++) {
-        const wt = (t + 1) * (t + 1);
-        w.push(wt);
-        sum += wt;
-      }
-      let x = Math.random() * sum;
-      for (let t = 0; t <= maxTier; t++) {
-        x -= w[t];
-        if (x <= 0) return t;
-      }
-      return maxTier;
-    };
-
-    return { count, pickTier };
-  }
 
   /* =========================
    * State / Storage helpers
@@ -467,6 +264,7 @@
     collect() {
       if (!this.el || !this.el.isConnected) return;
 
+      // coin1=+1, coin2=+2, coin3=+3, coin4=+4
       coins += (this.tier + 1);
       saveCoins();
       updateHud();
@@ -502,6 +300,8 @@
     constructor(bornAt, kind = "bunny1") {
       this.bornAt = Number(bornAt) || Date.now();
       this.kind   = safeKind(kind);
+
+      // ✅ 保存に baby が残ってた場合も「経過3分」を計算して自然に進化する
       this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
 
       this.wrap = document.createElement("div");
@@ -517,12 +317,20 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
+      // ★個体ごとのチャージ
+      this.charge = 0;        // 0..CHARGE_MAX
+      this.chargeReady = false;
+
+      // ★個体ごとのハート
+      this.hartEl = null;
+
       refreshFieldSize();
       this.x = rand(20, Math.max(21, FIELD_W - 140));
       this.y = groundY() - 120;
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
 
+      // 初期化時に進化チェック
       this.evolveIfNeeded(true);
       this.syncSprite();
 
@@ -531,15 +339,15 @@
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        if (chargeReady) {
-          const { count, pickTier } = getDropPlanFromCharge();
-          spawnClickCoins(this, count, pickTier);
-          consumeCharge();
-          return;
-        }
+        // ✅ その個体のチャージ量でドロップ決定
+        const plan = this.getDropPlanFromOwnCharge();
+        spawnClickCoins(this, plan.count, plan.pickTier);
 
-        // 通常は coin1 1枚だけ
-        spawnClickCoins(this, 1, () => 0);
+        // ✅ クリックでその個体のチャージ消費（ハートも消える）
+        this.consumeOwnCharge();
+
+        // ✅ 次周回の少しだけ加算（無しにしたければ 0）
+        this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
       };
 
       this.wrap.addEventListener("pointerdown", tap);
@@ -548,6 +356,7 @@
       this.el.addEventListener("load", () => {
         this.clampInside();
         this.applyPos();
+        this.positionHeart();
       });
 
       this.clampInside();
@@ -558,6 +367,96 @@
       this.el.src = this.isBaby
         ? ASSETS.babyBunny
         : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
+    }
+
+    ensureHeartEl() {
+      if (this.hartEl && this.hartEl.isConnected) return this.hartEl;
+      const el = document.createElement("img");
+      el.className = "wbChargeHart";
+      el.src = ASSETS.hart;
+      el.draggable = false;
+      el.style.display = "none";
+      field.appendChild(el); // field直下（最前面＆overflow事故回避）
+      this.hartEl = el;
+      return el;
+    }
+
+    showHeart() {
+      const el = this.ensureHeartEl();
+      el.style.display = "block";
+      this.positionHeart();
+    }
+
+    hideHeart() {
+      if (!this.hartEl) return;
+      this.hartEl.style.display = "none";
+    }
+
+    positionHeart() {
+      if (!this.hartEl || this.hartEl.style.display === "none") return;
+      const r  = this.wrap.getBoundingClientRect();
+      const fr = field.getBoundingClientRect();
+      const x = (r.left - fr.left) + r.width * 0.5;
+      const y = (r.top  - fr.top)  + r.height * 0.08;
+      this.hartEl.style.left = `${x}px`;
+      this.hartEl.style.top  = `${y}px`;
+    }
+
+    addOwnCharge(delta) {
+      if (this.chargeReady) return;
+      delta = Number(delta) || 0;
+      if (delta <= 0) return;
+
+      this.charge = clamp(this.charge + delta, 0, CHARGE_MAX);
+      if (this.charge >= CHARGE_MAX) {
+        this.charge = CHARGE_MAX;
+        this.chargeReady = true;
+        this.showHeart();
+        emit("bunnyChargeReady", { bornAt: this.bornAt });
+      }
+    }
+
+    consumeOwnCharge() {
+      this.charge = 0;
+      this.chargeReady = false;
+      this.hideHeart();
+      emit("bunnyChargeConsumed", { bornAt: this.bornAt });
+    }
+
+    getChargeRatio() {
+      return clamp(this.charge / CHARGE_MAX, 0, 1);
+    }
+
+    // チャージ量が高いほど「枚数が増える＆高ティアが出やすい」
+    getDropPlanFromOwnCharge() {
+      const r = this.getChargeRatio(); // 0..1
+
+      // 枚数：1〜10
+      const count = 1 + Math.floor(r * 9);
+
+      // 最大ティア：0〜3
+      const maxTier = Math.floor(r * 3 + 1e-9);
+
+      const pickTier = () => {
+        if (maxTier <= 0) return 0;
+
+        // 高ティア優遇：w(t)=(t+1)^2
+        let sum = 0;
+        const w = [];
+        for (let t = 0; t <= maxTier; t++) {
+          const wt = (t + 1) * (t + 1);
+          w.push(wt);
+          sum += wt;
+        }
+        let x = Math.random() * sum;
+        for (let t = 0; t <= maxTier; t++) {
+          x -= w[t];
+          if (x <= 0) return t;
+        }
+        return maxTier;
+      };
+
+      return { count, pickTier };
     }
 
     getWrapWidth() {
@@ -577,12 +476,14 @@
       this.y = groundY() - 120;
     }
 
+    // ✅ babyは3分で進化（保存がbabyでも経過時間で判定される）
     evolveIfNeeded(isInit = false) {
       if (!this.isBaby) return;
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
       this.isBaby = false;
 
+      // （任意）突然変異
       if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) {
         this.kind = "reabunny";
       }
@@ -602,6 +503,9 @@
     update(dt) {
       this.evolveIfNeeded(false);
 
+      // ★時間経過で個体チャージ
+      this.addOwnCharge(CHARGE_PER_SEC * dt);
+
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
       this.x += this.dir * this.baseSpeed * speedMul * dt;
 
@@ -614,6 +518,9 @@
       else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
 
       this.applyPos();
+
+      // ★満タン中はハート追従
+      if (this.chargeReady) this.positionHeart();
     }
   }
 
@@ -629,6 +536,7 @@
     const idx = bunnies.indexOf(b);
     if (idx < 0) return false;
     try { b.wrap.remove(); } catch {}
+    try { b.hartEl?.remove(); } catch {}
     bunnies.splice(idx, 1);
     saveBunnyMeta();
     emit("bunnyCountChanged", { count: bunnies.length });
@@ -743,11 +651,12 @@
 
     updateHud,
 
-    // charge
-    getCharge: () => charge,
-    isChargeReady: () => !!chargeReady,
-    consumeCharge,
-    setCharge,
+    // ★個体チャージ参照（デバッグ用。UI表示はしない）
+    getBunnyCharge: (bornAt) => {
+      const t = Number(bornAt);
+      const b = bunnies.find(x => x && x.bornAt === t);
+      return b ? { charge: b.charge, ready: b.chargeReady } : null;
+    },
   };
 
   /* =========================
@@ -773,13 +682,8 @@
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
-    // ✅ 時間経過でチャージ
-    addChargeByTime(dt);
-
     for (const b of bunnies) b.update(dt);
     for (const d of dropsOnField) d.update(dt);
-
-    if (chargeReady) positionChargeHeart();
 
     requestAnimationFrame(tick);
   }
@@ -788,18 +692,13 @@
     refreshFieldSize();
     initBunnies();
     updateHud();
-
-    // UI初期表示
-    updateChargeHud();
-    if (chargeReady) showChargeHeart(null);
-
     emit("bunnyCountChanged", { count: bunnies.length });
 
     requestAnimationFrame(tick);
 
     window.addEventListener("resize", () => {
       refreshFieldSize();
-      for (const b of bunnies) { b.clampInside(); b.applyPos(); }
+      for (const b of bunnies) { b.clampInside(); b.applyPos(); b.positionHeart?.(); }
       emit("resize", {});
     }, { passive: true });
   }
