@@ -504,9 +504,7 @@
       return;
     }
 
-    // ★要望：「初期2体は削除」＝0匹スタート
-    saveBunnyMeta();
-  }
+
 
   let lastFrame = performance.now();
   function tick(ts) {
