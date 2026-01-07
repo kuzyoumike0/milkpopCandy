@@ -1,74 +1,51 @@
 // syougou.js
-// 称号システム（各種カウント・称号解放・装備・永続化・付け替えUI）をここに集約
+// 称号システム（各種カウント・称号解放・装備・永続化・付け替えUI）
+// - 未解放は「？？？」表示（解放条件は表示）
+// - HUDの「名前の横」に現在称号を常時表示（見つからなければHUD左側に表示）
 
 (() => {
   /* =========================
    * Config
    * ========================= */
-
-  // しきい値（共通）
   const THRESHOLDS = [10, 50, 100];
 
-  // 種別（追加したいものはここに増やす）
-  // key は内部ID、label は表示名、emoji はUI用
   const CATEGORIES = [
     {
       key: "unchi",
       label: "ウンチ",
       emoji: "💩",
-      titles: {
-        10: "黄金を踏みし者",
-        50: "黄金に選ばれし者",
-        100: "黄金の王",
-      },
+      titles: { 10: "黄金を踏みし者", 50: "黄金に選ばれし者", 100: "黄金の王" },
     },
     {
       key: "tabidachi",
       label: "旅立ち",
       emoji: "🕊️",
-      titles: {
-        10: "旅立ちの見届け人",
-        50: "旅路の語り部",
-        100: "永遠の見送り人",
-      },
+      titles: { 10: "旅立ちの見届け人", 50: "旅路の語り部", 100: "永遠の見送り人" },
     },
     {
       key: "hanabi",
       label: "花火",
       emoji: "🎆",
-      titles: {
-        10: "小さな花火師",
-        50: "夜空の演出家",
-        100: "天上の花火師",
-      },
+      titles: { 10: "小さな花火師", 50: "夜空の演出家", 100: "天上の花火師" },
     },
     {
       key: "slot_win",
       label: "スロット当たり",
       emoji: "🎰",
-      titles: {
-        10: "ビギナーズラック",
-        50: "勝利の常連",
-        100: "運命の寵児",
-      },
+      titles: { 10: "ビギナーズラック", 50: "勝利の常連", 100: "運命の寵児" },
     },
     {
       key: "omukae",
       label: "お迎え",
       emoji: "🚪",
-      titles: {
-        10: "お迎え係",
-        50: "案内人",
-        100: "冥府の執事",
-      },
+      titles: { 10: "お迎え係", 50: "案内人", 100: "冥府の執事" },
     },
   ];
 
-  // localStorage keys
   const LS = {
-    counts: "wb_counts_v2",        // { unchi: 0, tabidachi: 0, ... }
-    currentTitle: "wb_title_v2",   // string
-    ownedTitles: "wb_title_list_v2", // string[]
+    counts: "wb_counts_v2",          // { unchi: 0, tabidachi: 0, ... }
+    currentTitle: "wb_title_v2",     // string（HUDに出す文字列）
+    ownedTitles: "wb_title_list_v2", // ["unchi:10", ...]
     uiOpenOnce: "wb_title_ui_hint_v1",
   };
 
@@ -84,7 +61,7 @@
   let WB = null;
 
   /* =========================
-   * Storage Helpers
+   * Storage
    * ========================= */
   function loadJson(key, def) {
     try {
@@ -118,34 +95,25 @@
     if (!Array.isArray(state.owned)) state.owned = [];
     state.current = loadStr(LS.currentTitle, "");
 
-    // 未定義カテゴリは 0 で埋める
     for (const c of CATEGORIES) {
       if (!Number.isFinite(state.counts[c.key])) state.counts[c.key] = 0;
     }
   }
 
   /* =========================
-   * Title Master
+   * Master
    * ========================= */
   function getCategory(key) {
     return CATEGORIES.find((c) => c.key === key) || null;
   }
 
-  function getTitleName(key, at) {
-    const c = getCategory(key);
-    if (!c) return null;
-    const name = c.titles?.[at];
-    return name ? String(name) : null;
-  }
-
   function buildTitleId(key, at) {
-    // 内部ID（重複防止）
     return `${key}:${at}`;
   }
 
   function displayTitleText(key, at) {
     const c = getCategory(key);
-    const name = getTitleName(key, at);
+    const name = c?.titles?.[at];
     if (!c || !name) return null;
     return `${c.emoji} ${c.label}${at}回：${name}`;
   }
@@ -154,20 +122,24 @@
     const out = [];
     for (const c of CATEGORIES) {
       for (const at of THRESHOLDS) {
-        const name = getTitleName(c.key, at);
+        const name = c.titles?.[at];
         if (!name) continue;
         out.push({
           key: c.key,
+          label: c.label,
+          emoji: c.emoji,
           at,
           id: buildTitleId(c.key, at),
           title: displayTitleText(c.key, at),
-          rawTitle: name,
-          label: c.label,
-          emoji: c.emoji,
+          rawTitle: String(name),
         });
       }
     }
     return out;
+  }
+
+  function isOwned(id) {
+    return state.owned.includes(id);
   }
 
   /* =========================
@@ -206,7 +178,7 @@
     document.head.appendChild(s);
   }
 
-  function showTitleMilestone(text) {
+  function showToast(text) {
     ensureToastStyles();
     const el = document.createElement("div");
     el.className = "farewellMilestone";
@@ -216,13 +188,103 @@
   }
 
   /* =========================
+   * HUD Title Badge (常時表示)
+   * ========================= */
+  const HUD_BADGE_ID = "wbHudTitleBadgeV1";
+
+  function ensureHudBadgeStyles() {
+    if (document.getElementById("syougouHudBadgeStyleV1")) return;
+    const s = document.createElement("style");
+    s.id = "syougouHudBadgeStyleV1";
+    s.textContent = `
+#${HUD_BADGE_ID}{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.92);
+  box-shadow: 0 10px 22px rgba(0,0,0,.10);
+  font-weight: 900;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+#${HUD_BADGE_ID} .label{
+  opacity: .72;
+}
+#${HUD_BADGE_ID}.empty{
+  opacity: .55;
+}
+`;
+    document.head.appendChild(s);
+  }
+
+  function findNameAnchorInHud(hud) {
+    if (!hud) return null;
+    // “名前っぽい”要素を優先して探す
+    const selectors = [
+      "#playerName", ".playerName",
+      "#userName", ".userName",
+      "#name", ".name",
+    ];
+    for (const sel of selectors) {
+      const el = hud.querySelector(sel);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  function ensureHudBadge() {
+    const hud = document.getElementById("hud");
+    if (!hud) return null;
+
+    ensureHudBadgeStyles();
+
+    let badge = document.getElementById(HUD_BADGE_ID);
+    if (badge && badge.parentElement) return badge;
+
+    badge = document.createElement("span");
+    badge.id = HUD_BADGE_ID;
+    badge.innerHTML = `<span class="label">称号</span><span class="value">（なし）</span>`;
+
+    const anchor = findNameAnchorInHud(hud);
+    if (anchor && anchor.parentElement) {
+      // 名前の“横”に付ける
+      anchor.insertAdjacentElement("afterend", badge);
+    } else {
+      // 名前が取れなければ、HUDの coin の横（確実に表示）
+      const coin = hud.querySelector("#coin") || hud.firstElementChild;
+      if (coin && coin.parentElement) coin.insertAdjacentElement("afterend", badge);
+      else hud.appendChild(badge);
+    }
+
+    return badge;
+  }
+
+  function updateHudTitleBadge() {
+    const badge = ensureHudBadge();
+    if (!badge) return;
+
+    const v = badge.querySelector(".value");
+    if (!v) return;
+
+    const cur = getCurrentTitle();
+    v.textContent = cur ? cur : "（なし）";
+
+    badge.classList.toggle("empty", !cur);
+  }
+
+  /* =========================
    * Unlock / Equip
    * ========================= */
   function equipTitle(titleText) {
     state.current = String(titleText || "");
     saveAll();
     WB?.updateHud?.();
-    refreshUI?.();
+    updateHudTitleBadge();
+    refreshUI();
   }
 
   function unequipTitle() {
@@ -245,13 +307,30 @@
     equipTitle(text);
 
     if (firstTime) {
-      showTitleMilestone(`🏅 称号解放：${text}`);
-      // パネル開いてなければ軽くヒント
+      showToast(`🏅 称号解放：${text}`);
       if (!loadStr(LS.uiOpenOnce, "")) {
         saveStr(LS.uiOpenOnce, "1");
-        setTimeout(() => showTitleMilestone(`🪪 「称号」から付け替えできます`), 900);
+        setTimeout(() => showToast(`🪪 「称号」から付け替えできます`), 900);
       }
     }
+  }
+
+  function getCount(key) {
+    return Number(state.counts?.[key] || 0);
+  }
+
+  function getAllCounts() {
+    const out = {};
+    for (const c of CATEGORIES) out[c.key] = getCount(c.key);
+    return out;
+  }
+
+  function getNextMilestone(key) {
+    const n = getCount(key);
+    for (const at of THRESHOLDS) {
+      if (n < at) return { at, remain: at - n };
+    }
+    return null;
   }
 
   function maybeUnlockByCount(key) {
@@ -269,27 +348,13 @@
     if (!c) return;
 
     const a = Math.max(1, Math.floor(amount));
-    const cur = Number(state.counts[key] || 0);
-    const next = cur + a;
-    state.counts[key] = next;
+    state.counts[key] = Number(state.counts[key] || 0) + a;
 
     saveAll();
     maybeUnlockByCount(key);
     WB?.updateHud?.();
-    refreshUI?.();
-  }
-
-  /* =========================
-   * Public getters
-   * ========================= */
-  function getCount(key) {
-    return Number(state.counts?.[key] || 0);
-  }
-
-  function getAllCounts() {
-    const out = {};
-    for (const c of CATEGORIES) out[c.key] = getCount(c.key);
-    return out;
+    updateHudTitleBadge();
+    refreshUI();
   }
 
   function getOwnedTitleIds() {
@@ -306,23 +371,15 @@
     return String(state.current || "");
   }
 
-  function getNextMilestone(key) {
-    const n = getCount(key);
-    for (const at of THRESHOLDS) {
-      if (n < at) return { at, remain: at - n };
-    }
-    return null; // 全達成
-  }
-
   /* =========================
-   * UI (Title Panel)
+   * UI
    * ========================= */
   let uiEl = null;
 
   function ensureUIStyles() {
-    if (document.getElementById("syougouUiStyleV2")) return;
+    if (document.getElementById("syougouUiStyleV4")) return;
     const s = document.createElement("style");
-    s.id = "syougouUiStyleV2";
+    s.id = "syougouUiStyleV4";
     s.textContent = `
 #syougouPanel{
   position: fixed;
@@ -339,8 +396,8 @@
   position:absolute;
   left:50%; top:50%;
   transform: translate(-50%, -50%);
-  width: min(640px, 92vw);
-  max-height: min(78vh, 720px);
+  width: min(700px, 94vw);
+  max-height: min(80vh, 760px);
   overflow: hidden;
   background: rgba(255,255,255,.97);
   border-radius: 18px;
@@ -406,6 +463,11 @@
 }
 #syougouPanel .btn.primary{ background: #ffd6e7; }
 #syougouPanel .btn.danger{ background: rgba(255,80,80,.12); }
+#syougouPanel .btn[disabled]{
+  opacity:.55;
+  cursor:not-allowed;
+  box-shadow:none;
+}
 #syougouPanel .grid{
   display:grid;
   grid-template-columns: 1fr;
@@ -420,6 +482,9 @@
   align-items:center;
   justify-content: space-between;
   gap: 10px;
+}
+#syougouPanel .item.locked{
+  opacity:.70;
 }
 #syougouPanel .item .left{
   display:flex;
@@ -446,6 +511,9 @@
 }
 #syougouPanel .badge.on{
   background: rgba(120, 210, 255, .22);
+}
+#syougouPanel .badge.lock{
+  background: rgba(255, 120, 120, .18);
 }
 `;
     document.head.appendChild(s);
@@ -482,6 +550,16 @@
     return uiEl;
   }
 
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
   function renderUI() {
     const p = buildUI();
     const body = p.querySelector(".body");
@@ -489,50 +567,61 @@
 
     const current = getCurrentTitle();
     const counts = getAllCounts();
-
     const master = getTitlesMaster();
     const ownedSet = new Set(getOwnedTitleIds());
 
-    const owned = master.filter((m) => ownedSet.has(m.id));
-    const locked = master.filter((m) => !ownedSet.has(m.id));
+    // カテゴリごと
+    const byCat = {};
+    for (const c of CATEGORIES) byCat[c.key] = [];
+    for (const t of master) byCat[t.key].push(t);
 
     const progressHtml = CATEGORIES.map((c) => {
       const n = counts[c.key] || 0;
       const next = getNextMilestone(c.key);
       const nextText = next ? `次：${next.at}まであと${next.remain}` : "全達成！";
-      return `
-        <div class="pill">${c.emoji} ${c.label}：<b>${n}</b> <span class="mini">(${nextText})</span></div>
-      `;
+      return `<div class="pill">${c.emoji} ${c.label}：<b>${n}</b> <span class="mini">(${nextText})</span></div>`;
     }).join("");
 
-    const ownedHtml = (owned.length ? owned : []).map((m) => {
-      const isOn = current && current === m.title;
-      return `
-        <div class="item">
-          <div class="left">
-            <div class="name">${escapeHtml(m.title)}</div>
-            <div class="meta">${escapeHtml(m.emoji)} ${escapeHtml(m.label)} / ${m.at}回達成</div>
-          </div>
-          <div class="right">
-            <span class="badge ${isOn ? "on" : ""}">${isOn ? "装備中" : "未装備"}</span>
-            <button class="btn primary" type="button" data-equip="${escapeAttr(m.title)}">
-              ${isOn ? "装備中" : "装備"}
-            </button>
-          </div>
-        </div>
-      `;
-    }).join("");
+    const sectionsHtml = CATEGORIES.map((c) => {
+      const list = byCat[c.key] || [];
 
-    const lockedHtml = locked.map((m) => {
+      const items = list.map((m) => {
+        const owned = ownedSet.has(m.id);
+        const isOn = current && current === m.title;
+
+        // ★未解放は ??? 表示（条件だけ見える）
+        const displayName = owned ? escapeHtml(m.title) : "？？？";
+
+        const badge = owned
+          ? `<span class="badge ${isOn ? "on" : ""}">${isOn ? "装備中" : "解放済"}</span>`
+          : `<span class="badge lock">未解放</span>`;
+
+        const btn = owned
+          ? `<button class="btn primary" type="button" data-equip="${escapeAttr(m.title)}">${isOn ? "装備中" : "装備"}</button>`
+          : `<button class="btn" type="button" disabled>未解放</button>`;
+
+        return `
+          <div class="item ${owned ? "" : "locked"}">
+            <div class="left">
+              <div class="name">${displayName}</div>
+              <div class="meta">${escapeHtml(c.emoji)} ${escapeHtml(c.label)} / ${m.at}回で解放</div>
+            </div>
+            <div class="right" style="display:flex; gap:8px; align-items:center;">
+              ${badge}
+              ${btn}
+            </div>
+          </div>
+        `;
+      }).join("");
+
       return `
-        <div class="item" style="opacity:.62">
-          <div class="left">
-            <div class="name">？？？</div>
-            <div class="meta">${escapeHtml(m.emoji)} ${escapeHtml(m.label)} / ${m.at}回で解放</div>
+        <div class="section">
+          <div class="row">
+            <div class="title">${c.emoji} ${c.label}</div>
+            <div class="mini">（全 ${list.length}）</div>
           </div>
-          <div class="right">
-            <span class="badge">未解放</span>
-          </div>
+          <div style="height:10px"></div>
+          <div class="grid">${items}</div>
         </div>
       `;
     }).join("");
@@ -543,28 +632,14 @@
           <div class="pill">現在：<b>${current ? escapeHtml(current) : "（なし）"}</b></div>
           <div class="row" style="gap:8px">
             <button class="btn danger" type="button" data-unequip="1">解除</button>
+            <button class="btn" type="button" data-refresh="1">更新</button>
           </div>
         </div>
         <div style="height:10px"></div>
         <div class="row">${progressHtml}</div>
       </div>
 
-      <div class="section">
-        <div class="row">
-          <div class="title">✅ 所持称号（${owned.length}）</div>
-          <button class="btn" type="button" data-refresh="1">更新</button>
-        </div>
-        <div style="height:10px"></div>
-        <div class="grid">${ownedHtml || `<div class="mini">まだ称号がありません。各カウントが 10 / 50 / 100 で解放されます。</div>`}</div>
-      </div>
-
-      <div class="section">
-        <div class="row">
-          <div class="title">🔒 未解放（${locked.length}）</div>
-        </div>
-        <div style="height:10px"></div>
-        <div class="grid">${lockedHtml}</div>
-      </div>
+      ${sectionsHtml}
     `;
 
     // bind
@@ -573,14 +648,14 @@
         e.preventDefault(); e.stopPropagation();
         const t = btn.getAttribute("data-equip") || "";
         equipTitle(t);
-        showTitleMilestone(`🪪 称号装備：${t}`);
+        showToast(`🪪 称号装備：${t}`);
       });
     });
     body.querySelectorAll("[data-unequip]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
         unequipTitle();
-        showTitleMilestone(`🪪 称号を解除しました`);
+        showToast(`🪪 称号を解除しました`);
       });
     });
     body.querySelectorAll("[data-refresh]").forEach((btn) => {
@@ -589,19 +664,6 @@
         renderUI();
       });
     });
-  }
-
-  function escapeHtml(s) {
-    return String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
-  function escapeAttr(s) {
-    // 属性は軽くでOK（同じくHTMLエスケ）
-    return escapeHtml(s);
   }
 
   function openTitlePanel() {
@@ -614,16 +676,13 @@
     if (!p) return;
     p.style.display = "none";
   }
-
   function refreshUI() {
     if (uiEl && uiEl.style.display !== "none") renderUI();
   }
 
-  // HUDに「称号」ボタンを追加（あれば）
   function injectHudButton() {
     const hud = document.getElementById("hud");
     if (!hud) return;
-
     if (document.getElementById("syougouBtn")) return;
 
     const btn = document.createElement("button");
@@ -634,7 +693,6 @@
       e.preventDefault();
       openTitlePanel();
     });
-
     hud.appendChild(btn);
   }
 
@@ -644,21 +702,20 @@
   function attach(wb) {
     WB = wb || null;
     WB?.updateHud?.();
+
     injectHudButton();
+    ensureHudBadge();
+    updateHudTitleBadge();
   }
 
   /* =========================
    * Event API (increment)
    * ========================= */
-
-  // それぞれの「回数」を増やす呼び口（既存コードからここを呼べばOK）
   function onGoldenUnchiCollected() { incCount("unchi", 1); }
   function onTabidachi()           { incCount("tabidachi", 1); }
   function onHanabi()              { incCount("hanabi", 1); }
   function onSlotWin()             { incCount("slot_win", 1); }
   function onOmukae()              { incCount("omukae", 1); }
-
-  // 汎用（必要なら）
   function add(key, amount = 1)    { incCount(key, amount); }
 
   /* =========================
@@ -668,6 +725,8 @@
 
   window.addEventListener("load", () => {
     injectHudButton();
+    ensureHudBadge();
+    updateHudTitleBadge();
 
     // 既存の「称号」ボタンが別にある場合も拾う
     const btn =
@@ -680,6 +739,12 @@
         openTitlePanel();
       });
     }
+
+    // HUD構造が後から変わる場合にも追従（保険）
+    setTimeout(() => {
+      ensureHudBadge();
+      updateHudTitleBadge();
+    }, 400);
   });
 
   /* =========================
@@ -703,6 +768,9 @@
     // UI
     openTitlePanel,
     closeTitlePanel,
+
+    // HUD
+    updateHudTitleBadge,
 
     // getters
     getCount,
