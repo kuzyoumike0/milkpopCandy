@@ -502,12 +502,35 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
       function applyTransform(imgEl, bunny, it) {
   const flip = !!bunny?.wrap?.classList?.contains("flip");
-  const fx = flip ? -1 : 1;
 
-  // ★重要：offsetX を flip で反転しない（ズレ防止）
-  const ox = (Number(it.offsetX) || 0);
-  const oy = (Number(it.offsetY) || 0);
-  const sc = (Number(it.scale) || 1);
+  // 親(.bunnyWrap)が transform で反転してるタイプか判定（子も一緒に反転する）
+  let parentFlips = false;
+  try {
+    if (flip) {
+      const t = getComputedStyle(bunny.wrap).transform;
+      parentFlips = !!t && t !== "none"; // matrix(...) が出るなら親が反転してる可能性大
+    }
+  } catch {}
+
+  // offset/scale
+  let ox = Number(it.offsetX) || 0;
+  const oy = Number(it.offsetY) || 0;
+  const sc = Number(it.scale) || 1;
+
+  // ★分岐が重要
+  // - 親が反転する: 子は scaleX しない（ダブル反転防止）
+  //   ただし座標系が反転するので offsetX だけ反転する
+  // - 親が反転しない: アクセ側で scaleX する＆offsetXも反転
+  let fx = 1;
+  if (flip) {
+    if (parentFlips) {
+      fx = 1;
+      ox = -ox;
+    } else {
+      fx = -1;
+      ox = -ox;
+    }
+  }
 
   imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
 
@@ -519,6 +542,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
   imgEl.style.transform = baseT;
   imgEl.style.zIndex = String(it.z || 10);
 }
+
 
 
       function drawAllForBunny(bunny) {
