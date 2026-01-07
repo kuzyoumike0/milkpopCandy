@@ -4,7 +4,7 @@
 // - 装着モード中、クリックした「うさぎ個体」に帽子を装着
 // - 保存は bunnyIndex ではなく「個体ID = bornAt」
 // - partyhat は大きめ＆下寄せ（耳の下・頭の真ん中）
-// - 反転時ズレ対策：left を変えず、角度だけ反転
+// - 反転時ズレ対策：親flipの反転を帽子側で打ち消す（scaleX(-1)）
 
 (() => {
   if (!window.WB) return;
@@ -14,8 +14,8 @@
    * Storage
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v3",     // { partyhat: number }
-    equipped: "wb_isyou_eq_v3",    // { bornAt: { partyhat:true } }
+    owned: "wb_isyou_owned_v4",     // { partyhat: number }
+    equipped: "wb_isyou_eq_v4",     // { bornAt: { partyhat:true } }
   };
 
   const ITEM = {
@@ -24,6 +24,13 @@
     price: 5000,
     src: "./assets/isyou/partyhat.png",
   };
+
+  // ★ここだけ調整すればOK
+  const HAT_X = "45%";   // もう少し左寄せ
+  const HAT_Y = "38px";  // 大幅に下へ（耳の下）
+  const HAT_W = "100px"; // 大きめ
+  const HAT_R = "-5deg";
+  const HAT_S = "1.0";
 
   let equipMode = false;
 
@@ -57,9 +64,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleFinal")) return;
+    if (document.getElementById("isyouStyleFinalV4")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleFinal";
+    s.id = "isyouStyleFinalV4";
     s.textContent = `
 /* ===== お洒落パネル ===== */
 #isyouPanel{
@@ -101,21 +108,22 @@
 }
 
 /* ===== 帽子：耳の下／頭の真ん中 ===== */
-.bunnyWrap{ position:relative; } /* 念のため（既にあるなら上書きされるだけ） */
+.bunnyWrap{ position:relative; } /* 念のため */
 
 .bunnyWrap .isyouHat{
   position:absolute;
 
-  left: var(--hatX, 47%);
-  top:  var(--hatY, 38px);
+  left: var(--hatX, ${HAT_X});
+  top:  var(--hatY, ${HAT_Y});
 
-  width: var(--hatW, 100px);
+  width: var(--hatW, ${HAT_W});
   height:auto;
 
+  /* 通常（非flip） */
   transform:
     translateX(-50%)
-    rotate(var(--hatR, -5deg))
-    scale(var(--hatS, 1));
+    rotate(var(--hatR, ${HAT_R}))
+    scale(var(--hatS, ${HAT_S}));
 
   transform-origin: 50% 90%;
   pointer-events:none;
@@ -123,12 +131,13 @@
   filter: drop-shadow(0 6px 8px rgba(0,0,0,.18));
 }
 
-/* ★反転時は left を変えない（ズレ防止） */
+/* ★flip時：親の反転を帽子側で打ち消す（scaleX(-1)）＋角度だけ左右反転 */
 .bunnyWrap.flip .isyouHat{
   transform:
     translateX(-50%)
-    rotate(calc(var(--hatR, -5deg) * -1))
-    scale(var(--hatS, 1));
+    scaleX(-1)
+    rotate(calc(var(--hatR, ${HAT_R}) * -1))
+    scale(var(--hatS, ${HAT_S}));
 }
 
 /* ===== 装着モード可視化 ===== */
@@ -267,9 +276,17 @@
     return String(bunny?.bornAt ?? "");
   }
 
-  function setHatStyleFor() {
-    // ★左寄せ＆かなり下（耳の下〜頭中央）
-    return { x: "45%", y: "38px", w: "100px", r: "-5deg", s: "1.0" };
+  function applyVars(bunny) {
+    // 装着時ズレ対策：1フレ遅らせて確定（画像ロード/flip反映待ち）
+    requestAnimationFrame(() => {
+      try {
+        bunny.wrap.style.setProperty("--hatX", HAT_X);
+        bunny.wrap.style.setProperty("--hatY", HAT_Y);
+        bunny.wrap.style.setProperty("--hatW", HAT_W);
+        bunny.wrap.style.setProperty("--hatR", HAT_R);
+        bunny.wrap.style.setProperty("--hatS", HAT_S);
+      } catch {}
+    });
   }
 
   function ensureHatOnBunny(bunny) {
@@ -281,16 +298,15 @@
       hat = document.createElement("img");
       hat.className = "isyouHat";
       hat.src = ITEM.src;
+      hat.draggable = false;
+      hat.decoding = "async";
       bunny.wrap.appendChild(hat);
     }
 
-    const st = setHatStyleFor();
-    bunny.wrap.style.setProperty("--hatX", st.x);
-    bunny.wrap.style.setProperty("--hatY", st.y);
-    bunny.wrap.style.setProperty("--hatW", st.w);
-    bunny.wrap.style.setProperty("--hatR", st.r);
-    bunny.wrap.style.setProperty("--hatS", st.s);
+    // 位置/サイズを確定
+    applyVars(bunny);
 
+    // 保存
     equipped[id] = equipped[id] || {};
     equipped[id][ITEM.key] = true;
     saveJson(LS.equipped, equipped);
@@ -317,8 +333,16 @@
     const bunny = WB.bunnies.find(b => b.wrap === wrap);
     if (!bunny) return;
 
+    if ((owned[ITEM.key] || 0) <= 0) {
+      toast("在庫がないよ（購入してね）");
+      equipMode = false;
+      document.getElementById("isyouBtn")?.classList.remove("on");
+      return;
+    }
+
     owned[ITEM.key]--;
     saveJson(LS.owned, owned);
+
     ensureHatOnBunny(bunny);
 
     equipMode = false;
@@ -345,4 +369,7 @@
       localStorage.removeItem(LS.equipped);
     });
   });
+
+  // 装着ズレが残る時用：flipが切り替わった瞬間にも再適用
+  WB.on?.("resize", () => setTimeout(applyEquippedAll, 0));
 })();
