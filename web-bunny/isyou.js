@@ -3,8 +3,8 @@
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は選択中だけ z-index を上げる
-// ✅ 反転しても帽子がズレない（レイヤーを逆反転して座標を固定）
-// ✅ partyhat は頭の上（anchorYマイナス）＋ポン演出
+// ✅ partyhat は field直下に「座標追従」で置く → 反転してもズレない
+// ✅ 装着時「ポンッ」演出（partyhat）
 
 (() => {
   "use strict";
@@ -18,11 +18,7 @@
       const t = setInterval(() => {
         try {
           const v = getter();
-          if (v) {
-            clearInterval(t);
-            resolve(v);
-            return;
-          }
+          if (v) { clearInterval(t); resolve(v); return; }
         } catch {}
         if (Date.now() - start > timeoutMs) {
           clearInterval(t);
@@ -34,6 +30,7 @@
 
   const waitForWB  = () => waitFor(() => (window.WB && typeof window.WB.on === "function" ? window.WB : null));
   const waitForHUD = () => waitFor(() => document.getElementById("hud"));
+  const $ = (q, p = document) => p.querySelector(q);
 
   Promise.all([waitForWB(), waitForHUD()])
     .then(([WB, hud]) => {
@@ -55,13 +52,18 @@
           img: "/assets/isyou/partyhat.png",
           price: 500,
 
-          // ここは微調整点
+          // ★あなたが今使ってる数値をそのまま採用（頭上の位置調整）
+          // anchorY は「wrapの上端からの比率」。マイナスOK（上に出せる）
           anchorY: -0.58,
           offsetX: 10,
-          offsetY: 18,      // ★16→18（ちょい沈める）
+          offsetY: 18,
           scale: 0.34,
-          z: 30,
+          z: 9999,
+
+          // ★partyhatは“field追従”で描画（反転ズレ0）
+          mode: "field",
         },
+
         crown: {
           label: "王冠",
           img: "/assets/isyou/crown.png",
@@ -71,6 +73,7 @@
           offsetY: -12,
           scale: 0.55,
           z: 35,
+          mode: "wrap",
         },
         ribbon: {
           label: "リボン",
@@ -81,6 +84,7 @@
           offsetY: 4,
           scale: 0.60,
           z: 20,
+          mode: "wrap",
         },
       };
 
@@ -88,9 +92,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV3")) return;
+        if (document.getElementById("isyouStyleFinalV4")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV3";
+        s.id = "isyouStyleFinalV4";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -124,24 +128,18 @@ body.isyouEquipMode .bunnyWrap:hover{
   z-index:2147483590 !important;
 }
 
-/* 装着演出（軽くポン） */
-.bunnyWrap.isyouPopHat .isyouItem[data-item-key="partyhat"]{
+/* ポン演出（partyhatだけ） */
+.isyouFloatingItem[data-item-key="partyhat"].pop{
   animation:isyouPop 220ms ease-out;
 }
 @keyframes isyouPop{
-  0%{ transform: var(--isyouT) scale(0.1); }
-  70%{ transform: var(--isyouT) scale(1.15); }
-  100%{ transform: var(--isyouT) scale(1.0); }
+  0%{ transform: translate(-50%,-50%) scale(0.1) var(--flip, scaleX(1)); }
+  70%{ transform: translate(-50%,-50%) scale(1.15) var(--flip, scaleX(1)); }
+  100%{ transform: translate(-50%,-50%) scale(1.0) var(--flip, scaleX(1)); }
 }
 
-/* アクセサリレイヤ */
-.isyouLayer{
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  z-index:50;
-  transform-origin:50% 50%;
-}
+/* wrap内アクセサリ */
+.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
 .isyouItem{
   position:absolute;
   left:50%;
@@ -149,6 +147,16 @@ body.isyouEquipMode .bunnyWrap:hover{
   pointer-events:none;
   user-select:none;
   -webkit-user-drag:none;
+}
+
+/* field追従アクセサリ（partyhat用） */
+.isyouFloatingItem{
+  position:absolute;
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+  transform: translate(-50%,-50%);
+  transform-origin: 50% 50%;
 }
 
 /* モーダル */
@@ -169,7 +177,7 @@ body.isyouEquipMode .bunnyWrap:hover{
   pointer-events:auto;
 }
 
-/* ★装着モード中：背景はクリックを通す / モーダルは触れる */
+/* 装着モード中：背景はクリックを通す / モーダルは触れる */
 body.isyouEquipMode .isyouBackdrop{ pointer-events:none; background:rgba(0,0,0,.25); }
 body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
@@ -203,9 +211,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         try {
           const v = JSON.parse(localStorage.getItem(key) || "null");
           return v && typeof v === "object" ? v : fallback;
-        } catch {
-          return fallback;
-        }
+        } catch { return fallback; }
       }
       const owned = loadJSON(LS.owned, {});
       const equipped = loadJSON(LS.equipped, {});
@@ -420,7 +426,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
             const grid = document.createElement("div");
             grid.className = "isyouGrid";
 
-            Object.entries(ITEMS).forEach(([key, it]) => {
+            Object.entries(ITEMS).forEach(([key]) => {
               const count = owned[key] || 0;
 
               const card = document.createElement("div");
@@ -431,10 +437,10 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
               const img = document.createElement("img");
               img.className = "isyouThumb";
-              img.src = it.img;
+              img.src = ITEMS[key].img;
 
               const name = document.createElement("div");
-              name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${count}</div>`;
+              name.innerHTML = `<div class="isyouName">${ITEMS[key].label}</div><div class="isyouSmall">所持：${count}</div>`;
 
               top.appendChild(img);
               top.appendChild(name);
@@ -487,64 +493,123 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       /* =========================
        * Accessory draw
        * ========================= */
+
+      // wrap内（crown/ribbon用）
       function ensureLayer(bunny) {
         if (!bunny?.wrap) return null;
-
         let layer = bunny.wrap.querySelector(".isyouLayer");
         if (!layer) {
           layer = document.createElement("div");
           layer.className = "isyouLayer";
           bunny.wrap.appendChild(layer);
         }
-
-        // ★ここが本命：親がflipならレイヤーを逆反転して「位置の左右反転」を相殺する
-        const flip = !!bunny.wrap.classList.contains("flip");
-        layer.style.transform = flip ? "scaleX(-1)" : "none";
-
         return layer;
       }
 
-      function applyTransform(imgEl, bunny, it) {
+      function applyWrapTransform(imgEl, bunny, it) {
         const flip = !!bunny?.wrap?.classList?.contains("flip");
-        // レイヤーが逆反転で座標は常に同じになるので、画像の見た目だけ反転
         const fx = flip ? -1 : 1;
 
-        const ox = Number(it.offsetX) || 0;
+        // wrap内は「位置」も反転されるので、offsetXだけ反転させて見た目を合わせる
+        const ox = (Number(it.offsetX) || 0) * (flip ? -1 : 1);
         const oy = Number(it.offsetY) || 0;
         const sc = Number(it.scale) || 1;
 
         imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
 
-        const baseT =
-          `translate(calc(-50% + ${ox}px), ${oy}px) ` +
-          `scale(${sc}) scaleX(${fx})`;
-
-        imgEl.style.setProperty("--isyouT", baseT);
-        imgEl.style.transform = baseT;
+        const t = `translate(calc(-50% + ${ox}px), ${oy}px) scale(${sc}) scaleX(${fx})`;
+        imgEl.style.transform = t;
         imgEl.style.zIndex = String(it.z || 10);
       }
 
+      // field追従（partyhat用）: bornAt:itemKey -> img
+      const floating = new Map();
+      function floatingKey(bunny, itemKey) { return `${String(bunny.bornAt)}:${itemKey}`; }
+
+      function ensureFloatingEl(bunny, itemKey, it) {
+        const k = floatingKey(bunny, itemKey);
+        let el = floating.get(k);
+        if (el && el.isConnected) return el;
+
+        el = document.createElement("img");
+        el.className = "isyouFloatingItem";
+        el.dataset.itemKey = itemKey;
+        el.src = it.img;
+        el.style.zIndex = String(it.z || 9999);
+        (WB.field || document.body).appendChild(el);
+
+        floating.set(k, el);
+        return el;
+      }
+
+      function removeFloatingEl(bunny, itemKey) {
+        const k = floatingKey(bunny, itemKey);
+        const el = floating.get(k);
+        if (el) {
+          try { el.remove(); } catch {}
+          floating.delete(k);
+        }
+      }
+
+      function positionFloating(el, bunny, it) {
+        const field = WB.field || document.body;
+        const fr = field.getBoundingClientRect();
+        const br = bunny.wrap.getBoundingClientRect();
+
+        const x = (br.left - fr.left) + br.width * 0.5 + (Number(it.offsetX) || 0);
+        const y = (br.top - fr.top) + br.height * (Number(it.anchorY) || 0) + (Number(it.offsetY) || 0);
+
+        const flip = !!bunny.wrap.classList.contains("flip");
+        el.style.left = `${x}px`;
+        el.style.top  = `${y}px`;
+
+        // 見た目だけ反転（座標は常に同じなのでズレない）
+        el.style.setProperty("--flip", flip ? "scaleX(-1)" : "scaleX(1)");
+
+        const sc = Number(it.scale) || 1;
+        el.style.transform = `translate(-50%,-50%) scale(${sc}) ${flip ? "scaleX(-1)" : ""}`;
+      }
+
       function drawAllForBunny(bunny) {
-        if (!bunny?.wrap || bunny.isBaby) return;
+        if (!bunny?.wrap || bunny.isBaby) {
+          // babyは全部消す
+          removeFloatingEl(bunny || {}, "partyhat");
+          const layer = bunny?.wrap?.querySelector?.(".isyouLayer");
+          if (layer) layer.innerHTML = "";
+          return;
+        }
 
         const key = String(bunny.bornAt);
         const eq = equipped[key] || {};
-        const layer = ensureLayer(bunny);
-        if (!layer) return;
 
-        layer.innerHTML = "";
+        // wrap内描画
+        const layer = ensureLayer(bunny);
+        if (layer) layer.innerHTML = "";
+
         Object.keys(eq).forEach((itemKey) => {
           if (!eq[itemKey]) return;
           const it = ITEMS[itemKey];
           if (!it) return;
 
-          const img = document.createElement("img");
-          img.className = "isyouItem";
-          img.dataset.itemKey = itemKey;
-          img.src = it.img;
+          if (it.mode === "field") {
+            const el = ensureFloatingEl(bunny, itemKey, it);
+            positionFloating(el, bunny, it);
+          } else {
+            // wrap内
+            removeFloatingEl(bunny, itemKey);
+            const img = document.createElement("img");
+            img.className = "isyouItem";
+            img.dataset.itemKey = itemKey;
+            img.src = it.img;
+            layer.appendChild(img);
+            applyWrapTransform(img, bunny, it);
+          }
+        });
 
-          layer.appendChild(img);
-          applyTransform(img, bunny, it);
+        // 装備してないfieldアイテムを消す
+        Object.keys(ITEMS).forEach((k) => {
+          if (ITEMS[k].mode !== "field") return;
+          if (!eq[k]) removeFloatingEl(bunny, k);
         });
       }
 
@@ -562,9 +627,12 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         saveAll();
         drawAllForBunny(bunny);
 
+        // 「ポンッ」演出（partyhatだけ：field要素に付ける）
         if (itemKey === "partyhat") {
-          bunny.wrap.classList.add("isyouPopHat");
-          setTimeout(() => bunny.wrap?.classList?.remove("isyouPopHat"), 260);
+          const it = ITEMS.partyhat;
+          const el = ensureFloatingEl(bunny, "partyhat", it);
+          el.classList.add("pop");
+          setTimeout(() => el.classList.remove("pop"), 260);
         }
       }
 
@@ -596,13 +664,31 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }, { capture: true });
 
       /* =========================
-       * Hooks
+       * Hooks + flip追従（毎フレーム座標更新）
        * ========================= */
       WB.on?.("bunnyCountChanged", redrawAll);
       WB.on?.("resize", redrawAll);
 
+      // ★partyhatはfield追従なので、毎フレーム追従させる
+      let raf = 0;
+      const loop = () => {
+        const list = getBunnyList() || [];
+        for (const b of list) {
+          if (!b || b.isBaby) continue;
+          const key = String(b.bornAt);
+          const eq = equipped[key] || {};
+          if (eq.partyhat) {
+            const it = ITEMS.partyhat;
+            const el = ensureFloatingEl(b, "partyhat", it);
+            positionFloating(el, b, it);
+          }
+        }
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
+
       redrawAll();
-      console.log("[isyou] ready");
+      console.log("[isyou] ready (partyhat follow-field = no flip drift)");
     })
     .catch((err) => console.warn("[isyou] init failed:", err?.message || err));
 })();
