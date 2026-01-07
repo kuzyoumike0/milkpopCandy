@@ -39,17 +39,16 @@
 
     const ITEMS = {
       partyhat: {
-        label: "パーティーハット",
-        img: "./assets/isyou/partyhat.png",
-        price: 500,
+      label: "パーティーハット",
+      img: "./assets/isyou/partyhat.png",
+      price: 500,
 
-        // ★画像に合わせた確定値
-        anchorY: 0.06,   // 頭の上（耳の間）
-        offsetX: 22,
-        offsetY: -18,    // ポンポン分上へ
-        scale: 1.05,      // 元画像が小さいので大きめ
-        z: 40,
-      },
+      anchorY: 0.03,   // ★頭頂部（耳の付け根より上）
+      offsetX: 14,     // ★耳の間から少し右
+      offsetY: -10,    // ★頭に「乗る」高さ
+      scale: 0.95,     // ★かぶせサイズ（これ以上大きいと浮く）
+      z: 25,           // ★顔より少し後ろに回す
+    },
       crown: {
         label: "王冠",
         img: "./assets/isyou/crown.png",
