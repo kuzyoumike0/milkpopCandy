@@ -63,18 +63,15 @@
       // anchorX/Y: 0.0〜1.0（画像左上が0,0 右下が1,1）
       // flip時は anchorX を左右反転（1 - anchorX）して頭側に追従
       const SLOTS = {
-        hat: {
-          // ★頭の位置（この値で“帽子の土台”が決まる）
-          // 今の画像だと頭が右寄りなので 0.62 くらいが合いやすい
-          anchorX: 0.62,
-          anchorY: 0,
+  hat: {
+    anchorX: 0.62,
+    anchorY: 0.10,
+    offsetX: 0,
+    offsetY: 30,   // ★もっと下（まずは +30）
+    z: 9999,
+  },
+};
 
-          // ★アンカーからの微調整（px）
-          offsetX: 0,
-          offsetY: 0, // もう少し上に乗せるなら -20 など
-          z: 9999,
-        },
-      };
 
       const ITEMS = {
         partyhat: {
