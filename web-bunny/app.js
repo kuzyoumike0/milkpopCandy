@@ -1,13 +1,13 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v14.1", Date.now());
+  console.log("[app.js] LOADED FIX v14.3 (charge->tier burst)", Date.now());
 
   /* =========================
    * Assets / Defs
    * ========================= */
   const ASSETS = {
     babyBunny: "./assets/babybunny.png",
-    hart: "./assets/hart.png",
+    hart: "./assets/hart.png", // ※今回の仕様では未使用（残してOK）
 
     coinSE: "./assets/coin.mp3",
     poyoSE: "./assets/poyo.mp3",
@@ -16,15 +16,15 @@
 
     ougonUnchi: "./assets/ougonunchi.png",
     coins: [
-      "./assets/coin1.png",
-      "./assets/coin2.png",
-      "./assets/coin3.png",
-      "./assets/coin4.png",
+      "./assets/coin1.png", // tier 0
+      "./assets/coin2.png", // tier 1
+      "./assets/coin3.png", // tier 2
+      "./assets/coin4.png", // tier 3
     ],
   };
 
   const BUNNY_DEFS = {
-    bunny1:  { label: "通常みるぽ",   img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny1:  { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
     bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
     bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
     bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
@@ -36,9 +36,43 @@
    * ========================= */
   const BABY_DURATION_MS = 3 * 60 * 1000;
   const BABY_SPEED_MUL   = 0.65;
+
+  // 進化時の突然変異（不要なら 0）
   const REA_EVOLVE_RATE  = 0.01;
 
   const DEPART_COST = 10; // tabidati.js が使う
+
+  /* =========================
+   * Charge Gauge（表示しない）
+   * - MAXになったら「チャージ状態」
+   * - 次に「うさぎをクリックした人」が高ティア複数ドロップ
+   * ========================= */
+  const CHARGE_MAX = 100;
+
+  // どれで貯めるか（お好みで調整）
+  const CHARGE_GAIN_ON_BUNNY_TAP     = 8; // うさぎクリック
+  const CHARGE_GAIN_ON_COIN_COLLECT = 3; // コイン回収
+
+  let charge = 0;
+  let chargeReady = false;
+
+  function addCharge(delta) {
+    if (chargeReady) return; // チャージ済みなら追加しない（次クリック待ち）
+    delta = Math.floor(Number(delta) || 0);
+    if (delta <= 0) return;
+    charge = Math.min(CHARGE_MAX, charge + delta);
+    if (charge >= CHARGE_MAX) {
+      chargeReady = true;
+      charge = CHARGE_MAX;
+      emit("chargeReady", {}); // 演出したければ他JSで拾える
+    }
+  }
+
+  function consumeCharge() {
+    chargeReady = false;
+    charge = 0;
+    emit("chargeConsumed", {});
+  }
 
   /* =========================
    * Storage
@@ -177,13 +211,13 @@
   }
 
   /* =========================
-   * Drops（最低限：クリックで1コイン落とす）
+   * Drops（ティア対応）
    * ========================= */
   const dropsOnField = [];
   const dropByEl = new WeakMap();
 
   class CoinDrop {
-    constructor(x, y) {
+    constructor(x, y, tierIndex = 0) {
       this.x = x;
       this.y = y;
       this.vx = (Math.random() * 2 - 1) * 110;
@@ -194,7 +228,8 @@
 
       const el = document.createElement("img");
       el.className = "coin";
-      el.src = ASSETS.coins[0];
+      this.tier = clamp(Math.floor(tierIndex), 0, ASSETS.coins.length - 1);
+      el.src = ASSETS.coins[this.tier];
       el.draggable = false;
       this.el = el;
 
@@ -230,23 +265,44 @@
     }
     collect() {
       if (!this.el || !this.el.isConnected) return;
-      coins += 1;
+
+      // coin1=+1, coin2=+2, coin3=+3, coin4=+4
+      coins += (this.tier + 1);
       saveCoins();
       updateHud();
       playSE(seCoin);
+
+      // ✅ コイン回収でもチャージが貯まる
+      addCharge(CHARGE_GAIN_ON_COIN_COLLECT);
+
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
     }
   }
 
-  function spawnClickCoin(bunny) {
+  function spawnClickCoins(bunny, count = 1, tierPicker = () => 0) {
     const r  = bunny.wrap.getBoundingClientRect();
     const fr = field.getBoundingClientRect();
-    const x  = (r.left - fr.left) + r.width  * 0.55 + rand(-8, 8);
-    const y  = (r.top  - fr.top)  + r.height * 0.82;
-    const c  = new CoinDrop(x, y);
-    dropsOnField.push(c);
+    const baseX  = (r.left - fr.left) + r.width  * 0.55;
+    const baseY  = (r.top  - fr.top)  + r.height * 0.82;
+
+    for (let i = 0; i < count; i++) {
+      const x = baseX + rand(-14, 14);
+      const y = baseY + rand(-6, 6);
+      const tier = tierPicker();
+      const c = new CoinDrop(x, y, tier);
+      dropsOnField.push(c);
+    }
+  }
+
+  // coin2〜coin4（tier 1..3）を coin4寄りに出す
+  function tierPickerHigh() {
+    // 重み: coin2:1 / coin3:2 / coin4:5
+    const r = Math.random();
+    if (r < 1 / 8) return 1;   // coin2
+    if (r < 3 / 8) return 2;   // coin3
+    return 3;                 // coin4
   }
 
   /* =========================
@@ -287,7 +343,17 @@
         e?.preventDefault?.();
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
-        spawnClickCoin(this);
+
+        // ✅ チャージ済みなら「高ティア複数」
+        if (chargeReady) {
+          const count = 3 + Math.floor(Math.random() * 5); // 3〜7枚
+          spawnClickCoins(this, count, tierPickerHigh);
+          consumeCharge();
+        } else {
+          // 通常：coin1を1枚
+          spawnClickCoins(this, 1, () => 0);
+          addCharge(CHARGE_GAIN_ON_BUNNY_TAP);
+        }
       };
       this.wrap.addEventListener("pointerdown", tap);
       this.wrap.addEventListener("click", tap);
@@ -324,12 +390,18 @@
       this.y = groundY() - 120;
     }
 
+    // ✅ babyは3分で「進化先(kind)」に進化
     evolveIfNeeded() {
       if (!this.isBaby) return;
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
       this.isBaby = false;
-      if (Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
+
+      // （任意）突然変異：進化時だけ reabunny へ
+      if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) {
+        this.kind = "reabunny";
+      }
+
       this.syncSprite();
       this.clampInside();
     }
@@ -489,6 +561,10 @@
 
     // ui
     updateHud,
+
+    // charge（他JSから加算したい時用・表示はしない）
+    addCharge: (n) => addCharge(n),
+    isChargeReady: () => !!chargeReady,
   };
 
   /* =========================
