@@ -100,20 +100,19 @@
 }
 
 /* ===== 帽子：耳の下／頭の真ん中 ===== */
-.bunnyWrap{ position:absolute; }
-
 .bunnyWrap .isyouHat{
   position:absolute;
 
+  /* ★大幅に下へ */
   left: var(--hatX, 52%);
-  top:  var(--hatY, 80px);     /* ★下にずらす */
+  top:  var(--hatY, 36px);   /* ← 18px → 36px */
 
-  width: var(--hatW, 56px);   /* ★大きめ */
+  width: var(--hatW, 64px); /* ← 少し大きく */
   height:auto;
 
   transform:
     translateX(-50%)
-    rotate(var(--hatR, -10deg))
+    rotate(var(--hatR, -8deg))
     scale(var(--hatS, 1));
 
   transform-origin: 50% 90%;
@@ -121,6 +120,7 @@
   z-index: 6;
   filter: drop-shadow(0 6px 8px rgba(0,0,0,.18));
 }
+
 
 /* 左右反転時の角度補正 */
 .bunnyWrap.flip .isyouHat{
