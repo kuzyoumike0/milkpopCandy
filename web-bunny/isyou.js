@@ -48,21 +48,19 @@
 
       const ITEMS = {
         partyhat: {
-          label: "パーティーハット",
-          img: "/assets/isyou/partyhat.png",
-          price: 500,
+  label: "パーティーハット",
+  img: "/assets/isyou/partyhat.png",
+  price: 500,
 
-          // ★あなたが今使ってる数値をそのまま採用（頭上の位置調整）
-          // anchorY は「wrapの上端からの比率」。マイナスOK（上に出せる）
-          anchorY: -0.58,
-          offsetX: 10,
-          offsetY: 18,
-          scale: 0.34,
-          z: 9999,
+  // ★field追従用：anchorYは 0〜1 にする
+  anchorY: 0.10,   // 頭の位置（だいたいこのへん）
+  offsetX: 10,     // 耳の間に寄せる
+  offsetY: -22,    // 上に乗せる（ここで微調整）
+  scale: 0.34,
+  z: 9999,
+  mode: "field",
+},
 
-          // ★partyhatは“field追従”で描画（反転ズレ0）
-          mode: "field",
-        },
 
         crown: {
           label: "王冠",
