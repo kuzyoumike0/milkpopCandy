@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.0 (per-bunny charge + hidden gauge + heart)", Date.now());
+  console.log("[app.js] LOADED v16.1 (baby small + baby no charge + baby idle coin1 + smaller heart)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -45,14 +45,19 @@
    * - 時間経過で貯まる（少し早く）
    * - クリック：その個体のチャージ量で「枚数/ティア」を決めてドロップ→その個体のチャージを消費
    * - チャージMAX中は、その個体の頭上に hart.png（小さめ＆ゆらゆら）
+   * ※ baby はチャージしない（ゲージ無し・ハート無し）
    * ========================= */
   const CHARGE_MAX = 100;
-
-  // ★少し早く：1秒あたり +3（=約34秒で満タン）
   const CHARGE_PER_SEC = 3.0;
-
-  // クリック後の最低保証（次が0枚感を避けたいなら1など。0でもOK）
   const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
+
+  /* =========================
+   * Idle Drop（放置排出）
+   * - baby：常に coin1 を1枚だけ
+   * - 大人：種類に応じて枚数/ティアを少しだけ増やす（クリックのチャージ爆発とは別枠）
+   * ========================= */
+  const IDLE_DROP_BABY_SEC  = 7.5;  // babyは遅め＆1枚
+  const IDLE_DROP_ADULT_SEC = 5.0;  // 大人はやや早め
 
   /* =========================
    * Storage
@@ -141,7 +146,7 @@
   }
 
   /* =========================
-   * CSS injection（コイン小さく / ハート小さめ＆ゆらゆら）
+   * CSS injection（コイン小さく / ハート小さめ＆ゆらゆら / baby小さく）
    * ========================= */
   (function injectCssOnce() {
     if (document.getElementById("wbPerBunnyChargeCss")) return;
@@ -152,6 +157,14 @@
         width:26px !important;
         height:26px !important;
       }
+
+      /* ✅ babybunny を小さく */
+      .bunny.baby{
+        transform: scale(0.78);
+        transform-origin: bottom center;
+      }
+
+      /* ✅ hart.png を小さく */
       .wbChargeHart {
         position:absolute;
         z-index:9999;
@@ -161,8 +174,8 @@
         transform: translate(-50%, -50%);
         animation: wbHartBob 1.05s ease-in-out infinite;
         filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
-        width:40px;
-        height:40px;
+        width:28px;
+        height:28px;
       }
       @keyframes wbHartBob {
         0%   { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
@@ -317,12 +330,15 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      // ★個体ごとのチャージ
+      // ★個体ごとのチャージ（babyは使わない）
       this.charge = 0;        // 0..CHARGE_MAX
       this.chargeReady = false;
 
       // ★個体ごとのハート
       this.hartEl = null;
+
+      // ★放置排出タイマー
+      this.idleAcc = 0;
 
       refreshFieldSize();
       this.x = rand(20, Math.max(21, FIELD_W - 140));
@@ -339,6 +355,12 @@
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
+        // ✅ babyは coin1 を1枚だけ（チャージも消費しない）
+        if (this.isBaby) {
+          spawnClickCoins(this, 1, () => 0); // tier=0 → coin1
+          return;
+        }
+
         // ✅ その個体のチャージ量でドロップ決定
         const plan = this.getDropPlanFromOwnCharge();
         spawnClickCoins(this, plan.count, plan.pickTier);
@@ -346,7 +368,7 @@
         // ✅ クリックでその個体のチャージ消費（ハートも消える）
         this.consumeOwnCharge();
 
-        // ✅ 次周回の少しだけ加算（無しにしたければ 0）
+        // ✅ 次周回の少しだけ加算
         this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
       };
 
@@ -364,6 +386,9 @@
     }
 
     syncSprite() {
+      // ✅ baby クラス付与（小さくする）
+      this.el.classList.toggle("baby", this.isBaby);
+
       this.el.src = this.isBaby
         ? ASSETS.babyBunny
         : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
@@ -403,6 +428,9 @@
     }
 
     addOwnCharge(delta) {
+      // ✅ babyはチャージしない（ゲージ無し）
+      if (this.isBaby) return;
+
       if (this.chargeReady) return;
       delta = Number(delta) || 0;
       if (delta <= 0) return;
@@ -427,60 +455,95 @@
       return clamp(this.charge / CHARGE_MAX, 0, 1);
     }
 
-    // チャージ量が高いほど「枚数が増える＆高ティアが出やすい」
-    // チャージ量が高いほど「枚数が増える＆高ティアが出やすい」
-getDropPlanFromOwnCharge() {
-  const r0 = this.getChargeRatio(); // 0..1
+    // ✅ クリック時：チャージ量が高いほど「枚数が増える＆高ティアが出やすい」
+    getDropPlanFromOwnCharge() {
+      const r0 = this.getChargeRatio(); // 0..1
 
-  // ✅ うさぎ種類ごとのコイン倍率（bunny1=0.55〜reabunny=4.0）
-  const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
+      const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
+      const babyMul = this.isBaby ? 0.6 : 1.0;
 
-  // ✅ babyは控えめ（欲しければ 0.6→0.8 などに）
-  const babyMul = this.isBaby ? 0.6 : 1.0;
+      const r = Math.min(1, r0 * (1.15 + mul * 0.15));
 
-  // ✅ 体感を上げるため「実効チャージ」を少しブースト（上限は1に丸め）
-  const r = Math.min(1, r0 * (1.15 + mul * 0.15));
+      const count = clamp(
+        Math.floor((2 + r * 24) * mul * babyMul),
+        2,
+        60
+      );
 
-  // ✅ 枚数：増やす（元: 1 + floor(r*15)）
-  // 例：通常みるぽでも増える / 上位・レアはガッツリ増える
-  const count = clamp(
-    Math.floor((2 + r * 24) * mul * babyMul),
-    2,
-    60
-  );
+      const maxTier = clamp(
+        Math.floor(r * 3 + mul * 0.35),
+        0,
+        ASSETS.coins.length - 1
+      );
 
-  // ✅ 最大ティア：0〜3（元: floor(r*6) だったけど assets は 0..3）
-  // rとmulで上に寄せる
-  const maxTier = clamp(
-    Math.floor(r * 3 + mul * 0.35),
-    0,
-    ASSETS.coins.length - 1
-  );
+      const pickTier = () => {
+        if (maxTier <= 0) return 0;
 
-  const pickTier = () => {
-    if (maxTier <= 0) return 0;
+        const p = 2.2 + mul * 0.35;
+        let sum = 0;
+        const w = [];
+        for (let t = 0; t <= maxTier; t++) {
+          const wt = Math.pow(t + 1, p);
+          w.push(wt);
+          sum += wt;
+        }
+        let x = Math.random() * sum;
+        for (let t = 0; t <= maxTier; t++) {
+          x -= w[t];
+          if (x <= 0) return t;
+        }
+        return maxTier;
+      };
 
-    // ✅ 高ティア優遇を強める（元: (t+1)^2）
-    // さらに mul が高いほど上振れしやすい
-    const p = 2.2 + mul * 0.35; // ここを上げるほど上位コインが出やすい
-    let sum = 0;
-    const w = [];
-    for (let t = 0; t <= maxTier; t++) {
-      const wt = Math.pow(t + 1, p);
-      w.push(wt);
-      sum += wt;
+      return { count, pickTier };
     }
-    let x = Math.random() * sum;
-    for (let t = 0; t <= maxTier; t++) {
-      x -= w[t];
-      if (x <= 0) return t;
+
+    // ✅ 放置排出（babyは coin1 固定）
+    idleDrop(dt) {
+      this.idleAcc += dt;
+
+      if (this.isBaby) {
+        if (this.idleAcc < IDLE_DROP_BABY_SEC) return;
+        this.idleAcc = 0;
+        spawnClickCoins(this, 1, () => 0); // baby放置=coin1だけ
+        return;
+      }
+
+      // 大人：種類で少し増える
+      const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
+      const interval = Math.max(1.2, IDLE_DROP_ADULT_SEC / Math.max(0.6, mul)); // 強いうさぎほど少し早い
+      if (this.idleAcc < interval) return;
+      this.idleAcc = 0;
+
+      // 放置は「少量」設計（クリックのチャージ爆発が主役）
+      const count = clamp(Math.round(1 + mul * 1.2), 1, 12);
+
+      const maxTier = clamp(
+        Math.floor(mul * 0.9), // 0..3 に収まる想定
+        0,
+        ASSETS.coins.length - 1
+      );
+
+      const pickTier = () => {
+        if (maxTier <= 0) return 0;
+        // ちょい上振れ：上位ほど出やすく
+        const w = [];
+        let sum = 0;
+        for (let t = 0; t <= maxTier; t++) {
+          const wt = (t + 1) * (t + 1);
+          w.push(wt);
+          sum += wt;
+        }
+        let x = Math.random() * sum;
+        for (let t = 0; t <= maxTier; t++) {
+          x -= w[t];
+          if (x <= 0) return t;
+        }
+        return maxTier;
+      };
+
+      spawnClickCoins(this, count, pickTier);
     }
-    return maxTier;
-  };
-
-  return { count, pickTier };
-}
-
 
     getWrapWidth() {
       const w1 = this.wrap.offsetWidth || 0;
@@ -526,7 +589,10 @@ getDropPlanFromOwnCharge() {
     update(dt) {
       this.evolveIfNeeded(false);
 
-      // ★時間経過で個体チャージ
+      // ✅ 放置排出（babyは coin1 固定）
+      this.idleDrop(dt);
+
+      // ★時間経過で個体チャージ（babyは addOwnCharge 内で無効化）
       this.addOwnCharge(CHARGE_PER_SEC * dt);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
@@ -542,8 +608,8 @@ getDropPlanFromOwnCharge() {
 
       this.applyPos();
 
-      // ★満タン中はハート追従
-      if (this.chargeReady) this.positionHeart();
+      // ★満タン中はハート追従（babyは除外）
+      if (!this.isBaby && this.chargeReady) this.positionHeart();
     }
   }
 
@@ -678,7 +744,7 @@ getDropPlanFromOwnCharge() {
     getBunnyCharge: (bornAt) => {
       const t = Number(bornAt);
       const b = bunnies.find(x => x && x.bornAt === t);
-      return b ? { charge: b.charge, ready: b.chargeReady } : null;
+      return b ? { charge: b.charge, ready: b.chargeReady, isBaby: b.isBaby } : null;
     },
   };
 
