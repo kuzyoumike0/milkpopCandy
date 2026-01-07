@@ -49,6 +49,7 @@ html,body{
   position:fixed;
   inset:0;
   overflow:hidden;
+  background:#000; /* 背景ロード前の保険 */
 }
 
 #bunnyLayer,
@@ -60,10 +61,23 @@ html,body{
 #coinLayer{
   pointer-events:none;
 }
+
+/* =========================
+   COIN
+========================= */
 .coin,
 .ougonunchi{
+  position:absolute;
+  width:32px;
+  height:auto;
+  user-select:none;
   pointer-events:auto;
   cursor:pointer;
+}
+
+.ougonunchi{
+  width:26px;
+  filter:drop-shadow(0 0 12px gold);
 }
 
 /* =========================
@@ -73,7 +87,7 @@ html,body{
   position:absolute;
   width:140px;
   height:140px;
-  pointer-events:auto;
+  pointer-events:auto; /* ★クリック判定はここ */
 }
 
 .bunny{
@@ -83,18 +97,22 @@ html,body{
   width:120px;
   height:auto;
   user-select:none;
-  pointer-events:none;
+  pointer-events:none; /* ★img自体はクリック不可 */
 }
 
 .bunnyWrap.flip .bunny{
   transform:scaleX(-1);
 }
 
+/* babyは小さく */
 .bunnyWrap.baby .bunny{
-  width:80px;
+  width:86px;
   opacity:.95;
 }
 
+/* =========================
+   HEART
+========================= */
 .bunnyHeart{
   position:absolute;
   top:-22px;
@@ -105,31 +123,22 @@ html,body{
   pointer-events:none;
 }
 
+/* MAX瞬間だけ使う（無限アニメ） */
 .bunnyHeart.show{
   opacity:1;
   animation:heartFloat 1.2s ease-in-out infinite;
+}
+
+/* MAX中の表示専用（アニメなし） */
+.bunnyHeart.visible{
+  opacity:1;
+  animation:none;
 }
 
 @keyframes heartFloat{
   0%{ transform:translate(-50%,0);}
   50%{ transform:translate(-50%,-6px);}
   100%{ transform:translate(-50%,0);}
-}
-
-/* =========================
-   COIN / DROP
-========================= */
-.coin,
-.ougonunchi{
-  position:absolute;
-  width:32px;
-  height:auto;
-  user-select:none;
-}
-
-.ougonunchi{
-  width:26px;
-  filter:drop-shadow(0 0 12px gold);
 }
 
 /* =========================
@@ -160,9 +169,11 @@ html,body{
   align-items:center;
   margin-bottom:8px;
 }
+
 .modalTitle{
   font-weight:900;
 }
+
 .modalClose{
   border:none;
   background:#eee;
@@ -188,24 +199,30 @@ html,body{
   text-align:center;
   box-shadow:0 6px 18px rgba(0,0,0,.12);
 }
+
 .shopCard.disabled{
   opacity:.45;
 }
+
 .shopThumb{
   width:72px;
   height:72px;
   object-fit:contain;
 }
+
 .shopName{
   font-weight:900;
 }
+
 .shopDesc{
   font-size:12px;
   opacity:.8;
 }
+
 .shopPrice{
   font-weight:900;
 }
+
 .shopPrice.bad{
   color:#ff4a4a;
 }
@@ -226,18 +243,22 @@ html,body{
   text-align:center;
   box-shadow:0 6px 18px rgba(0,0,0,.12);
 }
+
 .dexCard.unknown{
   opacity:.5;
   filter:grayscale(1);
 }
+
 .dexCard img{
   width:80px;
   height:80px;
   object-fit:contain;
 }
+
 .dexName{
   font-weight:900;
 }
+
 .dexDesc{
   font-size:12px;
 }
@@ -323,410 +344,42 @@ html,body{
   }
 }
 
-/* saku を左右に1枚ずつ・下に配置 */
-.saku-single{
-  position: fixed;
-  bottom: 0;              /* ★下に固定 */
-  height: 120px;          /* ★高すぎないように */
-  width: auto;
-  pointer-events: none;
-  z-index: 3;             /* ★うさぎより下 */
-  opacity: 0.9;
-}
-
-.saku-single.left{
-  left: 0;
-}
-
-.saku-single.right{
-  right: 0;
-  transform: scaleX(-1);
-}
-
-/* ===== 旅立ちメッセージ ===== */
-.farewellMsg{
-  position: fixed;
-  left: 50%;
-  bottom: 140px;              /* 地面より少し上 */
-  transform: translateX(-50%);
-  padding: 10px 18px;
-  background: rgba(255,255,255,0.85);
-  border-radius: 18px;
-  font-size: 14px;
-  font-weight: 500;
-  box-shadow: 0 10px 30px rgba(0,0,0,.15);
-  pointer-events: none;
-  z-index: 999;
-  opacity: 0;
-  animation: farewellFloat 2.4s ease-out forwards;
-}
-
-@keyframes farewellFloat{
-  0%{
-    opacity: 0;
-    transform: translate(-50%, 10px);
-  }
-  15%{
-    opacity: 1;
-  }
-  100%{
-    opacity: 0;
-    transform: translate(-50%, -40px);
-  }
-}
-
-/* ===== 旅立ち節目 通知 ===== */
-.farewellMilestone{
-  position: fixed;
-  left: 50%;
-  bottom: 180px;
-  transform: translateX(-50%);
-  padding: 12px 20px;
-  background: rgba(255,255,255,0.9);
-  border-radius: 20px;
-  font-size: 14px;
-  font-weight: 600;
-  box-shadow: 0 12px 36px rgba(0,0,0,.18);
-  pointer-events: none;
-  z-index: 1000;
-  opacity: 0;
-  animation: milestoneFloat 3.0s ease-out forwards;
-}
-
-.farewellMilestone.rea{
-  background: rgba(60,40,45,0.95);
-  color: #f3dede;
-}
-
-@keyframes milestoneFloat{
-  0%{
-    opacity: 0;
-    transform: translate(-50%, 16px);
-  }
-  15%{
-    opacity: 1;
-  }
-  100%{
-    opacity: 0;
-    transform: translate(-50%, -48px);
-  }
-}
-/* ===== 図鑑：タブ ===== */
-.dexTabs{
-  display:flex;
-  gap:8px;
-  margin: 6px 0 12px;
-}
-
-.dexTab{
-  flex:1;
-  padding:8px 10px;
-  border:none;
-  border-radius:12px;
-  cursor:pointer;
-  background:#f2f2f2;
-  font-weight:800;
-}
-
-.dexTab.active{
-  background:#ffffff;
-  box-shadow:0 6px 18px rgba(0,0,0,.10);
-}
-
-.titleCard{
-  background:#fff;
-  border-radius:14px;
-  padding:10px;
-  box-shadow:0 6px 18px rgba(0,0,0,.12);
-  text-align:left;
-}
-
-.titleCard.disabled{
-  opacity:.45;
-}
-
-.titleName{
-  font-weight:900;
-  margin-bottom:4px;
-}
-
-.titleReq{
-  font-size:12px;
-  opacity:.8;
-}
-
-.titleBadge{
-  display:inline-block;
-  margin-left:6px;
-  padding:2px 8px;
-  border-radius:999px;
-  background:#eee;
-  font-size:11px;
-  font-weight:800;
-}
-
-.titleBadge.on{
-  background:rgba(255, 215, 120, 0.55);
-}
-/* ===== 称号：進捗バー ===== */
-.titleProgress{
-  margin: 6px 0 10px;
-}
-
-.titleProgressBar{
-  height: 10px;
-  border-radius: 999px;
-  background: #eee;
-  overflow: hidden;
-}
-
-.titleProgressFill{
-  height: 100%;
-  width: 0%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #ffd36a, #ffb703);
-  transition: width .4s ease;
-}
-
-.titleProgressText{
-  margin-top: 4px;
-  font-size: 11px;
-  opacity: .8;
-  text-align: right;
-}
-
 /* =========================
-   お迎え：全面オーバーレイ
+   SAKU（左右）
 ========================= */
-#adoptOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 245, 248, 0.96);
-}
-
-#adoptOverlay.show {
-  display: flex;
-}
-
-.adoptContent {
-  text-align: center;
-  padding: 24px 28px;
-  border-radius: 20px;
-  background: #fff;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.15);
-}
-
-.adoptActions {
-  margin-top: 20px;
-  display: flex;
-  gap: 16px;
-  justify-content: center;
-}
-
-.adoptActions .primary {
-  background: #ff9ac6;
-  color: #fff;
-}
-/* ===== 全面オーバーレイ共通 ===== */
-.overlay{
-  position: fixed;
-  inset: 0;
-  z-index: 9998;
-  display: none;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255,245,248,0.96);
-}
-.overlay.show{ display:flex; }
-
-.overlayCard{
-  width: min(520px, 92vw);
-  border-radius: 22px;
-  background: #fff;
-  padding: 18px 20px;
-  box-shadow: 0 20px 50px rgba(0,0,0,0.15);
-}
-.overlayCard.wide{
-  width: min(860px, 94vw);
-  max-height: 82vh;
-  overflow: hidden;
-}
-
-.overlayHeader{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap: 12px;
-}
-.overlayBody{
-  margin-top: 12px;
-  max-height: 68vh;
-  overflow: auto;
-  padding-right: 6px;
-}
-
-.overlayActions{
-  margin-top: 16px;
-  display:flex;
-  justify-content:center;
-  gap: 12px;
-}
-.primary{
-  background: #ff9ac6;
-  color: #fff;
-  border: none;
-  padding: 8px 14px;
-  border-radius: 12px;
-}
-.overlayClose{
-  border-radius: 12px;
-  padding: 6px 10px;
-}
-/* ===== フィールド ===== */
-#field {
-  position: relative;
-  width: 100%;
-  height: calc(100vh - var(--hud-height, 0px));
-  overflow: hidden;
-  background: #000; /* 動画ロード前の保険 */
-}
-
-#field { position: relative; overflow: hidden; }
-
-/* 背景色（最背面） */
-#bgLayer{
-  position:absolute;
-  inset:0;
-  z-index:0;
+.saku{
+  position:fixed;
+  bottom:6px;
+  width:96px;
+  height:auto;
+  opacity:.9;
   pointer-events:none;
-  background: var(--bg, linear-gradient(#ffd6e7, #fff));
-  transition: background 2.2s ease;
+  z-index:4;
 }
 
-/* 天気 */
-#tenkiLayer{
-  position:absolute;
-  inset:0;
-  z-index:1;
-  pointer-events:none;
+.saku.left{ left:6px; }
+.saku.right{
+  right:6px;
+  transform:scaleX(-1);
 }
 
-/* ゲーム */
-#bunnyLayer{ position:relative; z-index:3; }
-#coinLayer { position:relative; z-index:4; }
-
-
-/* ===== 天気 ===== */
-#tenkiLayer {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-}
-#departBtn.on{
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(0,0,0,.18);
-  filter: brightness(1.05);
-}
-
-/* =========================
- * 花火演出（みきれ防止・中央表示）
- * ========================= */
-.fireworks {
-  position: fixed;
-  inset: 0;                 /* 上下左右 0 */
-  width: 100vw;
-  height: 100vh;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  pointer-events: none;
-  z-index: 5;
-  overflow: visible;        /* ★ここが重要 */
-}
-
-.fireworks img {
-  max-width: 100vmin;       /* 画面に収まる最大サイズ */
-  max-height: 100vmin;
-
-  width: auto;
-  height: auto;
-
-  object-fit: contain;      /* ★みきれ防止の核心 */
-}
-/* ===== saku.png（画面下に固定表示） ===== */
-#sakuImg{
-  position: fixed;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
-
-  width: min(720px, 100vw);
-  height: auto;
-
-  z-index: 9999;      /* 何より前に出す */
-  pointer-events: none;
-}
-/* =========================
- * saku.png（左右に小さく表示）
- * ========================= */
-.saku {
-  position: fixed;
-  bottom: 6px;
-
-  width: 96px;        /* ← サイズ調整はここ */
-  height: auto;
-
-  opacity: 0.9;
-  pointer-events: none; /* クリックを邪魔しない */
-  z-index: 4;           /* 花火より下 / UIより下なら 3〜5 */
-}
-
-/* 左 */
-.saku.left {
-  left: 6px;
-}
-
-/* 右（左右反転させると綺麗） */
-.saku.right {
-  right: 6px;
-  transform: scaleX(-1);
-}
-
-/* スマホではさらに小さく */
-@media (max-width: 600px) {
-  .saku {
-    width: 64px;
-    bottom: 4px;
+@media (max-width:600px){
+  .saku{
+    width:64px;
+    bottom:4px;
   }
 }
+
+/* =========================
+   SLOT PANEL
+========================= */
 #slotStarMachinePanel3x3{
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  display: none;       /* 初期は閉じる */
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  display:none;
 }
 
 #slotStarMachinePanel3x3.show{
-  display: block;
+  display:block;
 }
-/* うさぎ共通サイズ（通常） */
-.bunnyWrap .bunny{
-  width: 120px;   /* ←通常サイズ（必要なら調整） */
-  height: auto;
-}
-
-/* babyだけ小さくする */
-.bunnyWrap.baby .bunny{
-  width: 86px;    /* ←babyサイズ */
-}
-
-/* ===== ゲームレイヤー ===== */
-#bunnyLayer { position: relative; z-index: 3; }
-#coinLayer  { position: relative; z-index: 4; }
