@@ -1,12 +1,12 @@
-// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版
+// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版（FIX：flipでも帽子がズレない）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
 // ✅ FIX：親(bunnyWrap.flip)が反転してるのでアクセ側で scaleX しない（二重反転回避）
 // ✅ slot（部類）導入：hat に partyhat/crown/ribbon を入れて同一位置
-// ✅ FIX：帽子位置は「頭アンカー（比率）」で置く
-// ✅ FIX：flip時に anchorX を反転しない（親のflipに任せる）←重要
+// ✅ FIX：アンカー座標を getBoundingClientRect ではなく offset 系（レイアウト座標）で取る
+//     → flip（transform）しても帽子がズレない
 
 (() => {
   "use strict";
@@ -20,11 +20,7 @@
       const t = setInterval(() => {
         try {
           const v = getter();
-          if (v) {
-            clearInterval(t);
-            resolve(v);
-            return;
-          }
+          if (v) { clearInterval(t); resolve(v); return; }
         } catch {}
         if (Date.now() - start > timeoutMs) {
           clearInterval(t);
@@ -43,12 +39,8 @@
 
   Promise.all([waitForWB(), waitForHUD()])
     .then(([WB, hud]) => {
-      if (window.__ISYOU_INITED__) {
-        console.log("[isyou] already inited");
-        return;
-      }
+      if (window.__ISYOU_INITED__) return;
       window.__ISYOU_INITED__ = true;
-      console.log("[isyou] init");
 
       /* =========================
        * Config
@@ -59,17 +51,15 @@
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
-      // slot（部類）ごとの共通位置 + 頭アンカー
+      // ★hat位置（ここだけで全帽子が動く）
       const SLOTS = {
         hat: {
-          // ★頭の位置（画像内比率）
-          // ここを基準に「右/左」を決める。flip時も値は変えない！
+          // 頭アンカー（画像内比率）
           anchorX: 0.74,
           anchorY: 0.10,
-
-          // ★微調整（px）
-          offsetX: 10,  // +で右
-          offsetY: 55,  // +で下
+          // 微調整（px）
+          offsetX: 10,
+          offsetY: 55,
           z: 9999,
         },
       };
@@ -111,9 +101,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV7")) return;
+        if (document.getElementById("isyouStyleFinalV8")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV7";
+        s.id = "isyouStyleFinalV8";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -130,14 +120,11 @@
 }
 #isyouBtn:hover{ filter:brightness(1.03); }
 
-/* 装着モード：ホバー赤枠 */
 body.isyouEquipMode .bunnyWrap:hover{
   outline:4px solid rgba(255,64,64,.60);
   outline-offset:3px;
   border-radius:18px;
 }
-
-/* 選択中：赤枠 + 最前面 */
 .bunnyWrap.isyouSelectedTarget{
   outline:4px solid rgba(255,64,64,.92);
   outline-offset:3px;
@@ -157,14 +144,12 @@ body.isyouEquipMode .bunnyWrap:hover{
   100%{ transform: var(--isyouT) scale(1.0); }
 }
 
-/* アクセサリレイヤ */
+/* レイヤ */
 .isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
-
 /* アンカーはJSで left/top をpx指定 */
 .isyouItem{
   position:absolute;
-  left:0;
-  top:0;
+  left:0; top:0;
   transform-origin:50% 50%;
   pointer-events:none;
   user-select:none;
@@ -188,8 +173,6 @@ body.isyouEquipMode .bunnyWrap:hover{
   overflow:auto;
   pointer-events:auto;
 }
-
-/* 装着モード中：背景はクリックを通す / モーダルは触れる */
 body.isyouEquipMode .isyouBackdrop{ pointer-events:none; background:rgba(0,0,0,.25); }
 body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
@@ -519,7 +502,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       function getBunnyImgEl(wrap) {
-        // うさぎ本体っぽいimgを優先して拾う
         return (
           wrap.querySelector("img.bunnyImg") ||
           wrap.querySelector("img[data-bunny]") ||
@@ -528,7 +510,21 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         );
       }
 
-      // ✅ 頭アンカー（比率）で点を取る：flipでも値を反転しない
+      // ✅ 重要：offset系で「wrap内ローカル座標」を取る（transformの影響を受けない）
+      function getLocalPosWithin(el, root) {
+        let x = 0, y = 0;
+        let cur = el;
+        // offsetParent で辿れる限り加算
+        while (cur && cur !== root) {
+          x += cur.offsetLeft || 0;
+          y += cur.offsetTop || 0;
+          cur = cur.offsetParent;
+        }
+        // root まで辿れないDOM構造でも最悪は el.offsetLeft/Top で使う
+        return { x, y, ok: (cur === root) };
+      }
+
+      // ✅ hatアンカー（比率）を「ローカル座標」で返す
       function getAnchorPoint(bunny, slotKey) {
         const wrap = bunny?.wrap;
         if (!wrap) return { x: 0, y: 0 };
@@ -536,16 +532,17 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const img = getBunnyImgEl(wrap);
         if (!img) return { x: wrap.clientWidth / 2, y: 0 };
 
-        const wr = wrap.getBoundingClientRect();
-        const ir = img.getBoundingClientRect();
-
         const slot = slotKey && SLOTS[slotKey] ? SLOTS[slotKey] : null;
         const ax = slot && typeof slot.anchorX === "number" ? slot.anchorX : 0.5;
         const ay = slot && typeof slot.anchorY === "number" ? slot.anchorY : 0.0;
 
-        // ★flip時に 1-ax しない！（親のflipに任せる）
-        const x = (ir.left - wr.left) + ir.width * ax;
-        const y = (ir.top - wr.top) + ir.height * ay;
+        const p = getLocalPosWithin(img, wrap);
+        const w = img.offsetWidth || img.clientWidth || 0;
+        const h = img.offsetHeight || img.clientHeight || 0;
+
+        // ローカル座標（transform前）
+        const x = p.x + w * ax;
+        const y = p.y + h * ay;
         return { x, y };
       }
 
@@ -674,7 +671,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (flip position stable)");
+      console.log("[isyou] ready (flip stable by layout coords)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
