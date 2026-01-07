@@ -58,25 +58,30 @@ html,body{
   inset:0;
 }
 
+/* ✅ coin の click/hover を確実に拾う */
 #coinLayer{
-  pointer-events:none;
+  pointer-events:auto;
 }
 
 /* =========================
    COIN
 ========================= */
-.coin,
-.ougonunchi{
+.coin{
   position:absolute;
-  width:32px;
-  height:auto;
+  width:66px;         /* ✅ app.js（COIN_W/COIN_H）と一致 */
+  height:66px;
   user-select:none;
   pointer-events:auto;
   cursor:pointer;
 }
 
 .ougonunchi{
+  position:absolute;
   width:26px;
+  height:auto;
+  user-select:none;
+  pointer-events:auto;
+  cursor:pointer;
   filter:drop-shadow(0 0 12px gold);
 }
 
@@ -117,22 +122,10 @@ html,body{
   pointer-events:none;
 }
 
-/* MAX瞬間だけ使う（無限アニメ） */
-.bunnyHeart.show{
-  opacity:1;
-  animation:heartFloat 1.2s ease-in-out infinite;
-}
-
-/* MAX中の表示専用（アニメなし） */
+/* ✅ 表示だけ担当（アニメはapp.js側injectに任せる） */
+.bunnyHeart.show,
 .bunnyHeart.visible{
   opacity:1;
-  animation:none;
-}
-
-@keyframes heartFloat{
-  0%{ transform:translate(-50%,0);}
-  50%{ transform:translate(-50%,-6px);}
-  100%{ transform:translate(-50%,0);}
 }
 
 /* =========================
