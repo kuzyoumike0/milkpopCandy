@@ -487,14 +487,15 @@
       this.syncSprite();
 
       const tap = (e) => {
-        e?.preventDefault?.();
-        e?.stopPropagation?.();
-        unlockAudioOnce();
-        this.onClick();
-      };
-      this.wrap.addEventListener("pointerdown", tap);
-      this.wrap.addEventListener("click", tap);
-    }
+  if (e) e.preventDefault();
+  unlockAudioOnce();
+  this.onClick();
+};
+
+// pointerdown は preventDefault を効かせたいので passive:false 推奨
+this.wrap.addEventListener("pointerdown", tap, { passive: false });
+this.wrap.addEventListener("click", tap);
+
 
     syncSprite() {
       this.wrap.classList.toggle("baby", this.isBaby);
