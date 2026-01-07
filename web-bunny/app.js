@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v16.0 (visible gauge UI + heart bob + initial charge)", Date.now());
+  console.log("[app.js] LOADED FIX v16.1 (time-based charge)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -41,20 +41,18 @@
   const DEPART_COST = 10;
 
   /* =========================
-   * Charge（UI表示あり）
-   * - 通常クリック：ゲージが貯まる（消費しない）
-   * - ゲージMAX：満タン中ずっと hart.png を表示（上下ゆらゆら）
+   * Charge（時間経過で貯まる / UI表示あり）
+   * - ✅ 時間経過でチャージ（クリックや回収では増えない）
+   * - 満タン中ずっと hart.png を表示（上下ゆらゆら）
    * - 満タン中のクリック：多め＆高ティアでドロップ → ゲージ消費(0) → ハート消える
-   * - ✅ 初期からゲージが少し貯まっている
    * ========================= */
   const CHARGE_MAX = 100;
 
-  // たまりやすさ（お好みで調整OK）
-  const CHARGE_GAIN_ON_BUNNY_TAP     = 12;
-  const CHARGE_GAIN_ON_COIN_COLLECT = 5;
+  // ✅ たまる速さ（例：1秒に 2 貯まる → 50秒で満タン）
+  const CHARGE_PER_SEC = 2.0;
 
-  // ✅ 初期チャージ（0〜100）
-  const INITIAL_CHARGE = 20;
+  // ✅ 初期チャージ
+  const INITIAL_CHARGE = 0;
 
   let charge = clamp(INITIAL_CHARGE, 0, CHARGE_MAX);
   let chargeReady = (charge >= CHARGE_MAX);
@@ -197,14 +195,14 @@
         user-select:none;
         -webkit-user-drag:none;
         transform: translate(-50%, -50%);
-        animation: wbHartFloat 1.1s ease-in-out infinite;
+        animation: wbHartFloat 1.15s ease-in-out infinite;
         filter: drop-shadow(0 8px 14px rgba(0,0,0,.18));
-        width:34px; height:34px; /* ✅ 小さめ */
+        width:30px; height:30px; /* ✅ 小さめ */
       }
       @keyframes wbHartFloat {
-        0%   { transform: translate(-50%, -50%) translateY(0px)   rotate(-3deg) scale(1); }
-        50%  { transform: translate(-50%, -50%) translateY(-9px)  rotate( 3deg) scale(1.06); }
-        100% { transform: translate(-50%, -50%) translateY(0px)   rotate(-3deg) scale(1); }
+        0%   { transform: translate(-50%, -50%) translateY(0px)   rotate(-4deg) scale(1); }
+        50%  { transform: translate(-50%, -50%) translateY(-10px) rotate( 4deg) scale(1.07); }
+        100% { transform: translate(-50%, -50%) translateY(0px)   rotate(-4deg) scale(1); }
       }
     `;
     document.head.appendChild(st);
@@ -225,7 +223,7 @@
 
     const label = document.createElement("div");
     label.id = "wbChargeLabel";
-    label.textContent = "💖 チャージ";
+    label.textContent = "⏳ チャージ";
 
     const bar = document.createElement("div");
     bar.id = "wbChargeBar";
@@ -319,31 +317,32 @@
   }
 
   /* =========================
-   * Charge helpers
+   * Charge helpers（時間経過）
    * ========================= */
-  function addCharge(delta, sourceBunny = null) {
-    if (chargeReady) return;
+  function setCharge(v) {
+    const prevReady = chargeReady;
+    charge = clamp(v, 0, CHARGE_MAX);
+    chargeReady = (charge >= CHARGE_MAX);
 
-    delta = Math.floor(Number(delta) || 0);
-    if (delta <= 0) return;
-
-    charge = clamp(charge + delta, 0, CHARGE_MAX);
-
-    if (charge >= CHARGE_MAX) {
-      charge = CHARGE_MAX;
-      chargeReady = true;
-      showChargeHeart(sourceBunny);
+    if (!prevReady && chargeReady) {
+      showChargeHeart(null);
       emit("chargeReady", {});
+    } else if (prevReady && !chargeReady) {
+      hideChargeHeart();
+      emit("chargeConsumed", {});
     }
     updateChargeHud();
   }
 
+  function addChargeByTime(dtSeconds) {
+    if (chargeReady) return;
+    const add = CHARGE_PER_SEC * dtSeconds;
+    if (add <= 0) return;
+    setCharge(charge + add);
+  }
+
   function consumeCharge() {
-    charge = 0;
-    chargeReady = false;
-    hideChargeHeart();
-    emit("chargeConsumed", {});
-    updateChargeHud();
+    setCharge(0);
   }
 
   function getChargeRatio() {
@@ -473,8 +472,6 @@
       updateHud();
       playSE(seCoin);
 
-      addCharge(CHARGE_GAIN_ON_COIN_COLLECT, null);
-
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
@@ -541,8 +538,8 @@
           return;
         }
 
+        // 通常は coin1 1枚だけ
         spawnClickCoins(this, 1, () => 0);
-        addCharge(CHARGE_GAIN_ON_BUNNY_TAP, this);
       };
 
       this.wrap.addEventListener("pointerdown", tap);
@@ -747,10 +744,10 @@
     updateHud,
 
     // charge
-    addCharge: (n) => addCharge(n, null),
     getCharge: () => charge,
     isChargeReady: () => !!chargeReady,
     consumeCharge,
+    setCharge,
   };
 
   /* =========================
@@ -776,6 +773,9 @@
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
+    // ✅ 時間経過でチャージ
+    addChargeByTime(dt);
+
     for (const b of bunnies) b.update(dt);
     for (const d of dropsOnField) d.update(dt);
 
@@ -789,10 +789,8 @@
     initBunnies();
     updateHud();
 
-    // ✅ 初期からゲージUIを表示＆反映
+    // UI初期表示
     updateChargeHud();
-
-    // ✅ 初期チャージが満タンなら開始時からハート
     if (chargeReady) showChargeHeart(null);
 
     emit("bunnyCountChanged", { count: bunnies.length });
