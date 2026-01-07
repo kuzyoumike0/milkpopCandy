@@ -1,15 +1,13 @@
 // isyou.js — お洒落（ショップ＋複数装着＋flip補正＋称号連動＋赤枠）完全版（WB待機つき）
 // ★装着は「赤枠で囲った（=選択した）うさぎ」にだけ行う
+// ★修正：装着モード中は backdrop をクリック透過（うさぎを触れる）
+// ★修正：装着モード中は「背景クリックで閉じる」を無効（誤爆防止）
 // ★修正：モーダル内クリックは装着判定しない（帽子選択できる）
-// ★修正：装着モード中でもうさぎを触れる（ただしモーダルは触れる）
-// ★修正：装着時SE（Onoma-Pop03-1(High).mp3）を確実に鳴らす
+// ★修正：装着時SE（Onoma-Pop03-1(High).mp3）を確実に鳴らす（encodeURI + clone）
 
 (() => {
   "use strict";
 
-  /* =========================
-   * Wait for WB
-   * ========================= */
   const WAIT_MS = 8000;
   const TICK_MS = 50;
 
@@ -38,45 +36,16 @@
       }
       window.__ISYOU_INITED__ = true;
 
-      console.log("[isyou] init");
-
-      /* =========================
-       * Config
-       * ========================= */
       const LS = {
-        owned: "wb_isyou_owned_v2",          // { itemKey: number }
-        equipped: "wb_isyou_equipped_v2",    // { bornAt: { itemKey:true } }
+        owned: "wb_isyou_owned_v2",
+        equipped: "wb_isyou_equipped_v2",
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
       const ITEMS = {
-        partyhat: {
-          label: "パーティーハット",
-          img: "./assets/isyou/partyhat.png",
-          price: 500,
-          offsetX: 0,
-          offsetY: -18,
-          scale: 1.15,
-          z: 20,
-        },
-        crown: {
-          label: "王冠",
-          img: "./assets/isyou/crown.png",
-          price: 3500,
-          offsetX: 0,
-          offsetY: -28,
-          scale: 1.20,
-          z: 30,
-        },
-        ribbon: {
-          label: "リボン",
-          img: "./assets/isyou/ribbon.png",
-          price: 1200,
-          offsetX: 0,
-          offsetY: 32,
-          scale: 1.05,
-          z: 10,
-        },
+        partyhat: { label: "パーティーハット", img: "./assets/isyou/partyhat.png", price: 500,  offsetX: 0, offsetY: -18, scale: 1.15, z: 20 },
+        crown:    { label: "王冠",             img: "./assets/isyou/crown.png",    price: 3500, offsetX: 0, offsetY: -28, scale: 1.20, z: 30 },
+        ribbon:   { label: "リボン",           img: "./assets/isyou/ribbon.png",   price: 1200, offsetX: 0, offsetY:  32, scale: 1.05, z: 10 },
       };
 
       const TITLE_LINKS = [
@@ -84,65 +53,46 @@
         { match: /黄金に選ばれし者/, autoEquip: ["crown"] },
       ];
 
-      /* =========================
-       * HUD
-       * ========================= */
       const hud = document.getElementById("hud");
-      if (!hud) {
-        console.warn("[isyou] #hud not found");
-        return;
-      }
+      if (!hud) return;
 
       /* =========================
-       * CSS inject
+       * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleV6")) return;
+        if (document.getElementById("isyouStyleV7")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleV6";
+        s.id = "isyouStyleV7";
         s.textContent = `
-/* ===== お洒落ボタンを最前面 ===== */
 #hud{ pointer-events:auto; }
 #isyouBtn{ pointer-events:auto; z-index:2147483647; }
 
-/* ===== 装着モード：ホバー赤枠 ===== */
-body.isyouEquipMode .bunnyWrap{ outline:none; }
 body.isyouEquipMode .bunnyWrap:hover{
-  outline: 4px solid rgba(255,64,64,.60);
-  outline-offset: 3px;
-  border-radius: 18px;
+  outline:4px solid rgba(255,64,64,.60);
+  outline-offset:3px;
+  border-radius:18px;
 }
-
-/* ★選択（ロック）赤枠 ===== */
 .bunnyWrap.isyouSelectedTarget{
-  outline: 4px solid rgba(255,64,64,.92);
-  outline-offset: 3px;
-  border-radius: 18px;
-  box-shadow: 0 0 0 2px rgba(255,255,255,.65) inset;
+  outline:4px solid rgba(255,64,64,.92);
+  outline-offset:3px;
+  border-radius:18px;
+  box-shadow:0 0 0 2px rgba(255,255,255,.65) inset;
 }
-
-/* 装着した瞬間の点滅 */
 .bunnyWrap.isyouJustEquipped{
-  outline: 4px solid rgba(255,64,64,.92);
-  outline-offset: 3px;
-  border-radius: 18px;
-  animation: isyouBlink 520ms ease-in-out;
+  outline:4px solid rgba(255,64,64,.92);
+  outline-offset:3px;
+  border-radius:18px;
+  animation:isyouBlink 520ms ease-in-out;
 }
 @keyframes isyouBlink{
-  0%{ filter: brightness(1.0); }
-  50%{ filter: brightness(1.15); }
-  100%{ filter: brightness(1.0); }
+  0%{filter:brightness(1)}
+  50%{filter:brightness(1.15)}
+  100%{filter:brightness(1)}
 }
 
-/* ===== アクセサリレイヤ ===== */
 .isyouLayer{ position:absolute; inset:0; pointer-events:none; }
-.isyouItem{
-  position:absolute; left:50%; top:0;
-  transform-origin: 50% 50%;
-  pointer-events:none; user-select:none; -webkit-user-drag:none;
-}
+.isyouItem{ position:absolute; left:50%; top:0; transform-origin:50% 50%; pointer-events:none; user-select:none; -webkit-user-drag:none; }
 
-/* ===== モーダル ===== */
 .isyouBackdrop{
   position:fixed; inset:0;
   background:rgba(0,0,0,.45);
@@ -159,6 +109,11 @@ body.isyouEquipMode .bunnyWrap:hover{
   overflow:auto;
   pointer-events:auto;
 }
+
+/* ★装着モード中：背景はクリック透過、モーダルだけ触れる */
+body.isyouEquipMode .isyouBackdrop{ pointer-events:none; background:rgba(0,0,0,.25); }
+body.isyouEquipMode .isyouModal{ pointer-events:auto; }
+
 .isyouHeader{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .isyouTitle{ font-weight:900; }
 .isyouClose{ border:none; background:#eee; border-radius:12px; padding:6px 10px; cursor:pointer; }
@@ -172,19 +127,9 @@ body.isyouEquipMode .bunnyWrap:hover{
 .isyouName{ font-weight:900; }
 .isyouMeta{ margin-top:6px; font-size:12px; opacity:.85; line-height:1.35; }
 .isyouRow{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.isyouBtn{
-  border:none; padding:7px 10px; border-radius:12px; cursor:pointer;
-  background:#fff; box-shadow:0 4px 12px rgba(0,0,0,.12);
-  font-weight:800;
-}
+.isyouBtn{ border:none; padding:7px 10px; border-radius:12px; cursor:pointer; background:#fff; box-shadow:0 4px 12px rgba(0,0,0,.12); font-weight:800; }
 .isyouBtn.primary{ background:#ffe6f2; }
 .isyouSmall{ font-size:12px; opacity:.85; }
-
-/* ★装着モード中：背景(backdrop)はクリックを「通す」＝うさぎを触れる
-   ただしモーダルは操作できる（JS側でモーダル内クリックを無視） */
-body.isyouEquipMode .isyouBackdrop{
-  background: rgba(0,0,0,.25);
-}
         `;
         document.head.appendChild(s);
       })();
@@ -232,28 +177,24 @@ body.isyouEquipMode .isyouBackdrop{
       }
 
       /* =========================
-       * ★Equip SE（装着時SE）
-       * - clone再生で「確実に鳴る＆連打対応」
+       * Equip SE（確実）
        * ========================= */
-      const EQUIP_SE_SRC = "./assets/Onoma-Pop03-1(High).mp3";
+      const EQUIP_SE_SRC_RAW = "./assets/Onoma-Pop03-1(High).mp3";
+      const EQUIP_SE_SRC = encodeURI(EQUIP_SE_SRC_RAW);
       let equipSeBase = null;
 
-      function ensureEquipSeUnlocked() {
+      function ensureEquipSe() {
         if (!equipSeBase) {
           equipSeBase = new Audio(EQUIP_SE_SRC);
           equipSeBase.preload = "auto";
           equipSeBase.volume = 0.9;
-          // 読み込み開始（初回遅延軽減）
           try { equipSeBase.load(); } catch {}
         }
       }
-
       function playEquipSe() {
         try {
           WB.unlockAudioOnce?.();
-          ensureEquipSeUnlocked();
-
-          // cloneで毎回確実に鳴らす（currentTime問題回避）
+          ensureEquipSe();
           const a = equipSeBase.cloneNode(true);
           a.volume = equipSeBase.volume;
           a.currentTime = 0;
@@ -273,11 +214,11 @@ body.isyouEquipMode .isyouBackdrop{
       }
 
       /* =========================
-       * Modal State
+       * Modal
        * ========================= */
       let backdrop = null;
       let modal = null;
-      let tab = "shop"; // "shop" | "equip"
+      let tab = "shop";
       let equipMode = false;
       const selectedItems = new Set();
       let selectedBornAt = null;
@@ -289,21 +230,14 @@ body.isyouEquipMode .isyouBackdrop{
       }
 
       function clearSelectedTargetVisual() {
-        (getBunnyList() || []).forEach((b) =>
-          b?.wrap?.classList?.remove("isyouSelectedTarget")
-        );
+        (getBunnyList() || []).forEach((b) => b?.wrap?.classList?.remove("isyouSelectedTarget"));
       }
-
       function setSelectedTarget(bunnyOrNull) {
         clearSelectedTargetVisual();
-        if (!bunnyOrNull) {
-          selectedBornAt = null;
-          return;
-        }
+        if (!bunnyOrNull) { selectedBornAt = null; return; }
         selectedBornAt = bunnyOrNull.bornAt;
         bunnyOrNull.wrap?.classList?.add("isyouSelectedTarget");
       }
-
       function getSelectedBunny() {
         if (selectedBornAt == null) return null;
         return (getBunnyList() || []).find((b) => b && b.bornAt === selectedBornAt) || null;
@@ -388,9 +322,6 @@ body.isyouEquipMode .isyouBackdrop{
               const name = document.createElement("div");
               name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${owned[key] || 0}</div>`;
 
-              top.appendChild(img);
-              top.appendChild(name);
-
               const meta = document.createElement("div");
               meta.className = "isyouMeta";
               meta.textContent = `価格：${it.price} 🪙`;
@@ -403,18 +334,17 @@ body.isyouEquipMode .isyouBackdrop{
               buy.textContent = "購入";
               buy.addEventListener("click", () => {
                 const ok = spendCoins(it.price);
-                if (!ok) {
-                  buy.textContent = "コイン不足";
-                  setTimeout(() => (buy.textContent = "購入"), 700);
-                  return;
-                }
+                if (!ok) { buy.textContent = "コイン不足"; setTimeout(() => (buy.textContent = "購入"), 700); return; }
                 owned[key] = (owned[key] || 0) + 1;
                 saveAll();
                 WB.updateHud?.();
                 render();
               });
 
+              top.appendChild(img);
+              top.appendChild(name);
               row.appendChild(buy);
+
               card.appendChild(top);
               card.appendChild(meta);
               card.appendChild(row);
@@ -435,10 +365,9 @@ body.isyouEquipMode .isyouBackdrop{
               equipMode = !equipMode;
               document.body.classList.toggle("isyouEquipMode", equipMode);
 
-              // ★装着モードON時に音を解錠（ここがユーザー操作なので確実）
-              if (equipMode) ensureEquipSeUnlocked();
-
+              if (equipMode) ensureEquipSe();
               if (!equipMode) setSelectedTarget(null);
+
               render();
             });
 
@@ -478,9 +407,6 @@ body.isyouEquipMode .isyouBackdrop{
               const name = document.createElement("div");
               name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${count}</div>`;
 
-              top.appendChild(img);
-              top.appendChild(name);
-
               const row = document.createElement("div");
               row.className = "isyouRow";
 
@@ -497,7 +423,10 @@ body.isyouEquipMode .isyouBackdrop{
                 render();
               });
 
+              top.appendChild(img);
+              top.appendChild(name);
               row.appendChild(pick);
+
               card.appendChild(top);
               card.appendChild(row);
               grid.appendChild(card);
@@ -516,8 +445,11 @@ body.isyouEquipMode .isyouBackdrop{
 
         backdrop.appendChild(modal);
 
-        // ★背景クリックで閉じる（装着モード中でもOK：モーダル外はクリック通るので）
-        backdrop.addEventListener("click", closeModal);
+        // ★背景クリックで閉じる：装着モード中は無効（誤爆で閉じるのを防ぐ）
+        backdrop.addEventListener("click", () => {
+          if (equipMode) return;
+          closeModal();
+        });
 
         document.body.appendChild(backdrop);
         render();
@@ -525,12 +457,12 @@ body.isyouEquipMode .isyouBackdrop{
 
       btn.addEventListener("click", () => {
         WB.unlockAudioOnce?.();
-        ensureEquipSeUnlocked(); // ★ここもユーザー操作
+        ensureEquipSe(); // ユーザー操作でロード
         openModal();
       });
 
       /* =========================
-       * Accessory layer helpers
+       * Accessory layer
        * ========================= */
       function ensureLayer(bunny) {
         if (!bunny?.wrap) return null;
@@ -618,7 +550,6 @@ body.isyouEquipMode .isyouBackdrop{
         saveAll();
         drawAllForBunny(bunny);
 
-        // ★装着/解除SE
         playEquipSe();
 
         try {
@@ -628,16 +559,15 @@ body.isyouEquipMode .isyouBackdrop{
       }
 
       /* =========================
-       * 装着モード：クリック
-       * - ★重要：モーダル内クリックは無視（帽子選択できない問題の対策）
+       * Equip click
        * ========================= */
       function getBunnyFromWrap(wrap) {
         const list = getBunnyList();
         return (list || []).find(b => {
           if (!b || !b.wrap) return false;
           if (b.wrap === wrap) return true;
-          if (wrap && typeof wrap.contains === "function" && wrap.contains(b.wrap)) return true;
-          if (b.wrap && typeof b.wrap.contains === "function" && b.wrap.contains(wrap)) return true;
+          if (wrap?.contains?.(b.wrap)) return true;
+          if (b.wrap?.contains?.(wrap)) return true;
           return false;
         }) || null;
       }
@@ -645,7 +575,7 @@ body.isyouEquipMode .isyouBackdrop{
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
 
-        // ★モーダル内のクリックは装着処理しない（ここが最重要）
+        // ★モーダル内は無視（アイテム選択を邪魔しない）
         if (e.target?.closest?.(".isyouModal")) return;
 
         const wrap = e.target?.closest?.(".bunnyWrap");
@@ -713,14 +643,11 @@ body.isyouEquipMode .isyouBackdrop{
 
       setInterval(applyTitleLinkage, 1000);
 
-      /* =========================
-       * Hooks
-       * ========================= */
       WB.on?.("bunnyCountChanged", redrawAll);
       WB.on?.("resize", redrawAll);
       WB.on?.("hudUpdated", applyTitleLinkage);
 
-      // flip監視（軽量）
+      // flip監視
       let rafId = null;
       function startFlipWatcher() {
         if (rafId) return;
