@@ -432,10 +432,10 @@
       const r = this.getChargeRatio(); // 0..1
 
       // 枚数：1〜10
-      const count = 1 + Math.floor(r * 9);
+      const count = 1 + Math.floor(r * 15);
 
       // 最大ティア：0〜3
-      const maxTier = Math.floor(r * 3 + 1e-9);
+      const maxTier = Math.floor(r * 6 + 1e-9);
 
       const pickTier = () => {
         if (maxTier <= 0) return 0;
