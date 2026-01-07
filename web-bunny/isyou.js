@@ -46,11 +46,12 @@
         equipped: "wb_isyou_equipped_v2",    // { bornAt: { itemKey:true } }
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
+      
 
       const ITEMS = {
         partyhat: {
           label: "パーティーハット",
-          img: "./assets/partyhat.png",
+          img: "./assets/isyou/partyhat.png",
           price: 500,
           offsetX: 0,
           offsetY: -18,
@@ -59,7 +60,7 @@
         },
         crown: {
           label: "王冠",
-          img: "./assets/crown.png",
+          img: "./assets/isyou/crown.png",
           price: 3500,
           offsetX: 0,
           offsetY: -28,
@@ -68,7 +69,7 @@
         },
         ribbon: {
           label: "リボン",
-          img: "./assets/ribbon.png",
+          img: "./assets/isyou/ribbon.png",
           price: 1200,
           offsetX: 0,
           offsetY: 32,
