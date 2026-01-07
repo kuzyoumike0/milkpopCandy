@@ -1,12 +1,12 @@
-// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版（FIX：flipズレ解消 + hat部類 + アンカー補正）
+// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
 // ✅ FIX：bunnyWrap.flip は親ごと反転してるので、アクセ側で scaleX しない（=二重反転回避）
 // ✅ partyhat は「ポンッ」と被る
-// ✅ NEW：slot（部類）を導入。hatスロットは partyhat/crown/ribbon を同一位置に揃える
-// ✅ NEW：アクセの基準点を wrap中央→「うさぎ画像の中心」に変更してズレを解消
+// ✅ slot（部類）導入：hat に partyhat/crown/ribbon を入れて同じ位置
+// ✅ FIX：帽子位置は「画像中心」ではなく「頭アンカー（比率）」で置く（flip時は自動反転）
 
 (() => {
   "use strict";
@@ -59,11 +59,19 @@
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
-      // ✅ slot（部類）ごとの共通位置
+      // ✅ スロット（部類）ごとの共通位置 + アンカー（画像内比率）
+      // anchorX/Y: 0.0〜1.0（画像左上が0,0 右下が1,1）
+      // flip時は anchorX を左右反転（1 - anchorX）して頭側に追従
       const SLOTS = {
         hat: {
+          // ★頭の位置（この値で“帽子の土台”が決まる）
+          // 今の画像だと頭が右寄りなので 0.62 くらいが合いやすい
+          anchorX: 0.62,
+          anchorY: 0.10,
+
+          // ★アンカーからの微調整（px）
           offsetX: 0,
-          offsetY: -50, // ★頭の上：partyhat/crown/ribbon を全部ここへ
+          offsetY: -10, // もう少し上に乗せるなら -20 など
           z: 9999,
         },
       };
@@ -73,33 +81,27 @@
           label: "パーティーハット",
           img: "/assets/isyou/partyhat.png",
           price: 500,
-
           slot: "hat",
           offsetX: 0,
           offsetY: 0,
           scale: 0.32,
           z: 9999,
-          // keepUpright: true,
         },
-
         crown: {
           label: "王冠",
           img: "/assets/isyou/crown.png",
           price: 3500,
-
           slot: "hat",
           offsetX: 0,
           offsetY: 0,
           scale: 0.38,
           z: 9999,
         },
-
         ribbon: {
           label: "リボン",
           img: "/assets/isyou/ribbon.png",
           price: 1200,
-
-          slot: "hat", // ★同じ位置に揃える（帽子カテゴリ扱い）
+          slot: "hat", // 同じ位置に揃える
           offsetX: 0,
           offsetY: 0,
           scale: 0.45,
@@ -111,9 +113,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV5")) return;
+        if (document.getElementById("isyouStyleFinalV6")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV5";
+        s.id = "isyouStyleFinalV6";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -160,7 +162,7 @@ body.isyouEquipMode .bunnyWrap:hover{
 /* アクセサリレイヤ */
 .isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
 
-/* ★アンカーをJSでpx指定するので left:50% を廃止 */
+/* ★アンカーはJSで left/top をpx指定する */
 .isyouItem{
   position:absolute;
   left:0;
@@ -518,7 +520,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return layer;
       }
 
-      // ✅ NEW：wrap内の「うさぎ画像」を拾う（構造差異に強め）
       function getBunnyImgEl(wrap) {
         return (
           wrap.querySelector("img.bunnyImg") ||
@@ -527,27 +528,36 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         );
       }
 
-      // ✅ NEW：アクセの基準点（アンカー）を「うさぎ画像中心」にする
-      function getAnchorPoint(bunny) {
+      function isWrapFlipped(wrap) {
+        return !!wrap?.classList?.contains("flip");
+      }
+
+      // ✅ slotのanchor（比率）で「頭」を取る
+      function getAnchorPoint(bunny, slotKey) {
         const wrap = bunny?.wrap;
         if (!wrap) return { x: 0, y: 0 };
 
         const img = getBunnyImgEl(wrap);
-        const wr = wrap.getBoundingClientRect();
-
-        // imgが取れない場合は wrap 中央
         if (!img) return { x: wrap.clientWidth / 2, y: 0 };
 
+        const wr = wrap.getBoundingClientRect();
         const ir = img.getBoundingClientRect();
 
-        // wrap内座標に変換
-        const x = (ir.left - wr.left) + ir.width / 2;
-        const y = (ir.top - wr.top); // ★画像の上端基準（帽子向け）
+        const slot = slotKey && SLOTS[slotKey] ? SLOTS[slotKey] : null;
+
+        // デフォルト：画像中心/上端
+        let ax = slot && typeof slot.anchorX === "number" ? slot.anchorX : 0.5;
+        let ay = slot && typeof slot.anchorY === "number" ? slot.anchorY : 0.0;
+
+        // ★flip時はXだけ左右反転
+        if (isWrapFlipped(wrap)) ax = 1 - ax;
+
+        const x = (ir.left - wr.left) + ir.width * ax;
+        const y = (ir.top - wr.top) + ir.height * ay;
         return { x, y };
       }
 
-      // ★重要FIX：親(bunnyWrap)がflipで反転してるので、ここでは反転しない
-      // ＝ scaleX は基本 1（keepUpright の時だけ -1 で相殺）
+      // ★重要：親がflipで反転してるので、アクセ側で scaleX しない（keepUprightだけ相殺）
       function applyTransform(imgEl, bunny, it) {
         const keepUpright = !!it.keepUpright;
 
@@ -562,23 +572,20 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const oy = (Number(it.offsetY) || 0) + soy;
         const sc = Number(it.scale) || 1;
 
-        // ✅ NEW：アンカーを「うさぎ画像中心」にする（wrap中央ではない）
-        const a = getAnchorPoint(bunny);
+        // ✅ 帽子は「頭アンカー」に置く
+        const a = getAnchorPoint(bunny, slotKey);
         imgEl.style.left = `${a.x}px`;
         imgEl.style.top  = `${a.y}px`;
 
-        // keepUpright=true のときだけ、親の反転を打ち消す
         const extraFlip = keepUpright ? " scaleX(-1)" : "";
 
-        // leftをpxで決めたので、translate(-50%,0)で自分の中心へ
         const baseT =
-          `translate(-50%, 0) translate(${ox}px, ${oy}px) ` +
+          `translate(-50%, -50%) translate(${ox}px, ${oy}px) ` + // ★アンカー点を中心に扱う
           `scale(${sc})` + extraFlip;
 
         imgEl.style.setProperty("--isyouT", baseT);
         imgEl.style.transform = baseT;
 
-        // slot.z を優先（無ければ item.z）
         const finalZ = (sz || 0) || (Number(it.z) || 10);
         imgEl.style.zIndex = String(finalZ);
       }
@@ -675,7 +682,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (hat aligned + anchor fixed)");
+      console.log("[isyou] ready (hat anchor fixed)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
