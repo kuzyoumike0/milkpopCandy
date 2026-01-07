@@ -105,6 +105,21 @@
   const COIN_W = 32;
   const COIN_H = 32;
 
+  const LS = {
+  coin: "wb_coin_v1",
+  bunnies: "wb_bunnies_v11_wrapCss",
+
+  // ★過去キー（ここに過去使ってたものを全部並べる）
+  legacyBunnyKeys: [
+    "wb_bunnies_v10_omukaeDepends",
+    "wb_bunnies_v9",
+    "wb_bunnies_v8",
+  ],
+  legacyCoinKeys: [
+    "wb_coin_v0",
+  ],
+};
+
   /* =========================
    * Audio
    * ========================= */
