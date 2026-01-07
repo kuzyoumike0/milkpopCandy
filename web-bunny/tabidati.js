@@ -1,9 +1,10 @@
-// tabidati.js
+// tabidati.js（互換強化版）
 // - 旅立ちモードON/OFF
 // - 旅立ち時：コスト支払い / SE / 記録 / メッセージ / うさぎ削除
 // - 旅立ちモード中：うさぎホバーで赤縁取り
 // - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（はみ出し防止）
 // - 「長い空白メッセージ」対策：専用トーストCSSで表示
+// - ✅ WB新旧互換：getBunnies/getCoin/spendCoin 優先
 
 (() => {
   if (!window.WB) return;
@@ -16,12 +17,49 @@
   let clampTimer = null;
 
   /* =========================
+   * 互換ヘルパ
+   * ========================= */
+  const getBunnies = () => {
+    if (typeof WB.getBunnies === "function") return WB.getBunnies();
+    if (Array.isArray(WB.bunnies)) return WB.bunnies;
+    return [];
+  };
+
+  const getCoins = () => {
+    if (typeof WB.getCoin === "function") return WB.getCoin();
+    if (typeof WB.coins === "number") return WB.coins;
+    return 0;
+  };
+
+  const spendCoins = (amount) => {
+    amount = Math.floor(Number(amount) || 0);
+    if (amount <= 0) return true;
+
+    // 新API優先
+    if (typeof WB.spendCoin === "function") return !!WB.spendCoin(amount);
+
+    // 旧互換
+    if (typeof WB.coins === "number" && WB.coins >= amount) {
+      WB.coins -= amount;
+      try { WB.saveCoins?.(); } catch {}
+      try { WB.updateHud?.(); } catch {}
+      return true;
+    }
+    return false;
+  };
+
+  const emitBunnyCountChanged = () => {
+    const list = getBunnies();
+    try { WB.emit?.("bunnyCountChanged", { count: list.length }); } catch {}
+  };
+
+  /* =========================
    * Toast（専用CSSで空白バグ回避）
    * ========================= */
   function ensureToastStyles() {
-    if (document.getElementById("tabidatiToastStyleV1")) return;
+    if (document.getElementById("tabidatiToastStyleV2")) return;
     const s = document.createElement("style");
-    s.id = "tabidatiToastStyleV1";
+    s.id = "tabidatiToastStyleV2";
     s.textContent = `
 .tabidatiToast{
   position: fixed;
@@ -41,6 +79,7 @@
   opacity: 0;
   animation: tabToastIn .18s ease-out forwards, tabToastOut .28s ease-in forwards;
   animation-delay: 0ms, 1.25s;
+  white-space: pre-wrap;
 }
 @keyframes tabToastIn{
   from { opacity:0; transform:translate(-50%,-80%); }
@@ -76,7 +115,7 @@ body.departModeOn .bunnyWrap:hover{
   function toast(msg) {
     ensureToastStyles();
     const text = String(msg ?? "").trim();
-    if (!text) return; // 空文字は出さない（空白バグ対策）
+    if (!text) return;
     const el = document.createElement("div");
     el.className = "tabidatiToast";
     el.textContent = text;
@@ -104,7 +143,7 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   function toggleDepartMode() {
-    WB.unlockAudioOnce?.();
+    try { WB.unlockAudioOnce?.(); } catch {}
     setDepartMode(!departMode);
   }
 
@@ -122,7 +161,7 @@ body.departModeOn .bunnyWrap:hover{
     clampTimer = setInterval(() => {
       if (!departMode) return;
 
-      const area = (layer || field);
+      const area = layer || field;
       const ar = area.getBoundingClientRect();
       if (!ar.width || !ar.height) return;
 
@@ -133,7 +172,6 @@ body.departModeOn .bunnyWrap:hover{
         const r = w.getBoundingClientRect();
         if (!r.width || !r.height) continue;
 
-        // はみ出し量（viewport座標）
         const overL = ar.left - r.left;
         const overR = r.right - ar.right;
         const overT = ar.top - r.top;
@@ -141,12 +179,16 @@ body.departModeOn .bunnyWrap:hover{
 
         if (overL <= 0 && overR <= 0 && overT <= 0 && overB <= 0) continue;
 
-        // style.left/top を px で持っている前提で補正（多くの実装がこれ）
         const cs = getComputedStyle(w);
-        const left = parseFloat(w.style.left || cs.left || "0") || 0;
-        const top  = parseFloat(w.style.top  || cs.top  || "0") || 0;
 
-        // viewportでのズレを「px」補正として反映
+        // ★ left/top が auto（= レイアウト制御が別）の場合は触らない（事故防止）
+        const leftStr = (w.style.left || cs.left || "").trim();
+        const topStr  = (w.style.top  || cs.top  || "").trim();
+        if (!leftStr || !topStr || leftStr === "auto" || topStr === "auto") continue;
+
+        const left = parseFloat(leftStr) || 0;
+        const top  = parseFloat(topStr)  || 0;
+
         let nx = left;
         let ny = top;
 
@@ -155,7 +197,6 @@ body.departModeOn .bunnyWrap:hover{
         if (overT > 0) ny += overT;
         if (overB > 0) ny -= overB;
 
-        // 念のため無限値ガード
         if (Number.isFinite(nx)) w.style.left = `${nx}px`;
         if (Number.isFinite(ny)) w.style.top  = `${ny}px`;
       }
@@ -175,41 +216,49 @@ body.departModeOn .bunnyWrap:hover{
   async function departBunny(bunny) {
     if (!bunny) return false;
 
+    const list = getBunnies();
+
     // 最後の1匹は残す
-    if (WB.bunnies.length <= 1) {
+    if (list.length <= 1) {
       toast("最後の1匹は旅立たせられないよ");
       return false;
     }
 
     // コスト不足
-    if (WB.coins < WB.DEPART_COST) {
-      toast(`コイン不足（必要：${WB.DEPART_COST}🪙）`);
+    const cost = Number(WB.DEPART_COST ?? 0) || 0;
+    if (getCoins() < cost) {
+      toast(`コイン不足（必要：${cost}🪙）`);
       return false;
     }
 
-    // 支払い
-    WB.coins -= WB.DEPART_COST;
-    WB.saveCoins?.();
-    WB.updateHud?.();
-    WB.refreshShopUI?.();
+    // 支払い（新API優先）
+    if (!spendCoins(cost)) {
+      toast(`コイン不足（必要：${cost}🪙）`);
+      return false;
+    }
+
+    // 追加UI更新（あれば）
+    try { WB.updateHud?.(); } catch {}
+    try { WB.omukae?.refreshShopUI?.(); } catch {}
+    try { WB.refreshShopUI?.(); } catch {}
 
     // SE
-    WB.playSE?.(WB.seTabidati);
+    try { WB.playSE?.(WB.seTabidati); } catch {}
 
-    // 記録＆メッセージ（app.js側が持ってる想定）
-    WB.recordFarewell?.(bunny.kind);
-    WB.showFarewellMessage?.(bunny.kind);
+    // 記録＆メッセージ（あれば）
+    try { WB.recordFarewell?.(bunny.kind); } catch {}
+    try { WB.showFarewellMessage?.(bunny.kind); } catch {}
 
-    // まず配列から外して、以降の移動/ロジック対象から除外（←これで画面外へ暴走しづらい）
-    const idx = WB.bunnies.indexOf(bunny);
-    if (idx >= 0) WB.bunnies.splice(idx, 1);
+    // 配列から外して、以降の移動/ロジック対象から除外
+    const idx = list.indexOf(bunny);
+    if (idx >= 0) list.splice(idx, 1);
+    emitBunnyCountChanged();
 
     // 旅立ち演出：軽くフェードしてからDOM削除
     try {
       const w = bunny.wrap;
       if (w) {
         w.classList.add("departing");
-        // 少し待ってから削除
         await new Promise((r) => setTimeout(r, 520));
         try { w.remove(); } catch {}
       }
@@ -217,9 +266,13 @@ body.departModeOn .bunnyWrap:hover{
       try { bunny.wrap?.remove(); } catch {}
     }
 
-    // 保存＆実績チェック
-    WB.saveBunnyMeta?.();
-    WB.checkUnlocks?.();
+    // 保存＆実績チェック（あれば）
+    try { WB.saveBunnies?.(); } catch {}
+    try { WB.saveBunnyMeta?.(); } catch {}
+    try { WB.checkUnlocks?.(); } catch {}
+
+    // イベント通知（任意で他モジュールが追従できる）
+    try { WB.emit?.("bunnyDeparted", { kind: bunny.kind, bornAt: bunny.bornAt }); } catch {}
 
     return true;
   }
@@ -241,8 +294,8 @@ body.departModeOn .bunnyWrap:hover{
     e.stopPropagation();
     e.stopImmediatePropagation();
 
-    // wrapから対象インスタンスを特定
-    const bunny = WB.bunnies.find(b => b.wrap === wrap);
+    const list = getBunnies();
+    const bunny = list.find(b => b?.wrap === wrap);
     if (!bunny) return;
 
     departBunny(bunny);
@@ -251,11 +304,15 @@ body.departModeOn .bunnyWrap:hover{
   /* =========================
    * Hook
    * ========================= */
-  if (WB.departBtn) {
-    WB.departBtn.addEventListener("click", (e) => {
+  // departBtn が WB に無い場合もあるので、DOMからも拾う
+  const domDepartBtn = WB.departBtn || document.getElementById("departBtn");
+  if (domDepartBtn) {
+    domDepartBtn.addEventListener("click", (e) => {
       e.preventDefault();
       toggleDepartMode();
     });
+    // WBにも載せておく（他モジュール用）
+    try { WB.departBtn = domDepartBtn; } catch {}
   }
 
   // うさぎクリック横取り（キャプチャが重要）
