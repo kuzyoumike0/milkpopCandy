@@ -560,32 +560,37 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const oy = (Number(it.offsetY) || 0) + soy;
 
         // ✅ NEW：うさぎ画像と同サイズ・同位置に重ねる
-        if (it.fitToBunny) {
-          const wrap = bunny?.wrap;
-          const bimg = wrap ? getBunnyImgEl(wrap) : null;
-          if (!wrap || !bimg) return;
+        // ✅ NEW：うさぎ画像と同サイズ・同位置に重ねる（反転でもズレない版）
+if (it.fitToBunny) {
+  const wrap = bunny?.wrap;
+  const bimg = wrap ? getBunnyImgEl(wrap) : null;
+  if (!wrap || !bimg) return;
 
-          const p = getLocalPosWithin(bimg, wrap);
-          const w = bimg.offsetWidth || bimg.clientWidth || 0;
-          const h = bimg.offsetHeight || bimg.clientHeight || 0;
+  const cs = getComputedStyle(bimg);
 
-          imgEl.style.left = `${p.x}px`;
-          imgEl.style.top  = `${p.y}px`;
-          imgEl.style.width = `${w}px`;
-          imgEl.style.height = `${h}px`;
+  // bunnyImg の位置決めを完全コピー（transformも含む）
+  imgEl.style.left = cs.left;
+  imgEl.style.top = cs.top;
+  imgEl.style.width = cs.width;
+  imgEl.style.height = cs.height;
 
-          // 左上基準で完全一致（scaleは使わない）
-          const extraFlip = keepUpright ? " scaleX(-1)" : "";
-          const baseT = `translate(${ox}px, ${oy}px)` + extraFlip;
+  imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
 
-          imgEl.style.transformOrigin = "0 0";
-          imgEl.style.setProperty("--isyouT", baseT);
-          imgEl.style.transform = baseT;
+  // 元の transform をベースに、微調整 ox/oy を末尾に足す
+  const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
+  const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
+  const extraFlip = keepUpright ? " scaleX(-1)" : "";
 
-          const finalZ = (sz || 0) || (Number(it.z) || 10);
-          imgEl.style.zIndex = String(finalZ);
-          return;
-        }
+  const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
+
+  imgEl.style.setProperty("--isyouT", t);
+  imgEl.style.transform = t;
+
+  const finalZ = (sz || 0) || (Number(it.z) || 10);
+  imgEl.style.zIndex = String(finalZ);
+  return;
+}
+
 
         // 旧：アンカー比率で置く（互換）
         const sc = Number(it.scale) || 1;
