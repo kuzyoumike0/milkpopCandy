@@ -37,18 +37,18 @@
       title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
     };
 
-    const ITEMS = {
-      partyhat: {
-      label: "パーティーハット",
-      img: "./assets/isyou/partyhat.png",
-      price: 500,
+   partyhat: {
+  label: "パーティーハット",
+  img: "./assets/isyou/partyhat.png",
+  price: 500,
 
-      anchorY: 0.03,   // ★頭頂部（耳の付け根より上）
-      offsetX: 14,     // ★耳の間から少し右
-      offsetY: -10,    // ★頭に「乗る」高さ
-      scale: 0.95,     // ★かぶせサイズ（これ以上大きいと浮く）
-      z: 25,           // ★顔より少し後ろに回す
-    },
+  anchorY: 0.03,   // 頭頂部
+  offsetX: 14,
+  offsetY: -8,     // 頭に軽く接する
+  scale: 0.75,     // ★ここが決定値（これ以上はデカい）
+  z: 25,
+},
+
       crown: {
         label: "王冠",
         img: "./assets/isyou/crown.png",
