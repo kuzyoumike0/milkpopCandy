@@ -1,147 +1,114 @@
-// isyou.js — 赤枠で選択したうさぎにだけ装着（partyhat）
-// ★修正：モーダルが邪魔で赤枠が見えない問題を解決
-// - 装着モード中だけ：backdrop は pointer-events:none（背景クリックを通す）
-// - モーダルだけ pointer-events:auto（操作できる）
-// - 選択中のうさぎ .isyouSelectedTarget は z-index を上げて赤枠を最前面に
+// isyou.js — お洒落ボタンが出ない対策・完全版（WB待機 + HUD待機）
+// - #hud が出るまで待ってからボタンを追加
+// - 既にあれば再利用
+// - 目立つように最低限のCSSも注入
+// - partyhatは頭上に乗る設定（anchorY/offsetY調整）
 
 (() => {
   "use strict";
 
-  const WAIT_MS = 8000;
+  const WAIT_MS = 12000;
   const TICK_MS = 50;
 
-  function waitForWB() {
+  function waitFor(fn, timeoutMs = WAIT_MS) {
     const start = Date.now();
     return new Promise((resolve, reject) => {
       const t = setInterval(() => {
-        if (window.WB && typeof window.WB.on === "function") {
+        try {
+          const v = fn();
+          if (v) {
+            clearInterval(t);
+            resolve(v);
+            return;
+          }
+        } catch {}
+        if (Date.now() - start > timeoutMs) {
           clearInterval(t);
-          resolve(window.WB);
-          return;
-        }
-        if (Date.now() - start > WAIT_MS) {
-          clearInterval(t);
-          reject(new Error("WB not found in time"));
+          reject(new Error("waitFor timeout"));
         }
       }, TICK_MS);
     });
   }
 
-  waitForWB()
-    .then((WB) => {
-      if (window.__ISYOU_INITED__) return;
+  function waitForWB() {
+    return waitFor(() => (window.WB && typeof window.WB.on === "function" ? window.WB : null));
+  }
+
+  function waitForHUD() {
+    return waitFor(() => document.getElementById("hud"));
+  }
+
+  Promise.all([waitForWB(), waitForHUD()])
+    .then(([WB, hud]) => {
+      if (window.__ISYOU_INITED__) {
+        console.log("[isyou] already inited");
+        return;
+      }
       window.__ISYOU_INITED__ = true;
+      console.log("[isyou] init");
+
+      // CSS（ボタンが確実に見える）
+      if (!document.getElementById("isyouBtnCssV1")) {
+        const s = document.createElement("style");
+        s.id = "isyouBtnCssV1";
+        s.textContent = `
+#hud{ pointer-events:auto; }
+#isyouBtn{
+  pointer-events:auto;
+  z-index:2147483647;
+  font-weight:900;
+  border:none;
+  border-radius:12px;
+  padding:8px 12px;
+  cursor:pointer;
+  background:#ffe6f2;
+  box-shadow:0 6px 18px rgba(0,0,0,.18);
+  margin-left:8px;
+}
+#isyouBtn:hover{ filter:brightness(1.03); }
+        `;
+        document.head.appendChild(s);
+      }
+
+      // ボタン作成（左のボタン群に混ぜる）
+      let btn = document.getElementById("isyouBtn");
+      if (!btn) {
+        btn = document.createElement("button");
+        btn.id = "isyouBtn";
+        btn.textContent = "お洒落";
+
+        // shopBtn があるならその左に入れる（ボタン群に揃える）
+        const shopBtn = document.getElementById("shopBtn");
+        if (shopBtn && shopBtn.parentElement === hud) {
+          hud.insertBefore(btn, shopBtn);
+        } else {
+          hud.appendChild(btn);
+        }
+      }
+
+      // ここまでで「お洒落ボタンが出ない」は解消するはず
+      // ↓以降：最低限の装着機能（partyhatのみ）も付けておく
 
       const LS = {
         owned: "wb_isyou_owned_v2",
         equipped: "wb_isyou_equipped_v2",
-        title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
       const ITEMS = {
         partyhat: {
-  label: "パーティーハット",
-  img: "/assets/isyou/partyhat.png",
-  price: 500,
+          label: "パーティーハット",
+          img: "/assets/isyou/partyhat.png",
+          price: 500,
 
-  // ★ここが肝
-  anchorY: -0.02,  // 0より小さくして “頭頂より上” を基準にする
-  offsetX: 6,      // 右に寄りすぎなら 0〜6で微調整
-  offsetY: -26,    // 上に持ち上げる（-22〜-34あたりで調整）
-  scale: 0.42,     // 小さめ（0.38〜0.50で調整）
-  z: 25,
-},
+          // ★頭上（耳の間）寄せ
+          anchorY: -0.02,
+          offsetX: 2,
+          offsetY: -26,
+          scale: 0.42,
+          z: 25,
+        },
+      };
 
-
-      const hud = document.getElementById("hud");
-      if (!hud) return;
-
-      /* =========================
-       * CSS
-       * ========================= */
-      (function injectCSS() {
-        if (document.getElementById("isyouStyleLockHatFixZ")) return;
-        const s = document.createElement("style");
-        s.id = "isyouStyleLockHatFixZ";
-        s.textContent = `
-#hud{ pointer-events:auto; }
-#isyouBtn{ pointer-events:auto; z-index:2147483647; }
-
-/* 装着モード hover 赤枠 */
-body.isyouEquipMode .bunnyWrap:hover{
-  outline: 4px solid rgba(255,64,64,.60);
-  outline-offset: 3px;
-  border-radius: 18px;
-}
-
-/* ★選択中：赤枠 + 最前面へ */
-.bunnyWrap.isyouSelectedTarget{
-  outline: 4px solid rgba(255,64,64,.92);
-  outline-offset: 3px;
-  border-radius: 18px;
-  box-shadow: 0 0 0 2px rgba(255,255,255,.65) inset;
-  z-index: 2147483590 !important;   /* ← modalより少し下、backdropより上に見せる */
-  position: relative;              /* z-indexを効かせる */
-}
-
-/* アクセサリ */
-.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
-.isyouItem{
-  position:absolute; left:50%;
-  transform-origin:50% 50%;
-  pointer-events:none;
-  user-select:none; -webkit-user-drag:none;
-}
-
-/* モーダル */
-.isyouBackdrop{
-  position:fixed; inset:0;
-  background:rgba(0,0,0,.45);
-  display:grid; place-items:center;
-  z-index:2147483600;
-}
-
-/* ★装着モード中：背景(backdrop)はクリックを通す */
-body.isyouEquipMode .isyouBackdrop{
-  pointer-events:none;              /* ←重要：うさぎクリックが通る */
-  background:rgba(0,0,0,.25);
-}
-/* ★モーダルは触れる */
-body.isyouEquipMode .isyouModal{
-  pointer-events:auto;              /* ←重要：ボタン選択できる */
-}
-
-.isyouModal{
-  width:min(92vw,560px);
-  max-height:86vh;
-  background:#fff;
-  border-radius:18px;
-  padding:14px;
-  box-shadow:0 20px 60px rgba(0,0,0,.30);
-  overflow:auto;
-}
-.isyouHeader{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
-.isyouTitle{ font-weight:900; }
-.isyouClose{ border:none; background:#eee; border-radius:12px; padding:6px 10px; cursor:pointer; }
-.isyouTabs{ display:flex; gap:8px; margin-top:10px; }
-.isyouTab{ border:none; padding:8px 10px; border-radius:12px; cursor:pointer; background:#f3f3f3; font-weight:800; }
-.isyouTab.on{ background:#ffe6f2; }
-.isyouGrid{ margin-top:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
-.isyouCard{ background:#fff; border-radius:14px; padding:10px; box-shadow:0 6px 18px rgba(0,0,0,.12); }
-.isyouCardHead{ display:flex; align-items:center; gap:10px; }
-.isyouThumb{ width:54px; height:54px; object-fit:contain; }
-.isyouName{ font-weight:900; }
-.isyouRow{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.isyouBtn{ border:none; padding:7px 10px; border-radius:12px; cursor:pointer; background:#fff; box-shadow:0 4px 12px rgba(0,0,0,.12); font-weight:800; }
-.isyouBtn.primary{ background:#ffe6f2; }
-.isyouSmall{ font-size:12px; opacity:.85; }
-        `;
-        document.head.appendChild(s);
-      })();
-
-      /* =========================
-       * Storage
-       * ========================= */
       function loadJSON(key, fallback) {
         try {
           const v = JSON.parse(localStorage.getItem(key) || "null");
@@ -157,40 +124,10 @@ body.isyouEquipMode .isyouModal{
         localStorage.setItem(LS.equipped, JSON.stringify(equipped));
       }
 
-      /* =========================
-       * HUD button
-       * ========================= */
-      let btn = document.getElementById("isyouBtn");
-      if (!btn) {
-        btn = document.createElement("button");
-        btn.id = "isyouBtn";
-        btn.textContent = "お洒落";
-        hud.appendChild(btn);
-      }
-
-      /* =========================
-       * Bunny helpers
-       * ========================= */
-      const selectedItems = new Set();
-      let selectedBornAt = null;
-      let equipMode = false;
-
       function getBunnyList() {
         return Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
       }
-      function clearSelectedTargetVisual() {
-        (getBunnyList() || []).forEach((b) => b?.wrap?.classList?.remove("isyouSelectedTarget"));
-      }
-      function setSelectedTarget(bunnyOrNull) {
-        clearSelectedTargetVisual();
-        if (!bunnyOrNull) { selectedBornAt = null; return; }
-        selectedBornAt = bunnyOrNull.bornAt;
-        bunnyOrNull.wrap?.classList?.add("isyouSelectedTarget");
-      }
 
-      /* =========================
-       * Accessory drawing
-       * ========================= */
       function ensureLayer(bunny) {
         if (!bunny?.wrap) return null;
         let layer = bunny.wrap.querySelector(".isyouLayer");
@@ -201,6 +138,32 @@ body.isyouEquipMode .isyouModal{
         }
         return layer;
       }
+
+      // レイヤCSS
+      if (!document.getElementById("isyouLayerCssV1")) {
+        const s = document.createElement("style");
+        s.id = "isyouLayerCssV1";
+        s.textContent = `
+.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
+.isyouItem{
+  position:absolute;
+  left:50%;
+  transform-origin:50% 50%;
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+}
+.bunnyWrap.isyouSelectedTarget{
+  outline:4px solid rgba(255,64,64,.92);
+  outline-offset:3px;
+  border-radius:18px;
+  position:relative;
+  z-index:2147483590;
+}
+        `;
+        document.head.appendChild(s);
+      }
+
       function applyTransform(imgEl, bunny, it) {
         const flip = !!bunny?.wrap?.classList?.contains("flip");
         const fx = flip ? -1 : 1;
@@ -212,10 +175,11 @@ body.isyouEquipMode .isyouModal{
         imgEl.style.transform = `translate(calc(-50% + ${ox}px), ${oy}px) scale(${sc}) scaleX(${fx})`;
         imgEl.style.zIndex = String(it.z || 10);
       }
+
       function drawAllForBunny(bunny) {
         if (!bunny?.wrap || bunny.isBaby) return;
-        const key = String(bunny.bornAt);
-        const eq = equipped[key] || {};
+        const k = String(bunny.bornAt);
+        const eq = equipped[k] || {};
         const layer = ensureLayer(bunny);
         if (!layer) return;
 
@@ -232,158 +196,73 @@ body.isyouEquipMode .isyouModal{
           applyTransform(img, bunny, it);
         });
       }
+
       function redrawAll() {
         (getBunnyList() || []).forEach(drawAllForBunny);
       }
 
-      function toggleEquip(bunny, itemKey) {
-        if (!bunny || bunny.isBaby) return;
-        if ((owned[itemKey] || 0) <= 0) return;
+      // 赤枠選択→その子にだけ付ける（partyhatのみ）
+      let equipMode = false;
+      let selectedBornAt = null;
 
+      function clearSelect() {
+        (getBunnyList() || []).forEach((b) => b?.wrap?.classList?.remove("isyouSelectedTarget"));
+        selectedBornAt = null;
+      }
+      function selectBunny(bunny) {
+        clearSelect();
+        if (!bunny) return;
+        selectedBornAt = bunny.bornAt;
+        bunny.wrap?.classList?.add("isyouSelectedTarget");
+      }
+
+      function toggleHat(bunny) {
+        if (!bunny || bunny.isBaby) return;
+        if ((owned.partyhat || 0) <= 0) {
+          // 未所持なら1個だけ配る（動作確認用。不要なら消してOK）
+          owned.partyhat = 1;
+        }
         const k = String(bunny.bornAt);
         equipped[k] = equipped[k] || {};
-        equipped[k][itemKey] = !equipped[k][itemKey];
+        equipped[k].partyhat = !equipped[k].partyhat;
         saveAll();
         drawAllForBunny(bunny);
       }
 
-      /* =========================
-       * Modal UI (minimum)
-       * ========================= */
-      let backdrop = null;
-
-      function closeModal() {
-        equipMode = false;
-        document.body.classList.remove("isyouEquipMode");
-        selectedItems.clear();
-        setSelectedTarget(null);
-        try { backdrop?.remove(); } catch {}
-        backdrop = null;
-      }
-
-      function openModal() {
-        if (backdrop) return;
-
-        backdrop = document.createElement("div");
-        backdrop.className = "isyouBackdrop";
-
-        const modal = document.createElement("div");
-        modal.className = "isyouModal";
-        modal.addEventListener("click", (e) => e.stopPropagation());
-
-        const head = document.createElement("div");
-        head.className = "isyouHeader";
-
-        const title = document.createElement("div");
-        title.className = "isyouTitle";
-        title.textContent = "🎀 お洒落";
-
-        const close = document.createElement("button");
-        close.className = "isyouClose";
-        close.textContent = "×";
-        close.addEventListener("click", closeModal);
-
-        head.appendChild(title);
-        head.appendChild(close);
-
-        const body = document.createElement("div");
-
-        const rowTop = document.createElement("div");
-        rowTop.className = "isyouRow";
-
-        const toggle = document.createElement("button");
-        toggle.className = "isyouBtn primary";
-        toggle.textContent = equipMode ? "装着モード：ON（赤枠の子に装着）" : "装着モード：OFF";
-        toggle.addEventListener("click", () => {
-          equipMode = !equipMode;
-          document.body.classList.toggle("isyouEquipMode", equipMode);
-          if (!equipMode) setSelectedTarget(null);
-          toggle.textContent = equipMode ? "装着モード：ON（赤枠の子に装着）" : "装着モード：OFF";
-        });
-
-        const pick = document.createElement("button");
-        pick.className = "isyouBtn";
-        pick.textContent = selectedItems.has("partyhat") ? "partyhat：選択中" : "partyhat：選択";
-        pick.addEventListener("click", () => {
-          if ((owned.partyhat || 0) <= 0) {
-            pick.textContent = "partyhat：未所持";
-            setTimeout(() => {
-              pick.textContent = selectedItems.has("partyhat") ? "partyhat：選択中" : "partyhat：選択";
-            }, 700);
-            return;
-          }
-          if (selectedItems.has("partyhat")) selectedItems.delete("partyhat");
-          else selectedItems.add("partyhat");
-          pick.textContent = selectedItems.has("partyhat") ? "partyhat：選択中" : "partyhat：選択";
-        });
-
-        rowTop.appendChild(toggle);
-        rowTop.appendChild(pick);
-
-        const hint = document.createElement("div");
-        hint.className = "isyouSmall";
-        hint.style.marginTop = "8px";
-        hint.textContent = "装着モードON → うさぎをクリックで赤枠 → 同じうさぎをもう一度クリックで装着/解除";
-
-        body.appendChild(rowTop);
-        body.appendChild(hint);
-
-        modal.appendChild(head);
-        modal.appendChild(body);
-
-        backdrop.appendChild(modal);
-        // ★装着モード中は backdrop が pointer-events:none になるので
-        // クリックで閉じる挙動は「×」で閉じる運用に寄せる
-        backdrop.addEventListener("click", closeModal);
-
-        document.body.appendChild(backdrop);
-      }
-
-      btn.addEventListener("click", () => {
-        WB.unlockAudioOnce?.();
-        openModal();
-      });
-
-      /* =========================
-       * Click: 赤枠選択 → 同じ子再クリックで装着
-       * ========================= */
+      // クリック判定
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
-
-        // モーダル内クリックは無視
-        if (e.target?.closest?.(".isyouModal")) return;
-
         const wrap = e.target?.closest?.(".bunnyWrap");
         if (!wrap) return;
-
         const bunny = (getBunnyList() || []).find((b) => b && b.wrap === wrap) || null;
-        if (!bunny || bunny.isBaby) return;
+        if (!bunny) return;
 
-        // 未選択 → 赤枠
         if (selectedBornAt == null) {
-          setSelectedTarget(bunny);
+          selectBunny(bunny);
           return;
         }
-
-        // 同じ子 → 装着
         if (bunny.bornAt === selectedBornAt) {
-          if (selectedItems.size === 0) return;
-          selectedItems.forEach((k) => toggleEquip(bunny, k));
+          toggleHat(bunny);
           return;
         }
-
-        // 別の子 → 赤枠移動
-        setSelectedTarget(bunny);
+        selectBunny(bunny);
       }, { capture: true });
 
-      /* =========================
-       * Hooks
-       * ========================= */
+      // ボタンでモード切替（簡易）
+      btn.addEventListener("click", () => {
+        WB.unlockAudioOnce?.();
+        equipMode = !equipMode;
+        if (!equipMode) clearSelect();
+        btn.textContent = equipMode ? "お洒落(装着ON)" : "お洒落";
+      });
+
       WB.on?.("bunnyCountChanged", redrawAll);
       WB.on?.("resize", redrawAll);
 
       redrawAll();
-      console.log("[isyou] ready");
+      console.log("[isyou] ready + button ok");
     })
-    .catch((err) => console.warn("[isyou] init failed:", err?.message || err));
+    .catch((err) => {
+      console.warn("[isyou] init failed:", err?.message || err);
+    });
 })();
