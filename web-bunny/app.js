@@ -7,7 +7,6 @@
  *    - マグネットは「地面付近」だけ効く（空中で吸われない）
  * ✅ v12.8:
  *  - baby復活：isBaby=true で生成 → 3分後に targetAdultSrc へ成長
- *  - babyは小さめ表示（.baby）
  *  - babyのドロップは常に1枚
  *  - 画面外に行きがち対策：状態ごとの幅でclamp
  *
@@ -16,11 +15,15 @@
  *  - babyは wrap を縮めず「画像だけ」小さくして足元(bottom:0)固定
  *  - babyだけ大きい/小さいが混ざる見た目ブレを解消（CSSを統一）
  *  - clamp幅は wrap 基準に統一（babyだけ幅110扱いをやめる）
+ *
+ * ✅ v12.8 PATCH2（旅立ち/初期baby対策）:
+ *  - tabidati.js が旧API前提でも旅立ち出来るように WB.bunnies を生やす（互換）
+ *  - 保存復元で「初期2体が両方baby」なら強制でadultに矯正（初期画面baby2体を潰す）
  */
 
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v12.8 PATCH", Date.now());
+  console.log("[app.js] LOADED v12.8 PATCH2", Date.now());
 
   /* ===== helpers ===== */
   const $ = (q, p = document) => p.querySelector(q);
@@ -99,7 +102,7 @@
     bunny5: "./assets/bunny5.png",
     reabunny: "./assets/reabunny.png",
 
-    // ★ baby画像がある場合はこれを使う（無いなら大人のままでも動く）
+    // ★ baby画像がある場合はこれを使う
     babybunny: "./assets/babybunny.png",
 
     hart: "./assets/hart.png",
@@ -129,7 +132,6 @@
 
   const LS = {
     coin: "wb_coin_v1",
-    // ★保存形式を更新（baby対応）
     bunnies: "wb_bunnies_v12_8_baby",
     legacyBunnyKeys: [
       "wb_bunnies_v12_wrapStable",
@@ -145,25 +147,23 @@
 
   const GAUGE = { max: 100, perSec: 4, drainOnDrop: 35 };
 
-  // コイン：見た目大きめ＆拾いやすい（ただし当たり判定は縮小）
+  // コイン
   const COIN_W = 66, COIN_H = 66;
-
-  // ★枚数が多いと重いので抑える
   const MAX_COINS_ON_FIELD = 90;
 
-  // マグネット（回収しやすい）：地面付近だけ軽く吸う
+  // マグネット
   const MAGNET_RADIUS = 190;
   const MAGNET_PULL_PX_PER_SEC = 360;
 
-  // hover回収は「地面に落ちてから」だけ（散らばる前に吸われない）
-  const HOVER_ENABLE_DELAY = 0.35; // sec（生成後すぐは無効）
+  // hover回収は地面に落ちてから
+  const HOVER_ENABLE_DELAY = 0.35;
 
-  // ★ baby成長
+  // baby成長
   const BABY_GROW_MS = 3 * 60 * 1000;
 
-  // ★当たり判定・画面外対策用：wrap基準に統一（babyもwrap幅でクランプする）
+  // wrap基準（babyもwrapは同じサイズ）
   const BUNNY_W_ADULT = 140;
-  const BUNNY_W_BABY  = 140; // ← PATCH：babyだけ幅110扱いをやめる（wrapは縮めないため）
+  const BUNNY_W_BABY  = 140;
   const BUNNY_H       = 140;
 
   /* ===== Audio ===== */
@@ -192,13 +192,13 @@
   /* ===== State ===== */
   let coin = 0;
   const bunnies = [];
-  const coins = []; // {id, el, x, y, vx, vy, value, collected, life, bounces, bornAt}
+  const coins = [];
   let nextCoinId = 1;
 
   let rafId = 0;
   let lastTickAt = now();
 
-  /* ===== field rect cache（mousemove毎に測らない） ===== */
+  /* ===== field rect cache ===== */
   let fieldLeft = 0, fieldTop = 0;
   function refreshFieldRect() {
     const r = field.getBoundingClientRect();
@@ -275,7 +275,7 @@
   function getFloorY() { return Math.max(0, field.clientHeight - 74); }
 
   function tierFromGauge(g, isBaby = false) {
-    if (isBaby) return 1; // babyは常にtier1扱い
+    if (isBaby) return 1;
     g = clamp(g, 0, GAUGE.max);
     if (g < 25) return 1;
     if (g < 50) return 2;
@@ -313,7 +313,7 @@
     el.style.userSelect = "none";
     el.style.zIndex = "40";
 
-    // ✅ 当たり判定「大きすぎ」修正：控えめにする
+    // 当たり判定縮小
     el.style.padding = "6px";
     el.style.margin  = "-6px";
 
@@ -321,7 +321,6 @@
     const sx = clamp(x, 0, field.clientWidth - COIN_W);
     const sy = clamp(y, 0, floorY);
 
-    // ✅ 足元にパラッ：高ティアほど少し広く散る
     const vxMax = clamp(120 * spread, 120, 240);
     const vyUp  = clamp(110 * spread, 110, 180);
 
@@ -344,10 +343,8 @@
     el.style.left = `${c.x}px`;
     el.style.top  = `${c.y}px`;
 
-    // クリック回収はいつでも
     el.addEventListener("click", () => collectCoin(c));
 
-    // hover回収は「地面に落ちてから」だけ
     el.addEventListener("mouseenter", () => {
       const floorNow = getFloorY() - COIN_H + 2;
       const landed = (c.y >= floorNow - 2) && (Math.abs(c.vy) < 10);
@@ -373,7 +370,6 @@
     b.x = clamp(b.x, 0, maxX);
 
     const floorY = getFloorY();
-    // wrap基準で床に揃える（babyは画像だけ小さいので浮かない）
     b.y = clamp(floorY - BUNNY_H + 22, 0, floorY);
 
     const lx = (b._lx ?? NaN), ly = (b._ly ?? NaN);
@@ -402,7 +398,6 @@
       setHeartState(b, "hide");
       return;
     }
-    // MAX瞬間だけ show、以後 visible（＝ゆらゆら）
     if (b.maxAnimArmed) {
       b.maxAnimArmed = false;
       setHeartState(b, "show");
@@ -414,9 +409,7 @@
   }
 
   function calcDropCount(b) {
-    // ★babyは常に1枚
     if (b.isBaby) return 1;
-
     const step = Math.floor(clamp(b.gauge, 0, GAUGE.max) / 25);
     return clamp(1 + step + (b.gauge >= GAUGE.max ? 1 : 0), 1, 8);
   }
@@ -512,6 +505,17 @@
       targetAdultSrc,
       adultSrc: targetAdultSrc,
 
+      // 旅立ち互換：kind を持たせる（推定）
+      kind: (() => {
+        const low = String(targetAdultSrc).toLowerCase();
+        if (low.includes("reabunny")) return "reabunny";
+        if (low.includes("bunny5")) return "bunny5";
+        if (low.includes("bunny4")) return "bunny4";
+        if (low.includes("bunny3")) return "bunny3";
+        if (low.includes("bunny1")) return "bunny1";
+        return "bunny1";
+      })(),
+
       wrap, img, heart,
       _lx: NaN, _ly: NaN, _flip: null,
     };
@@ -562,11 +566,8 @@
       const dt = Math.max(0, Math.min(0.033, (t - lastTickAt) / 1000));
       lastTickAt = t;
 
-      // --- bunny ---
       for (const b of bunnies) {
-        if (b.isBaby && b.babyUntil && now() >= b.babyUntil) {
-          growUp(b);
-        }
+        if (b.isBaby && b.babyUntil && now() >= b.babyUntil) growUp(b);
 
         b.gauge = clamp(b.gauge + GAUGE.perSec * dt, 0, GAUGE.max);
 
@@ -579,7 +580,6 @@
         updateHeart(b);
       }
 
-      // --- coins physics ---
       const floorY = getFloorY() - COIN_H + 2;
       const g = 900;
 
@@ -594,7 +594,6 @@
           continue;
         }
 
-        // ✅ マグネットは「地面付近」だけ効く
         const nearGround = (c.y >= floorY - 22);
         if (nearGround) {
           const dx = mouseFx - (c.x + COIN_W / 2);
@@ -652,6 +651,9 @@
   WB.createBunny = (opts = {}) => createBunny(opts);
   WB.getBunnies = () => bunnies;
 
+  // ✅ 互換：旧スクリプトが WB.bunnies を参照しても動くようにする
+  WB.bunnies = bunnies;
+
   WB.resetCoreOnly = () => {
     if (rafId) cancelAnimationFrame(rafId);
     rafId = 0;
@@ -696,7 +698,21 @@
 
   loadCoin();
 
-  const saved = loadBunnies();
+  // === saved復元 ===
+  let saved = loadBunnies();
+
+  // ✅ PATCH2：初期2体が両方babyなら強制adultに矯正（「初期画面baby2体」対策）
+  if (saved.length === 2 && saved.every(s => !!s.isBaby)) {
+    saved = saved.map(s => ({
+      ...s,
+      isBaby: false,
+      babyUntil: 0,
+      targetAdultSrc: (s.targetAdultSrc || s.adultSrc || ASSET.bunny),
+      adultSrc: (s.targetAdultSrc || s.adultSrc || ASSET.bunny),
+    }));
+    try { localStorage.setItem(LS.bunnies, JSON.stringify(saved)); } catch {}
+  }
+
   if (saved.length > 0) {
     for (const s of saved) {
       createBunny({
@@ -716,5 +732,5 @@
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(step);
 
-  WB.emit("core:ready", { version: "app.js-core-v12.8-baby-return-PATCH", startBunnies: bunnies.length });
+  WB.emit("core:ready", { version: "app.js-core-v12.8-baby-return-PATCH2", startBunnies: bunnies.length });
 })();
