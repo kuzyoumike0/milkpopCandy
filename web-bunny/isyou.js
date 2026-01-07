@@ -3,10 +3,10 @@
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
-// ✅ FIX：bunnyWrap.flip は親ごと反転してるので、アクセ側で scaleX しない（=二重反転回避）
-// ✅ partyhat は「ポンッ」と被る
-// ✅ slot（部類）導入：hat に partyhat/crown/ribbon を入れて同じ位置
-// ✅ FIX：帽子位置は「画像中心」ではなく「頭アンカー（比率）」で置く（flip時は自動反転）
+// ✅ FIX：親(bunnyWrap.flip)が反転してるのでアクセ側で scaleX しない（二重反転回避）
+// ✅ slot（部類）導入：hat に partyhat/crown/ribbon を入れて同一位置
+// ✅ FIX：帽子位置は「頭アンカー（比率）」で置く
+// ✅ FIX：flip時に anchorX を反転しない（親のflipに任せる）←重要
 
 (() => {
   "use strict";
@@ -59,21 +59,20 @@
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
-      // ✅ スロット（部類）ごとの共通位置 + アンカー（画像内比率）
-      // anchorX/Y: 0.0〜1.0（画像左上が0,0 右下が1,1）
-      // flip時は anchorX を左右反転（1 - anchorX）して頭側に追従
+      // slot（部類）ごとの共通位置 + 頭アンカー
       const SLOTS = {
-  hat: {
-    anchorX: 0.74,
-    anchorY: 0.10,
-    offsetX: 10,
-    offsetY: 15,   // ★さらに下へ（+25px）
-    z: 9999,
-  },
-};
+        hat: {
+          // ★頭の位置（画像内比率）
+          // ここを基準に「右/左」を決める。flip時も値は変えない！
+          anchorX: 0.74,
+          anchorY: 0.10,
 
-
-
+          // ★微調整（px）
+          offsetX: 10,  // +で右
+          offsetY: 55,  // +で下
+          z: 9999,
+        },
+      };
 
       const ITEMS = {
         partyhat: {
@@ -100,7 +99,7 @@
           label: "リボン",
           img: "/assets/isyou/ribbon.png",
           price: 1200,
-          slot: "hat", // 同じ位置に揃える
+          slot: "hat",
           offsetX: 0,
           offsetY: 0,
           scale: 0.45,
@@ -112,9 +111,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV6")) return;
+        if (document.getElementById("isyouStyleFinalV7")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV6";
+        s.id = "isyouStyleFinalV7";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -161,7 +160,7 @@ body.isyouEquipMode .bunnyWrap:hover{
 /* アクセサリレイヤ */
 .isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
 
-/* ★アンカーはJSで left/top をpx指定する */
+/* アンカーはJSで left/top をpx指定 */
 .isyouItem{
   position:absolute;
   left:0;
@@ -190,7 +189,7 @@ body.isyouEquipMode .bunnyWrap:hover{
   pointer-events:auto;
 }
 
-/* ★装着モード中：背景はクリックを通す / モーダルは触れる */
+/* 装着モード中：背景はクリックを通す / モーダルは触れる */
 body.isyouEquipMode .isyouBackdrop{ pointer-events:none; background:rgba(0,0,0,.25); }
 body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
@@ -520,18 +519,16 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       function getBunnyImgEl(wrap) {
+        // うさぎ本体っぽいimgを優先して拾う
         return (
           wrap.querySelector("img.bunnyImg") ||
           wrap.querySelector("img[data-bunny]") ||
+          wrap.querySelector("img[src*='bunny']") ||
           wrap.querySelector("img")
         );
       }
 
-      function isWrapFlipped(wrap) {
-        return !!wrap?.classList?.contains("flip");
-      }
-
-      // ✅ slotのanchor（比率）で「頭」を取る
+      // ✅ 頭アンカー（比率）で点を取る：flipでも値を反転しない
       function getAnchorPoint(bunny, slotKey) {
         const wrap = bunny?.wrap;
         if (!wrap) return { x: 0, y: 0 };
@@ -543,20 +540,16 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const ir = img.getBoundingClientRect();
 
         const slot = slotKey && SLOTS[slotKey] ? SLOTS[slotKey] : null;
+        const ax = slot && typeof slot.anchorX === "number" ? slot.anchorX : 0.5;
+        const ay = slot && typeof slot.anchorY === "number" ? slot.anchorY : 0.0;
 
-        // デフォルト：画像中心/上端
-        let ax = slot && typeof slot.anchorX === "number" ? slot.anchorX : 0.5;
-        let ay = slot && typeof slot.anchorY === "number" ? slot.anchorY : 0.0;
-
-        // ★flip時はXだけ左右反転
-        if (isWrapFlipped(wrap)) ax = 1 - ax;
-
+        // ★flip時に 1-ax しない！（親のflipに任せる）
         const x = (ir.left - wr.left) + ir.width * ax;
         const y = (ir.top - wr.top) + ir.height * ay;
         return { x, y };
       }
 
-      // ★重要：親がflipで反転してるので、アクセ側で scaleX しない（keepUprightだけ相殺）
+      // 親がflipで反転してるので、アクセ側で scaleX しない（keepUprightだけ相殺）
       function applyTransform(imgEl, bunny, it) {
         const keepUpright = !!it.keepUpright;
 
@@ -571,15 +564,15 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const oy = (Number(it.offsetY) || 0) + soy;
         const sc = Number(it.scale) || 1;
 
-        // ✅ 帽子は「頭アンカー」に置く
         const a = getAnchorPoint(bunny, slotKey);
         imgEl.style.left = `${a.x}px`;
         imgEl.style.top  = `${a.y}px`;
 
         const extraFlip = keepUpright ? " scaleX(-1)" : "";
 
+        // アンカー点を中心として扱う
         const baseT =
-          `translate(-50%, -50%) translate(${ox}px, ${oy}px) ` + // ★アンカー点を中心に扱う
+          `translate(-50%, -50%) translate(${ox}px, ${oy}px) ` +
           `scale(${sc})` + extraFlip;
 
         imgEl.style.setProperty("--isyouT", baseT);
@@ -681,7 +674,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (hat anchor fixed)");
+      console.log("[isyou] ready (flip position stable)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
