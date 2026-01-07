@@ -1,4 +1,10 @@
 // isyou.js — お洒落（ショップ＋複数装着＋flip補正＋称号連動＋赤枠）完全版（WB待機つき）
+// ★変更点：装着は「赤枠で囲った（=選択した）うさぎ」にだけ行う
+// - 装着モードON中：うさぎを1回クリック → 赤枠でロック（選択）
+// - 以降はその子にだけ装着（他のうさぎを触っても切り替わらない）
+// - もう一度その子をクリック → 選択解除（赤枠消える）
+// - 別のうさぎをクリック → 選択先を切り替え（赤枠移動）
+
 (() => {
   "use strict";
 
@@ -46,7 +52,6 @@
         equipped: "wb_isyou_equipped_v2",    // { bornAt: { itemKey:true } }
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
-      
 
       const ITEMS = {
         partyhat: {
@@ -96,23 +101,33 @@
        * CSS inject
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleV3")) return;
+        if (document.getElementById("isyouStyleV4")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleV3";
+        s.id = "isyouStyleV4";
         s.textContent = `
 /* ===== お洒落ボタンを確実に最前面＆クリック可に ===== */
 #hud{ pointer-events:auto; }
 #isyouBtn{ pointer-events:auto; z-index:2147483647; }
 
-/* ===== お洒落モード：赤枠 ===== */
+/* ===== お洒落モード：ホバー赤枠 ===== */
 body.isyouEquipMode .bunnyWrap{ outline:none; }
 body.isyouEquipMode .bunnyWrap:hover{
-  outline: 4px solid rgba(255,64,64,.88);
+  outline: 4px solid rgba(255,64,64,.60);
   outline-offset: 3px;
   border-radius: 18px;
 }
+
+/* ★選択（ロック）されたうさぎ：濃い赤枠で固定表示 */
+.bunnyWrap.isyouSelectedTarget{
+  outline: 4px solid rgba(255,64,64,.92);
+  outline-offset: 3px;
+  border-radius: 18px;
+  box-shadow: 0 0 0 2px rgba(255,255,255,.65) inset;
+}
+
+/* 装着した瞬間の点滅 */
 .bunnyWrap.isyouJustEquipped{
-  outline: 4px solid rgba(255,64,64,.88);
+  outline: 4px solid rgba(255,64,64,.92);
   outline-offset: 3px;
   border-radius: 18px;
   animation: isyouBlink 520ms ease-in-out;
@@ -264,7 +279,6 @@ body.isyouEquipMode .bunnyWrap:hover{
         btn = document.createElement("button");
         btn.textContent = "お洒落";
         btn.id = "isyouBtn";
-        // 左側に入れたいなら prepend（好み）
         hud.appendChild(btn);
       }
 
@@ -276,10 +290,35 @@ body.isyouEquipMode .bunnyWrap:hover{
       let equipMode = false;
       const selectedItems = new Set();
 
+      // ★「赤枠で囲った(選択した)うさぎ」= 装着対象
+      let selectedBornAt = null;
+
+      function clearSelectedTargetVisual() {
+        const list = Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
+        (list || []).forEach((b) => b?.wrap?.classList?.remove("isyouSelectedTarget"));
+      }
+
+      function setSelectedTarget(bunnyOrNull) {
+        clearSelectedTargetVisual();
+        if (!bunnyOrNull) {
+          selectedBornAt = null;
+          return;
+        }
+        selectedBornAt = bunnyOrNull.bornAt;
+        bunnyOrNull.wrap?.classList?.add("isyouSelectedTarget");
+      }
+
+      function getSelectedBunny() {
+        if (selectedBornAt == null) return null;
+        const list = Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
+        return (list || []).find((b) => b && b.bornAt === selectedBornAt) || null;
+      }
+
       function closeModal() {
         equipMode = false;
         document.body.classList.remove("isyouEquipMode");
         selectedItems.clear();
+        setSelectedTarget(null); // ★解除
         try { backdrop?.remove(); } catch {}
         backdrop = null;
       }
@@ -395,20 +434,34 @@ body.isyouEquipMode .bunnyWrap:hover{
 
             const toggle = document.createElement("button");
             toggle.className = "isyouBtn primary";
-            toggle.textContent = equipMode ? "装着モード：ON（うさぎクリック）" : "装着モード：OFF";
+            toggle.textContent = equipMode ? "装着モード：ON（赤枠の子に装着）" : "装着モード：OFF";
             toggle.addEventListener("click", () => {
               equipMode = !equipMode;
               document.body.classList.toggle("isyouEquipMode", equipMode);
+
+              // OFFにしたら選択解除
+              if (!equipMode) setSelectedTarget(null);
+
               render();
             });
 
             const hint = document.createElement("div");
             hint.className = "isyouSmall";
-            hint.textContent = "※複数選んで同時装着できます / もう一度クリックで外します";
+            hint.textContent = "①装着したいアイテムを選択 ②うさぎをクリックして赤枠で選択 ③もう一度クリックで外す";
 
             rowTop.appendChild(toggle);
             rowTop.appendChild(hint);
             body.appendChild(rowTop);
+
+            // ★選択中のターゲット表示
+            const sel = getSelectedBunny();
+            const targetLine = document.createElement("div");
+            targetLine.className = "isyouSmall";
+            targetLine.style.marginTop = "6px";
+            targetLine.textContent = sel
+              ? `装着対象：${sel.kind || "bunny"}（ID: ${sel.bornAt}）`
+              : "装着対象：未選択（うさぎをクリックして赤枠で選択）";
+            body.appendChild(targetLine);
 
             const grid = document.createElement("div");
             grid.className = "isyouGrid";
@@ -544,6 +597,12 @@ body.isyouEquipMode .bunnyWrap:hover{
       function redrawAll() {
         const list = Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
         (list || []).forEach(drawAllForBunny);
+
+        // ★選択ターゲットが消えた（旅立ち等）時は解除
+        if (selectedBornAt != null) {
+          const still = (list || []).some(b => b && b.bornAt === selectedBornAt);
+          if (!still) setSelectedTarget(null);
+        }
       }
 
       function toggleEquip(bunny, itemKey) {
@@ -567,19 +626,41 @@ body.isyouEquipMode .bunnyWrap:hover{
         } catch {}
       }
 
-      // 装着モード：うさぎクリックで装着（複数同時）
+      /* =========================
+       * 装着モード：赤枠で囲った（選択した）うさぎにだけ装着
+       * - うさぎクリックで「選択」(赤枠固定)
+       * - 選択中のうさぎ以外をクリックしても装着しない（選択切替のみ）
+       * ========================= */
+      function getBunnyFromWrap(wrap) {
+        const list = Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
+        return (list || []).find(b => b && b.wrap === wrap) || null;
+      }
+
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
 
         const wrap = e.target?.closest?.(".bunnyWrap");
         if (!wrap) return;
 
-        const list = Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
-        const bunny = (list || []).find(b => b.wrap === wrap);
-        if (!bunny) return;
+        const bunny = getBunnyFromWrap(wrap);
+        if (!bunny || bunny.isBaby) return;
 
-        if (selectedItems.size === 0) return;
-        selectedItems.forEach((k) => toggleEquip(bunny, k));
+        // ★赤枠ターゲット選択のロジック
+        // 1) まだ未選択：この子を選択して終了
+        if (selectedBornAt == null) {
+          setSelectedTarget(bunny);
+          return;
+        }
+
+        // 2) すでに選択中の子をクリック：装着/解除を実行
+        if (bunny.bornAt === selectedBornAt) {
+          if (selectedItems.size === 0) return;
+          selectedItems.forEach((k) => toggleEquip(bunny, k));
+          return;
+        }
+
+        // 3) 別の子をクリック：選択先を切り替え（装着はしない）
+        setSelectedTarget(bunny);
       }, { passive: true });
 
       /* =========================
@@ -657,6 +738,5 @@ body.isyouEquipMode .bunnyWrap:hover{
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
-      // ここで終了（WBが無い＝app.jsが読めてない等）
     });
 })();
