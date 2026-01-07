@@ -1,10 +1,10 @@
-// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版（最終FIX）
+// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版（FIX）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
-// ✅ partyhat は「頭の上」に固定（anchorY廃止・top:0基準）
-// ✅ 反転してもズレない（X/Yは不変、見た目だけ scaleX 反転）
+// ✅ partyhat は「頭の上」に固定（top:0基準）
+// ✅ 反転時のズレ修正：offsetX を flip で符号反転（帽子の乗る位置が左右対称になる）
 // ✅ partyhat は「ポンッ」と被るアニメ
 
 (() => {
@@ -58,16 +58,16 @@
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
-      // ★位置決めは「wrap上端(top:0)基準 + px」で統一（anchorYは使わない）
+      // ★位置決めは「wrap上端(top:0)基準 + px」で統一
       const ITEMS = {
         partyhat: {
           label: "パーティーハット",
           img: "/assets/isyou/partyhat.png",
           price: 500,
 
-          offsetX: 10,     // 耳の間へ
-          offsetY: -48,    // ★頭の上（高い/低いはここだけ調整）
-          scale: 0.34,     // 小さめ
+          offsetX: 10,     // 耳の間へ寄せる（flip時は自動で左右反転）
+          offsetY: -38,    // ★-48だと浮きやすいので少し下げた
+          scale: 0.34,
           z: 9999,
         },
         crown: {
@@ -75,7 +75,7 @@
           img: "/assets/isyou/crown.png",
           price: 3500,
           offsetX: 0,
-          offsetY: -54,
+          offsetY: -50,
           scale: 0.38,
           z: 9999,
         },
@@ -94,9 +94,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV2")) return;
+        if (document.getElementById("isyouStyleFinalV3")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV2";
+        s.id = "isyouStyleFinalV3";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -499,16 +499,17 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return layer;
       }
 
-      // ★最終FIX：位置は flip と無関係（見た目だけscaleX）
+      // ★FIX：offsetXをflipで符号反転 → 頭の位置から左右対称に乗る
       function applyTransform(imgEl, bunny, it) {
         const flip = !!bunny?.wrap?.classList?.contains("flip");
         const fx = flip ? -1 : 1;
 
-        const ox = Number(it.offsetX) || 0;
+        const baseOx = Number(it.offsetX) || 0;
+        const ox = baseOx * (flip ? -1 : 1);  // ←ここがズレ修正の本体
         const oy = Number(it.offsetY) || 0;
         const sc = Number(it.scale) || 1;
 
-        imgEl.style.top = "0px"; // ★常に上端基準
+        imgEl.style.top = "0px";
 
         const baseT =
           `translate(calc(-50% + ${ox}px), ${oy}px) ` +
@@ -557,7 +558,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         saveAll();
         drawAllForBunny(bunny);
 
-        // 「ポンッ」演出（partyhatのときだけ）
         if (itemKey === "partyhat") {
           bunny.wrap.classList.add("isyouPopHat");
           setTimeout(() => bunny.wrap?.classList?.remove("isyouPopHat"), 260);
@@ -565,12 +565,10 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       /* =========================
-       * Equip mode click (赤枠選択→同じ子再クリックで装着)
+       * Equip mode click
        * ========================= */
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
-
-        // モーダル内クリックは無視
         if (e.target?.closest?.(".isyouModal")) return;
 
         const wrap = e.target?.closest?.(".bunnyWrap");
@@ -594,12 +592,11 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }, { capture: true });
 
       /* =========================
-       * Hooks
+       * Hooks + flip watcher
        * ========================= */
       WB.on?.("bunnyCountChanged", redrawAll);
       WB.on?.("resize", redrawAll);
 
-      // flip変化を軽く監視（ズレ再現防止）
       let rafId = null;
       function startFlipWatcher() {
         if (rafId) return;
@@ -615,7 +612,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (final fixed)");
+      console.log("[isyou] ready (flip fixed)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
