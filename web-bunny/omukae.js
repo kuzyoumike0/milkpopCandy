@@ -10,11 +10,75 @@
   let shopBackdrop = null;
   let shopModal = null;
 
+  /* =========================
+   * WB互換ヘルパ
+   * ========================= */
+  function getBunnyCount() {
+    // 新API
+    if (typeof WB.getBunnies === "function") return WB.getBunnies().length;
+    // 旧API
+    if (Array.isArray(WB.bunnies)) return WB.bunnies.length;
+    return 0;
+  }
+
+  function getCoins() {
+    if (typeof WB.getCoin === "function") return WB.getCoin();
+    if (typeof WB.coins === "number") return WB.coins;
+    return 0;
+  }
+
+  function spendCoins(amount) {
+    // 新APIがあるならそれを使う（内部でHUD更新・保存される想定）
+    if (typeof WB.spendCoin === "function") return WB.spendCoin(amount);
+
+    // 旧API互換
+    if (typeof WB.coins === "number" && WB.coins >= amount) {
+      WB.coins -= amount;
+      if (typeof WB.saveCoins === "function") WB.saveCoins();
+      if (typeof WB.updateHud === "function") WB.updateHud();
+      return true;
+    }
+    return false;
+  }
+
+  // omukae商品定義（WB側にあればそれを優先）
+  function getDefs() {
+    // 優先：app.js が提供するカタログ（src/cost）
+    // 期待フォーマット: [{key,name,src,cost}, ...]
+    if (Array.isArray(WB.omukaeCatalog) && WB.omukaeCatalog.length) {
+      const map = {};
+      for (const it of WB.omukaeCatalog) {
+        if (!it?.key) continue;
+        map[it.key] = {
+          label: it.name || it.key,
+          desc: it.desc || "お迎えした子は baby で来て、3分で成長します。",
+          img: it.src,              // 表示サムネ
+          adultSrc: it.src,         // 成長先（指定進化）
+          price: Number(it.cost || it.price || 0),
+        };
+      }
+      return map;
+    }
+
+    // 従来：WB.BUNNY_DEFS があるならそれを使う
+    if (WB.BUNNY_DEFS) return WB.BUNNY_DEFS;
+
+    // どちらも無い場合の最小フォールバック
+    const a = WB.assets || {};
+    return {
+      bunny1: { label: "bunny1", desc: "", img: a.bunny1 || "", adultSrc: a.bunny1 || "", price: 200 },
+      bunny3: { label: "bunny3", desc: "", img: a.bunny3 || "", adultSrc: a.bunny3 || "", price: 200 },
+      bunny4: { label: "bunny4", desc: "", img: a.bunny4 || "", adultSrc: a.bunny4 || "", price: 200 },
+      bunny5: { label: "bunny5", desc: "", img: a.bunny5 || "", adultSrc: a.bunny5 || "", price: 200 },
+    };
+  }
+
   function calcDynamicPrice(kind) {
-    const base = WB.BUNNY_DEFS[kind]?.price ?? 0;
+    const defs = getDefs();
+    const base = defs[kind]?.price ?? 0;
     if (base <= 0) return 0;
 
-    const n = WB.bunnies.length;
+    const n = getBunnyCount();
     const mul = 1 + n * PRICE_INFLATION_PER_BUNNY;
     const raw = Math.floor(base * mul);
     return Math.max(base, Math.ceil(raw / PRICE_ROUND_UNIT) * PRICE_ROUND_UNIT);
@@ -33,7 +97,8 @@
   }
 
   function showAdoptEffect(kind) {
-    const def = WB.BUNNY_DEFS[kind] || WB.BUNNY_DEFS.bunny1;
+    const defs = getDefs();
+    const def = defs[kind] || defs.bunny1;
 
     const overlay = document.createElement("div");
     overlay.className = "adoptFxOverlay";
@@ -84,21 +149,37 @@
   }
 
   function buyBunny(kind) {
-    kind = WB.BUNNY_DEFS[kind] ? kind : "bunny1";
-    const def = WB.BUNNY_DEFS[kind];
-    if (!def || def.price <= 0) return false;
+    const defs = getDefs();
+    kind = defs[kind] ? kind : "bunny1";
+    const def = defs[kind];
+    if (!def) return false;
 
     const priceNow = calcDynamicPrice(kind);
-    if (WB.coins < priceNow) return false;
+    if (getCoins() < priceNow) return false;
 
-    WB.coins -= priceNow;
-    WB.saveCoins();
-    WB.updateHud();
+    if (!spendCoins(priceNow)) return false;
 
     const waitMs = showAdoptEffect(kind);
+
     setTimeout(() => {
-      WB.spawnBunny(kind, Date.now());
-      // 実績のチェックは zisseki.js が bunnyCountChanged を監視しているので自動
+      // ✅ 重要：購入は babyで生成して、成長先を固定する
+      // 新app.js: WB.createBunny({isBaby:true,targetAdultSrc:"./assets/bunny3.png"})
+      if (typeof WB.createBunny === "function") {
+        WB.createBunny({
+          isBaby: true,
+          targetAdultSrc: def.adultSrc || def.img, // 成長先＝購入した種類
+        });
+      } else if (typeof WB.spawnBunny === "function") {
+        // 旧ロジック互換：spawnBunny(kind, bornAt) が「baby→kindへ成長」前提ならこれ
+        // ただし「確実に指定進化」させたいので、spawnBunnyが target を受けるなら優先
+        try {
+          WB.spawnBunny(kind, Date.now(), { targetAdultSrc: def.adultSrc || def.img });
+        } catch {
+          WB.spawnBunny(kind, Date.now());
+        }
+      }
+
+      // 実績チェックは zisseki.js 側が監視している想定
       refreshShopUI();
     }, waitMs);
 
@@ -119,23 +200,26 @@
       shopBackdrop.appendChild(shopModal);
     }
 
+    const defs = getDefs();
     const kinds = getShopKinds();
+
     const cards = kinds.map((kind) => {
-      const def = WB.BUNNY_DEFS[kind];
+      const def = defs[kind];
+      if (!def) return "";
       const priceNow = calcDynamicPrice(kind);
-      const canBuy = WB.coins >= priceNow;
+      const canBuy = getCoins() >= priceNow;
       return `
         <div class="shopCard ${canBuy ? "" : "disabled"}">
           <img src="${def.img}" class="shopThumb" alt="${def.label}">
           <div class="shopName">${def.label}</div>
-          <div class="shopDesc">${def.desc}</div>
+          <div class="shopDesc">${def.desc || ""}</div>
           <div class="shopPrice ${canBuy ? "" : "bad"}">${priceNow} 🪙</div>
           <button data-buy="${kind}" ${canBuy ? "" : "disabled"}>お迎え</button>
         </div>
       `;
     }).join("");
 
-    const nowCount = WB.bunnies.length;
+    const nowCount = getBunnyCount();
     const unlocked = WB.zisseki?.isUnlocked?.("unlock_bunny4");
     const need = WB.zisseki?.UNLOCK_BUNNY4_NEED ?? 10;
 
@@ -158,7 +242,7 @@
       <div class="shopGrid">${cards}</div>
 
       <div style="margin-top:10px;font-size:12px;opacity:.9;">
-        所持：<b>${WB.coins}🪙</b> / 現在：<b>${WB.bunnies.length}匹</b>
+        所持：<b>${getCoins()}🪙</b> / 現在：<b>${nowCount}匹</b>
       </div>
     `;
 
@@ -184,16 +268,30 @@
     buildShopModal();
   }
 
+  /* =========================
+   * 起動：omukae:open を優先して受ける
+   * ========================= */
+  // app.jsがWB.emit("omukae:open") する方式に対応
+  if (typeof WB.on === "function") {
+    WB.on("omukae:open", () => {
+      WB.unlockAudioOnce?.();
+      openShopModal();
+    });
+  }
+
+  // 従来互換：WB.shopBtn を直接監視
   if (WB.shopBtn) {
     WB.shopBtn.addEventListener("click", () => {
-      WB.unlockAudioOnce();
+      WB.unlockAudioOnce?.();
       openShopModal();
     });
   }
 
   // 実績が解放されたらショップUIを更新
-  WB.on("achievementUnlocked", () => refreshShopUI());
-  WB.on("bunnyCountChanged", () => refreshShopUI());
+  if (typeof WB.on === "function") {
+    WB.on("achievementUnlocked", () => refreshShopUI());
+    WB.on("bunnyCountChanged", () => refreshShopUI());
+  }
 
   WB.omukae = {
     openShopModal,
