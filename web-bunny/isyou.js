@@ -1,11 +1,11 @@
-// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版（FIX）
+// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠選択）完全版（FIX：flipズレ解消）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
-// ✅ partyhat は「頭の上」に固定（top:0基準）
-// ✅ 反転時のズレ修正：offsetX を flip で符号反転（帽子の乗る位置が左右対称になる）
-// ✅ partyhat は「ポンッ」と被るアニメ
+// ✅ partyhat は頭の上（top基準+px）
+// ✅ FIX：bunnyWrap.flip は親ごと反転してるので、アクセ側で scaleX しない（=二重反転回避）
+// ✅ partyhat は「ポンッ」と被る
 
 (() => {
   "use strict";
@@ -53,23 +53,28 @@
        * Config
        * ========================= */
       const LS = {
-        owned: "wb_isyou_owned_v2",          // { itemKey: number }
-        equipped: "wb_isyou_equipped_v2",    // { bornAt: { itemKey:true } }
+        owned: "wb_isyou_owned_v2",
+        equipped: "wb_isyou_equipped_v2",
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
-      // ★位置決めは「wrap上端(top:0)基準 + px」で統一
       const ITEMS = {
         partyhat: {
           label: "パーティーハット",
           img: "/assets/isyou/partyhat.png",
           price: 500,
 
-          offsetX: 10,     // 耳の間へ寄せる（flip時は自動で左右反転）
-          offsetY: -38,    // ★-48だと浮きやすいので少し下げた
-          scale: 0.34,
+          // ★中央寄せ（耳の間）
+          // 親のflipで左右入れ替わるので、ここは“固定値”でOK
+          offsetX: 0,
+          offsetY: -42,   // 頭の上
+          scale: 0.32,
           z: 9999,
+
+          // keepUpright:true を付けると「反転しても正面向き」になる（今回は不要）
+          // keepUpright: true,
         },
+
         crown: {
           label: "王冠",
           img: "/assets/isyou/crown.png",
@@ -79,6 +84,7 @@
           scale: 0.38,
           z: 9999,
         },
+
         ribbon: {
           label: "リボン",
           img: "/assets/isyou/ribbon.png",
@@ -94,9 +100,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV3")) return;
+        if (document.getElementById("isyouStyleFinalV4")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV3";
+        s.id = "isyouStyleFinalV4";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -145,7 +151,7 @@ body.isyouEquipMode .bunnyWrap:hover{
 .isyouItem{
   position:absolute;
   left:50%;
-  top:0;                 /* ★基準は常に上端 */
+  top:0;                 /* ★上端基準 */
   transform-origin:50% 50%;
   pointer-events:none;
   user-select:none;
@@ -238,7 +244,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       /* =========================
-       * HUD Button（必ず作る）
+       * HUD Button
        * ========================= */
       let btn = document.getElementById("isyouBtn");
       if (!btn) {
@@ -254,7 +260,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
        * Modal
        * ========================= */
       let backdrop = null;
-      let tab = "shop"; // shop | equip
+      let tab = "shop";
       let equipMode = false;
 
       const selectedItems = new Set();
@@ -499,21 +505,23 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return layer;
       }
 
-      // ★FIX：offsetXをflipで符号反転 → 頭の位置から左右対称に乗る
+      // ★重要FIX：親(bunnyWrap)がflipで反転してるので、ここでは反転しない
+      // ＝ scaleX は基本 1（keepUpright の時だけ -1 で相殺）
       function applyTransform(imgEl, bunny, it) {
-        const flip = !!bunny?.wrap?.classList?.contains("flip");
-        const fx = flip ? -1 : 1;
+        const keepUpright = !!it.keepUpright;
 
-        const baseOx = Number(it.offsetX) || 0;
-        const ox = baseOx * (flip ? -1 : 1);  // ←ここがズレ修正の本体
+        const ox = Number(it.offsetX) || 0;
         const oy = Number(it.offsetY) || 0;
         const sc = Number(it.scale) || 1;
 
         imgEl.style.top = "0px";
 
+        // keepUpright=true のときだけ、親の反転を打ち消す
+        const extraFlip = keepUpright ? " scaleX(-1)" : "";
+
         const baseT =
           `translate(calc(-50% + ${ox}px), ${oy}px) ` +
-          `scale(${sc}) scaleX(${fx})`;
+          `scale(${sc})` + extraFlip;
 
         imgEl.style.setProperty("--isyouT", baseT);
         imgEl.style.transform = baseT;
@@ -612,7 +620,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (flip fixed)");
+      console.log("[isyou] ready (flip stable)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
