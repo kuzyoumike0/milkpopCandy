@@ -45,7 +45,7 @@
         img: "./assets/isyou/partyhat.png",
         price: 500,
 
-        anchorY: 0.03,   // 頭頂部
+        anchorY: 1.00,   // 頭頂部
         offsetX: 14,
         offsetY: -6,
         scale: 0.6,      // ★最終確定：小さめ
