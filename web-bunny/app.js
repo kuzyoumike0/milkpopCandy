@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.2 (idle drop OFF)", Date.now());
+  console.log("[app.js] LOADED v16.3 (idle drop OFF + baby size stable via wrap-scale)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -24,11 +24,11 @@
   };
 
   const BUNNY_DEFS = {
-    bunny1:  { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+    bunny1:   { label: "通常みるぽ",     img: "./assets/bunny1.png",   price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:   { label: "毒タイプみるぽ", img: "./assets/bunny3.png",   price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:   { label: "水タイプみるぽ", img: "./assets/bunny4.png",   price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:   { label: "お正月みるぽ",   img: "./assets/bunny5.png",   price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
   /* =========================
@@ -63,16 +63,16 @@
   /* =========================
    * DOM
    * ========================= */
-  const field      = document.getElementById("field");
-  const bunnyLayer = document.getElementById("bunnyLayer");
-  const coinLayer  = document.getElementById("coinLayer");
-  const coinValueEl= document.getElementById("coinValue");
+  const field       = document.getElementById("field");
+  const bunnyLayer  = document.getElementById("bunnyLayer");
+  const coinLayer   = document.getElementById("coinLayer");
+  const coinValueEl = document.getElementById("coinValue");
 
-  const shopBtn    = document.getElementById("shopBtn");
-  const departBtn  = document.getElementById("departBtn");
-  const resetBtn   = document.getElementById("resetBtn");
-  const rankBtn    = document.getElementById("rankBtn");
-  const slotBtn    = document.getElementById("slotBtn");
+  const shopBtn   = document.getElementById("shopBtn");
+  const departBtn = document.getElementById("departBtn");
+  const resetBtn  = document.getElementById("resetBtn");
+  const rankBtn   = document.getElementById("rankBtn");
+  const slotBtn   = document.getElementById("slotBtn");
 
   if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
     console.error("[app.js] 必要DOMが見つかりません");
@@ -135,20 +135,23 @@
   }
 
   /* =========================
-   * CSS injection（コイン小さく / ハート小さめ＆ゆらゆら / baby小さく）
+   * CSS injection
+   * - コイン小さく
+   * - ハート小さめ＆ゆらゆら
+   * - ✅ babyは img ではなく wrap を縮める（transform競合対策）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbPerBunnyChargeCss")) return;
+    if (document.getElementById("wbPerBunnyChargeCss_v2")) return;
     const st = document.createElement("style");
-    st.id = "wbPerBunnyChargeCss";
+    st.id = "wbPerBunnyChargeCss_v2";
     st.textContent = `
       .coin{
         width:26px !important;
         height:26px !important;
       }
 
-      /* ✅ babybunny を小さく */
-      .bunny.baby{
+      /* ✅ babyはwrapごと縮める（imgのtransform競合を回避） */
+      .bunnyWrap.babyWrap{
         transform: scale(0.78);
         transform-origin: bottom center;
       }
@@ -337,6 +340,7 @@
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
+        // babyはcoin1 1枚だけ
         if (this.isBaby) {
           spawnClickCoins(this, 1, () => 0);
           return;
@@ -363,7 +367,12 @@
     }
 
     syncSprite() {
+      // ✅ babyはwrapごと縮める（transform競合に強い）
+      this.wrap.classList.toggle("babyWrap", this.isBaby);
+
+      // classは保険で残す（他JSが参照してもOK）
       this.el.classList.toggle("baby", this.isBaby);
+
       this.el.src = this.isBaby
         ? ASSETS.babyBunny
         : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
@@ -430,7 +439,6 @@
 
     getDropPlanFromOwnCharge() {
       const r0 = this.getChargeRatio();
-
       const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
       const r = Math.min(1, r0 * (1.15 + mul * 0.15));
 
@@ -468,7 +476,7 @@
       return { count, pickTier };
     }
 
-    // ✅ 放置排出は無効化（何もしない）
+    // ✅ 放置排出は無効化
     idleDrop(dt) { /* idle drop OFF */ }
 
     getWrapWidth() {
@@ -512,6 +520,10 @@
 
     update(dt) {
       this.evolveIfNeeded(false);
+
+      // ✅ 保険：baby中は常にwrapクラス維持（他JSが触っても戻す）
+      if (this.isBaby) this.wrap.classList.add("babyWrap");
+      else this.wrap.classList.remove("babyWrap");
 
       // ✅ 放置排出しない
       // this.idleDrop(dt);
@@ -602,10 +614,10 @@
   /* =========================
    * Buttons（emit only）
    * ========================= */
-  shopBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:shop",  {}); });
-  departBtn?.addEventListener("click",() => { unlockAudioOnce(); emit("ui:depart",{}); });
-  rankBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:rank",  {}); });
-  slotBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:slot",  {}); });
+  shopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
+  departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
+  rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
+  slotBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:slot",   {}); });
 
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
