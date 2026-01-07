@@ -7,9 +7,9 @@
 // ✅ slot（部類）導入：hat
 // ✅ FIX：アンカー座標を getBoundingClientRect ではなく offset 系（レイアウト座標）で取る
 //     → flip（transform）しても帽子がズレない
-// ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる）
+// ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる）※offset系で位置決め
 // ✅ aimasuku は fitToBunny=true（うさぎと同じ大きさ＆同じ位置）
-// ✅ 重要：hat は「複数装着」ではなく「着せ替え」（同時に1つだけ）
+// ✅ 重要：hat は「複数装着」ではなく「置き換え」（同時に1つだけ）
 
 (() => {
   "use strict";
@@ -100,27 +100,27 @@
           z: 9999,
         },
 
-        // ✅ aimasuku：うさぎと同じ大きさ＆同じ位置
+        // ✅ aimasuku：うさぎと同じ大きさ＆同じ位置（ズレない版）
         aimasuku: {
           label: "アイマスク",
           img: "/assets/isyou/aimasuku.png",
           price: 1200,
           slot: "hat",
-          fitToBunny: true,  // ←これで「うさぎ画像と完全一致」
+          fitToBunny: true,   // ←完全一致
           offsetX: 0,
           offsetY: 0,
           scale: 1,
           z: 9999,
-          keepUpright: true,
+          keepUpright: true,  // 顔の向きはそのまま
         },
 
-        // ✅ ahiru：hatと同じ部類（着せ替え対象）
+        // ✅ ahiru：hatと同じ部類（置き換え対象）
         ahiru: {
           label: "ぷかアヒル",
           img: "/assets/isyou/ahiru.png",
           price: 600,
           slot: "hat",
-          fitToBunny: true,
+          fitToBunny: true,   // 今回は「同位置で重ねる」仕様に統一
           offsetX: 0,
           offsetY: 0,
           scale: 1,
@@ -133,9 +133,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV10")) return;
+        if (document.getElementById("isyouStyleFinalV11")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV10";
+        s.id = "isyouStyleFinalV11";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -290,7 +290,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       let tab = "shop";
       let equipMode = false;
 
-      // 「装着する候補」選択（ここで hat は 1つだけにする）
+      // ✅ 選択（hatは常に1つだけ）
       const selectedItems = new Set();
       let selectedBornAt = null;
 
@@ -437,7 +437,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
             const hint = document.createElement("div");
             hint.className = "isyouSmall";
-            hint.textContent = "①アイテム選択（hatは1つだけ） ②うさぎをクリックで赤枠 ③同じうさぎを再クリックで着せ替え";
+            hint.textContent = "①アイテム選択（hatは1つだけ） ②うさぎをクリックで赤枠 ③同じうさぎを再クリックで置き換え";
 
             rowTop.appendChild(toggle);
             rowTop.appendChild(hint);
@@ -484,22 +484,19 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
               pick.style.background = onSel ? "#ffe6f2" : "#fff";
               pick.disabled = count <= 0;
 
-              // ✅ hat は 1つだけ選択（選んだら他hat候補を解除）
               pick.addEventListener("click", () => {
                 if (count <= 0) return;
 
-                const slot = it.slot ? String(it.slot) : "";
+                const slot = String(it.slot || "");
                 if (slot === "hat") {
-                  // 他のhat候補を全部外す
+                  // ✅ hatは常に1つだけ選択
                   for (const k of Array.from(selectedItems)) {
                     const other = ITEMS[k];
                     if (other && String(other.slot || "") === "hat") selectedItems.delete(k);
                   }
-                  // 自分をトグル
                   if (selectedItems.has(key)) selectedItems.delete(key);
                   else selectedItems.add(key);
                 } else {
-                  // 将来 slot追加した時用（複数OKのまま）
                   if (selectedItems.has(key)) selectedItems.delete(key);
                   else selectedItems.add(key);
                 }
@@ -559,6 +556,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         );
       }
 
+      // ✅ offset系で「wrap内ローカル座標」を取る（transformの影響を受けない）
       function getLocalPosWithin(el, root) {
         let x = 0, y = 0;
         let cur = el;
@@ -570,6 +568,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return { x, y, ok: (cur === root) };
       }
 
+      // ✅ hatアンカー（比率）を「ローカル座標」で返す（fitToBunny時は使わない）
       function getAnchorPoint(bunny, slotKey) {
         const wrap = bunny?.wrap;
         if (!wrap) return { x: 0, y: 0 };
@@ -601,18 +600,22 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const ox = (Number(it.offsetX) || 0) + sox;
         const oy = (Number(it.offsetY) || 0) + soy;
 
-        // ✅ fitToBunny：うさぎ画像と同サイズ・同位置に重ねる（反転でもズレない）
+        // ✅ fitToBunny：offset系で完全一致（ズレない）
         if (it.fitToBunny) {
           const wrap = bunny?.wrap;
           const bimg = wrap ? getBunnyImgEl(wrap) : null;
           if (!wrap || !bimg) return;
 
-          const cs = getComputedStyle(bimg);
+          const p = getLocalPosWithin(bimg, wrap);
+          const w = bimg.offsetWidth || bimg.clientWidth || 0;
+          const h = bimg.offsetHeight || bimg.clientHeight || 0;
 
-          imgEl.style.left = cs.left;
-          imgEl.style.top = cs.top;
-          imgEl.style.width = cs.width;
-          imgEl.style.height = cs.height;
+          imgEl.style.left   = `${p.x}px`;
+          imgEl.style.top    = `${p.y}px`;
+          imgEl.style.width  = `${w}px`;
+          imgEl.style.height = `${h}px`;
+
+          const cs = getComputedStyle(bimg);
           imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
 
           const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
@@ -674,7 +677,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         (getBunnyList() || []).forEach(drawAllForBunny);
       }
 
-      // ✅ 着せ替え（slot内は1つだけ）
+      // ✅ 置き換え（slot内は1つだけON）
       function setEquipExclusiveBySlot(bunny, itemKey) {
         if (!bunny || bunny.isBaby) return;
 
@@ -687,14 +690,14 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const key = String(bunny.bornAt);
         equipped[key] = equipped[key] || {};
 
-        // そのslotの他アイテムを全部OFF
+        // slot内の他アイテムを全部OFF
         Object.keys(equipped[key]).forEach((k) => {
           const other = ITEMS[k];
           if (!other) return;
           if (String(other.slot || "") === slot) equipped[key][k] = false;
         });
 
-        // 選んだやつだけON
+        // これだけON
         equipped[key][itemKey] = true;
 
         saveAll();
@@ -706,7 +709,6 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         }
       }
 
-      // ✅ 外す（slot内を全部OFF）
       function clearEquipBySlot(bunny, slot) {
         if (!bunny || bunny.isBaby) return;
         slot = String(slot || "");
@@ -744,19 +746,16 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         }
 
         if (bunny.bornAt === selectedBornAt) {
-          // ✅ hat は「着せ替え」：選択中のhatがあればそれだけ着せる。無ければ外す。
+          // ✅ hat は置き換え：選択中のhatがあればそれだけ着せる。無ければ外す。
           let pickedHat = null;
           for (const k of selectedItems) {
             const it = ITEMS[k];
             if (it && String(it.slot || "") === "hat") { pickedHat = k; break; }
           }
 
-          if (pickedHat) {
-            setEquipExclusiveBySlot(bunny, pickedHat);
-          } else {
-            // 選んでない時は「hatを外す」扱いにする
-            clearEquipBySlot(bunny, "hat");
-          }
+          if (pickedHat) setEquipExclusiveBySlot(bunny, pickedHat);
+          else clearEquipBySlot(bunny, "hat");
+
           return;
         }
 
@@ -784,7 +783,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (aimasuku fitToBunny + hat exclusive)");
+      console.log("[isyou] ready (fitToBunny offset + hat replace)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
