@@ -1,9 +1,12 @@
-// isyou.js — お洒落（ショップ＋複数装着＋flip補正＋称号連動＋赤枠）完全版（WB待機つき）
-// ★partyhat を頭に自然にかぶせる（anchorY対応 / 小さめ）
+// isyou.js — お洒落（ショップ＋装着＋flip補正＋赤枠）完全版（WB待機つき）
+// ★partyhat を頭に自然にかぶせる（anchorY対応 / 小サイズ）
 
 (() => {
   "use strict";
 
+  /* =========================
+   * Wait for WB
+   * ========================= */
   const WAIT_MS = 8000;
   const TICK_MS = 50;
 
@@ -34,7 +37,6 @@
     const LS = {
       owned: "wb_isyou_owned_v2",
       equipped: "wb_isyou_equipped_v2",
-      title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
     };
 
     const ITEMS = {
@@ -42,10 +44,11 @@
         label: "パーティーハット",
         img: "./assets/isyou/partyhat.png",
         price: 500,
+
         anchorY: 0.03,   // 頭頂部
         offsetX: 14,
-        offsetY: -8,     // 頭に軽く接する
-        scale: 0.75,     // ★小さめ
+        offsetY: -6,
+        scale: 0.6,      // ★最終確定：小さめ
         z: 25,
       },
 
@@ -53,7 +56,7 @@
         label: "王冠",
         img: "./assets/isyou/crown.png",
         price: 3500,
-        anchorY: 0.10,
+        anchorY: 0.1,
         offsetX: 0,
         offsetY: -26,
         scale: 1.25,
@@ -73,13 +76,10 @@
     };
 
     /* =========================
-     * HUD（ボタン復活）
+     * HUD（お洒落ボタン）
      * ========================= */
     const hud = document.getElementById("hud");
-    if (!hud) {
-      console.warn("[isyou] #hud not found");
-      return;
-    }
+    if (!hud) return;
 
     let isyouBtn = document.getElementById("isyouBtn");
     if (!isyouBtn) {
@@ -133,14 +133,11 @@ body.isyouEquipMode .bunnyWrap:hover{
 }
 .isyouModal{
   width:min(92vw,560px);
-  max-height:86vh;
   background:#fff;
   border-radius:18px;
   padding:14px;
-  overflow:auto;
 }
 
-/* 装着モード中：背景透過（うさぎ触れる） */
 body.isyouEquipMode .isyouBackdrop{ pointer-events:none; background:rgba(0,0,0,.25); }
 body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 `;
@@ -150,8 +147,8 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
     /* =========================
      * Storage
      * ========================= */
-    const owned = (() => { try { return JSON.parse(localStorage.getItem(LS.owned) || "{}"); } catch { return {}; } })();
-    const equipped = (() => { try { return JSON.parse(localStorage.getItem(LS.equipped) || "{}"); } catch { return {}; } })();
+    const owned = JSON.parse(localStorage.getItem(LS.owned) || "{}");
+    const equipped = JSON.parse(localStorage.getItem(LS.equipped) || "{}");
 
     const saveAll = () => {
       localStorage.setItem(LS.owned, JSON.stringify(owned));
@@ -180,11 +177,10 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       const fx = flip ? -1 : 1;
       const ox = (it.offsetX || 0) * (flip ? -1 : 1);
 
-      // ★anchorY（高さ）を反映
       img.style.top = `${(it.anchorY ?? 0) * 100}%`;
       img.style.transform =
         `translate(calc(-50% + ${ox}px), ${it.offsetY}px) scale(${it.scale}) scaleX(${fx})`;
-      img.style.zIndex = String(it.z || 10);
+      img.style.zIndex = it.z || 10;
     }
 
     function drawAllForBunny(bunny) {
@@ -213,9 +209,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
     function toggleEquip(bunny, key) {
       if (!bunny || bunny.isBaby) return;
-      if ((owned[key] || 0) <= 0) return;
-
-      equipped[bunny.bornAt] = equipped[bunny.bornAt] || {};
+      equipped[bunny.bornAt] ??= {};
       equipped[bunny.bornAt][key] = !equipped[bunny.bornAt][key];
       saveAll();
       drawAllForBunny(bunny);
@@ -225,12 +219,11 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
     }
 
     /* =========================
-     * Modal（最低限：装着テスト用）
+     * Equip interaction
      * ========================= */
-    let backdrop = null;
     let equipMode = false;
     let selectedBornAt = null;
-    const selectedItems = new Set(["partyhat"]); // ★まず帽子を選択済みにしておく（テスト楽）
+    const selectedItems = new Set(["partyhat"]);
 
     function setSelected(bunny) {
       getBunnies().forEach(b => b.wrap.classList.remove("isyouSelectedTarget"));
@@ -238,6 +231,30 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       selectedBornAt = bunny.bornAt;
       bunny.wrap.classList.add("isyouSelectedTarget");
     }
+
+    document.addEventListener("pointerdown", (e) => {
+      if (!equipMode) return;
+      if (e.target.closest(".isyouModal")) return;
+
+      const wrap = e.target.closest(".bunnyWrap");
+      if (!wrap) return;
+
+      const bunny = getBunnies().find(b => b.wrap === wrap);
+      if (!bunny) return;
+
+      if (selectedBornAt == null) {
+        setSelected(bunny);
+      } else if (bunny.bornAt === selectedBornAt) {
+        selectedItems.forEach(k => toggleEquip(bunny, k));
+      } else {
+        setSelected(bunny);
+      }
+    }, { capture:true });
+
+    /* =========================
+     * Modal
+     * ========================= */
+    let backdrop = null;
 
     function openModal() {
       if (backdrop) return;
@@ -247,77 +264,34 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
       const modal = document.createElement("div");
       modal.className = "isyouModal";
-      modal.addEventListener("click", (e) => e.stopPropagation());
-
       modal.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
-          <div style="font-weight:900;">🎀 お洒落</div>
-          <button id="isyouCloseBtn" style="border:none;background:#eee;border-radius:12px;padding:6px 10px;cursor:pointer;">×</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <b>🎀 お洒落</b>
+          <button id="isyouClose">×</button>
         </div>
-        <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <button id="isyouEquipToggle" class="isyouBtn primary">装着モード：OFF</button>
-          <span style="font-size:12px;opacity:.85;">装着モードON → うさぎをクリックで赤枠選択 → 同じ子をもう一度クリックで装着</span>
-        </div>
-        <div style="margin-top:10px;font-size:12px;opacity:.85;">
-          ※今はテスト用に partyhat を選択済み（クリックで装着/解除）
-        </div>
+        <button id="equipToggle" style="margin-top:10px;">装着モード切替</button>
       `;
 
       backdrop.appendChild(modal);
       document.body.appendChild(backdrop);
 
-      const closeBtn = modal.querySelector("#isyouCloseBtn");
-      closeBtn.addEventListener("click", closeModal);
-
-      const toggleBtn = modal.querySelector("#isyouEquipToggle");
-      toggleBtn.addEventListener("click", () => {
+      modal.querySelector("#isyouClose").onclick = closeModal;
+      modal.querySelector("#equipToggle").onclick = () => {
         equipMode = !equipMode;
         document.body.classList.toggle("isyouEquipMode", equipMode);
         if (!equipMode) setSelected(null);
-        toggleBtn.textContent = equipMode ? "装着モード：ON" : "装着モード：OFF";
-      });
-
-      // 装着モード中は閉じない（誤爆防止）
-      backdrop.addEventListener("click", () => {
-        if (equipMode) return;
-        closeModal();
-      });
+      };
     }
 
     function closeModal() {
       equipMode = false;
       document.body.classList.remove("isyouEquipMode");
       setSelected(null);
-      try { backdrop?.remove(); } catch {}
+      backdrop?.remove();
       backdrop = null;
     }
 
-    isyouBtn.addEventListener("click", () => openModal());
-
-    /* =========================
-     * Equip click
-     * ========================= */
-    document.addEventListener("pointerdown", (e) => {
-      if (!equipMode) return;
-      if (e.target.closest(".isyouModal")) return;
-
-      const wrap = e.target.closest(".bunnyWrap");
-      if (!wrap) return;
-
-      const bunny = getBunnies().find(b => b.wrap === wrap);
-      if (!bunny || bunny.isBaby) return;
-
-      if (selectedBornAt == null) {
-        setSelected(bunny);
-        return;
-      }
-
-      if (bunny.bornAt === selectedBornAt) {
-        selectedItems.forEach(k => toggleEquip(bunny, k));
-      } else {
-        setSelected(bunny);
-      }
-    }, { capture:true });
+    isyouBtn.onclick = openModal;
 
     /* =========================
      * Hooks
