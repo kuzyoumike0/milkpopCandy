@@ -716,6 +716,16 @@ html,body{
 #slotStarMachinePanel3x3.show{
   display: block;
 }
+/* うさぎ共通サイズ（通常） */
+.bunnyWrap .bunny{
+  width: 120px;   /* ←通常サイズ（必要なら調整） */
+  height: auto;
+}
+
+/* babyだけ小さくする */
+.bunnyWrap.baby .bunny{
+  width: 86px;    /* ←babyサイズ */
+}
 
 /* ===== ゲームレイヤー ===== */
 #bunnyLayer { position: relative; z-index: 3; }
