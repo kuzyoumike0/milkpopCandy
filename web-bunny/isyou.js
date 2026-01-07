@@ -62,7 +62,7 @@
   img: "/assets/isyou/partyhat.png",
   price: 500,
 
-  anchorY: -0.55,  // ★顔→頭上へ大きく上げる
+  anchorY: -0.58,  // ★顔→頭上へ大きく上げる
   offsetX: 10,     // ★右へ（耳の間に寄せる）
   offsetY: 8,      // ★少し下げて頭に“乗せる”
   scale: 0.34,     // ★少し小さめ
