@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED FIX v14.6 (save-baby-elapsed + coin small + charge->count+tier)", Date.now());
+  console.log("[app.js] LOADED FIX v14.8 (charge consume on click + heart when ready)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -37,20 +37,22 @@
   const BABY_DURATION_MS = 3 * 60 * 1000;
   const BABY_SPEED_MUL   = 0.65;
   const REA_EVOLVE_RATE  = 0.01;
+
   const DEPART_COST = 10;
 
   /* =========================
-   * Charge Gauge（表示しない）
-   * - 貯まってるほど「コイン枚数↑＆ティア↑」
-   * - うさぎクリックで現在のチャージを消費してドロップ
-   * - 満タン到達時に hart.png を出す（1回）
+   * Charge（表示しない）
+   * - クリック時にゲージ量に応じて「枚数＆ティア」を決定
+   * - クリックしたらゲージは消費（0に戻る）
+   * - 満タン到達時に hart.png を表示（かわいく上下ゆれ）
    * ========================= */
   const CHARGE_MAX = 100;
-  const CHARGE_GAIN_ON_BUNNY_TAP     = 8;  // 次周回用に少しだけ入れる
+
+  const CHARGE_GAIN_ON_BUNNY_TAP     = 8;
   const CHARGE_GAIN_ON_COIN_COLLECT = 3;
 
   let charge = 0;
-  let chargeReady = false; // 満タン到達済み（ハート済み）フラグ
+  let chargeReady = false; // 満タン到達状態（ハート表示済みフラグ）
 
   /* =========================
    * Storage
@@ -139,19 +141,17 @@
   }
 
   /* =========================
-   * CSS injection（コイン小さく / ハートゆれ）
+   * CSS injection（コイン小さく / ハート上下ゆれ）
    * ========================= */
   (function injectCssOnce() {
     if (document.getElementById("wbCoinHeartCss")) return;
     const st = document.createElement("style");
     st.id = "wbCoinHeartCss";
     st.textContent = `
-      /* ✅ coin.png を小さく */
       .coin{
         width:22px !important;
         height:22px !important;
       }
-
       .wbHart {
         position: absolute;
         pointer-events: none;
@@ -172,18 +172,16 @@
   })();
 
   /* =========================
-   * Heart pop（満タン到達時）
+   * Heart pop（満タン到達時に出す）
    * ========================= */
   const heartsOnField = [];
-
   class HeartPop {
     constructor(x, y) {
-      this.x = x;
-      this.y = y;
+      this.x = x; this.y = y;
       this.age = 0;
-      this.life = 1.6;
-      this.vy = -42 - Math.random() * 18;
-      this.vx = (Math.random() * 2 - 1) * 10;
+      this.life = 2.0;
+      this.vy = -22 - Math.random() * 10; // ふわっと
+      this.vx = (Math.random() * 2 - 1) * 8;
 
       const el = document.createElement("img");
       el.className = "wbHart";
@@ -191,8 +189,8 @@
       el.draggable = false;
       el.style.width = "46px";
       el.style.height = "46px";
-
       this.el = el;
+
       coinLayer.appendChild(el);
       this.render();
     }
@@ -206,9 +204,10 @@
       this.y += this.vy * dt;
 
       const t = clamp(this.age / this.life, 0, 1);
+      // 最後は自然にフェードアウト
       this.el.style.opacity = String(1 - t);
-      this.render();
 
+      this.render();
       if (this.age >= this.life) {
         try { this.el.remove(); } catch {}
         return false;
@@ -225,7 +224,7 @@
     const r  = bunny.wrap.getBoundingClientRect();
     const fr = field.getBoundingClientRect();
     const x = (r.left - fr.left) + r.width * 0.5 + rand(-6, 6);
-    const y = (r.top  - fr.top)  + r.height * 0.15 + rand(-4, 4);
+    const y = (r.top  - fr.top)  + r.height * 0.10 + rand(-4, 4);
     heartsOnField.push(new HeartPop(x, y));
   }
 
@@ -233,14 +232,14 @@
    * Charge helpers
    * ========================= */
   function addCharge(delta, sourceBunny = null) {
+    if (chargeReady) return; // 満タンになったら次クリックまで増やさない
     delta = Math.floor(Number(delta) || 0);
     if (delta <= 0) return;
 
-    const before = charge;
     charge = clamp(charge + delta, 0, CHARGE_MAX);
 
-    // ✅ 初めて満タン到達した瞬間だけハート
-    if (!chargeReady && before < CHARGE_MAX && charge >= CHARGE_MAX) {
+    if (charge >= CHARGE_MAX) {
+      charge = CHARGE_MAX;
       chargeReady = true;
       const b = sourceBunny || pickRandomBunny();
       if (b) spawnHeart(b);
@@ -258,31 +257,29 @@
     return clamp(charge / CHARGE_MAX, 0, 1);
   }
 
-  // ✅ チャージ量に応じて「枚数」と「ティア」を決める
+  // ✅ チャージ量に応じて「枚数」と「ティア」を決める（消費はクリック後）
   function getDropPlanFromCharge() {
     const r = getChargeRatio(); // 0..1
 
-    // 枚数：1〜8（お好みで調整）
-    const count = 1 + Math.floor(r * 7);
+    // 枚数：通常 1枚、満タンで最大 10枚
+    const count = 1 + Math.floor(r * 9);
 
     // 最大ティア：0〜3（coin1..coin4）
     const maxTier = Math.floor(r * 3 + 1e-9); // 0..3
 
-    // ティア選択：上の方ほど出やすく（maxTierの範囲内）
+    // 0..maxTier から「高いほど出やすい」重み
     const pickTier = () => {
       if (maxTier <= 0) return 0;
-      // 0..maxTier の中で「高い方が出やすい」重み
-      // w(t) = (t+1)^2
-      const weights = [];
       let sum = 0;
+      const w = [];
       for (let t = 0; t <= maxTier; t++) {
-        const w = (t + 1) * (t + 1);
-        weights.push(w);
-        sum += w;
+        const wt = (t + 1) * (t + 1); // 高ティア優遇
+        w.push(wt);
+        sum += wt;
       }
       let x = Math.random() * sum;
       for (let t = 0; t <= maxTier; t++) {
-        x -= weights[t];
+        x -= w[t];
         if (x <= 0) return t;
       }
       return maxTier;
@@ -388,7 +385,7 @@
       updateHud();
       playSE(seCoin);
 
-      // ✅ 回収でチャージ増加（満タン到達時はランダムうさぎがハート）
+      // ✅ 回収でチャージ増加（満タンになったらハート＆次クリック待ち）
       addCharge(CHARGE_GAIN_ON_COIN_COLLECT, null);
 
       try { this.el.remove(); } catch {}
@@ -422,7 +419,7 @@
       this.bornAt = Number(bornAt) || Date.now();
       this.kind   = safeKind(kind);
 
-      // ✅ 保存にbabyが残ってても「経過時間」で判定（3分経ってたら最初から大人）
+      // ✅ 保存にbabyが残ってても「放置経過」で判定（3分経ってたら最初から大人）
       this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
 
       this.wrap = document.createElement("div");
@@ -444,7 +441,7 @@
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
 
-      // 起動直後に進化チェックして見た目確定
+      // 起動直後に進化チェック
       this.evolveIfNeeded(true);
       this.syncSprite();
 
@@ -453,12 +450,14 @@
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        // ✅ チャージ量に応じて「枚数＆ティア」
+        // ✅ いまのゲージ量で「枚数＆ティア」決定 → ドロップ → ゲージ消費
         const { count, pickTier } = getDropPlanFromCharge();
         spawnClickCoins(this, count, pickTier);
 
-        // ✅ クリックでチャージ消費 → 次周回用に少しだけ入れる（0にしたければこの1行を消す）
+        // ✅ クリックしたら消費（0へ）
         consumeCharge();
+
+        // ✅ クリック自体でも次のゲージが少し貯まる
         addCharge(CHARGE_GAIN_ON_BUNNY_TAP, this);
       };
 
@@ -497,16 +496,15 @@
       this.y = groundY() - 120;
     }
 
+    // ✅ babyは3分で進化（保存の放置時間も反映）
     evolveIfNeeded(isInit = false) {
       if (!this.isBaby) return;
 
       const elapsed = Date.now() - this.bornAt;
       if (elapsed < BABY_DURATION_MS) return;
 
-      // ✅ 3分経過していたら進化（保存の放置分もここで反映）
       this.isBaby = false;
 
-      // （任意）突然変異：進化時だけ reabunny へ
       if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) {
         this.kind = "reabunny";
       }
@@ -514,7 +512,6 @@
       this.syncSprite();
       this.clampInside();
 
-      // 初期化時に進化した場合も保存し直しておく（次回起動で安定）
       if (isInit) saveBunnyMeta();
     }
 
@@ -636,7 +633,6 @@
     ASSETS, BUNNY_DEFS, LS, DEPART_COST,
     field, shopBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
-    // state
     get coins() { return coins; },
     set coins(v) {
       coins = Math.max(0, Math.floor(Number(v) || 0));
@@ -644,7 +640,6 @@
       updateHud();
     },
 
-    // coin api（omukae/tabidati互換）
     getCoin: () => coins,
     spendCoin: (n) => {
       n = Math.floor(Number(n) || 0);
@@ -656,28 +651,24 @@
       return true;
     },
 
-    // bunnies
     bunnies,
     getBunnies: () => bunnies,
     spawnBunny,
     removeBunnyInstance,
 
-    // storage
     saveCoins,
     saveBunnyMeta,
 
-    // audio
     unlockAudioOnce,
     playSE,
     seTabidati,
 
-    // ui
     updateHud,
 
     // charge（表示しない）
     addCharge: (n) => addCharge(n, null),
     getCharge: () => charge,
-    getChargeRatio: () => getChargeRatio(),
+    isChargeReady: () => !!chargeReady,
   };
 
   /* =========================
@@ -686,14 +677,12 @@
   function initBunnies() {
     const meta = loadBunnyMeta();
 
-    // ✅ 保存があるなら bornAt をそのまま復元（放置分で3分超なら最初から大人）
     if (meta && meta.length) {
       meta.forEach(m => spawnBunny(m.kind, m.bornAt));
       saveBunnyMeta();
       return;
     }
 
-    // ✅ 保存が無いなら「初期に大人bunnyを2体」
     const t = Date.now();
     spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
     spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
