@@ -370,3 +370,21 @@ html,body{
 #slotStarMachinePanel3x3.show{
   display:block;
 }
+/* HUDを最前面に固定（最重要） */
+#hud{
+  position: sticky; /* fixedでもOK */
+  top: 0;
+  z-index: 9999;
+  pointer-events: auto;
+}
+
+/* fieldの上にHUDが重なるなら、field側に余白を作る（HUD高さ分） */
+#field{
+  padding-top: 64px; /* HUDの高さに合わせて調整 */
+  box-sizing: border-box;
+}
+
+/* ついで：装飾画像がクリックを邪魔しないように */
+.saku{
+  pointer-events: none;
+}
