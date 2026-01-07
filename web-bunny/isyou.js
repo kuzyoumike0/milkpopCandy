@@ -95,19 +95,18 @@
       };
 
       const ITEMS = {
-        partyhat: {
-          label: "パーティーハット",
-          img: "/assets/isyou/partyhat.png",
-          price: 500,
+       partyhat: {
+  label: "パーティーハット",
+  img: "/assets/isyou/partyhat.png",
+  price: 500,
 
-          // ★頭上（耳の間）寄せ
-          anchorY: -0.02,
-          offsetX: 2,
-          offsetY: -26,
-          scale: 0.42,
-          z: 25,
-        },
-      };
+  anchorY: -0.12,   // ★耳を含めた頭の一番上を基準にする
+  offsetX: 0,       // ★耳の間の中央
+  offsetY: -10,     // ★頭に軽く乗せる
+  scale: 0.40,      // ★小物サイズ（これ以上大きいと主張しすぎる）
+  z: 30,
+},
+
 
       function loadJSON(key, fallback) {
         try {
