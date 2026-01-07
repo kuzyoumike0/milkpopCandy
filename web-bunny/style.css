@@ -390,3 +390,6 @@ html,body{
 #coinLayer{
   z-index: 1;               /* HUDより下なら何でもOK */
 }
+#field{
+  z-index: 0;
+}
