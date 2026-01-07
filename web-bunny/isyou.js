@@ -3,7 +3,8 @@
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は見えるように選択中だけ z-index を上げる
-// ✅ partyhat は「頭の上」に固定（anchorYマイナス）
+// ✅ 反転しても帽子がズレない（isyouLayer を transform から保護）
+// ✅ partyhat は頭の上（anchorYマイナス）＋ポン演出
 
 (() => {
   "use strict";
@@ -57,20 +58,16 @@
       };
 
       const ITEMS = {
-       partyhat: {
-  label: "パーティーハット",
-  img: "/assets/isyou/partyhat.png",
-  price: 500,
-
-  anchorY: -0.58,
-  offsetX: 10,
-  offsetY: 16,   // ★8 → 16（頭に乗せる）
-  scale: 0.34,
-  z: 30,
-},
-
-
-
+        partyhat: {
+          label: "パーティーハット",
+          img: "/assets/isyou/partyhat.png",
+          price: 500,
+          anchorY: -0.58,
+          offsetX: 10,
+          offsetY: 16,   // ★頭に乗せる
+          scale: 0.34,
+          z: 30,
+        },
         crown: {
           label: "王冠",
           img: "/assets/isyou/crown.png",
@@ -97,9 +94,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV1")) return;
+        if (document.getElementById("isyouStyleFinalV2")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV1";
+        s.id = "isyouStyleFinalV2";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -144,7 +141,15 @@ body.isyouEquipMode .bunnyWrap:hover{
 }
 
 /* アクセサリレイヤ */
-.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:50; }
+.isyouLayer{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:50;
+
+  /* ★重要：親のtransform/反転の影響を受けないようにする */
+  transform:none !important;
+}
 .isyouItem{
   position:absolute;
   left:50%;
@@ -501,38 +506,25 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         return layer;
       }
 
-     function applyTransform(imgEl, bunny, it) {
-  const flip = !!bunny?.wrap?.classList?.contains("flip");
-  const fx = flip ? -1 : 1;
+      // ★確定版：flipでも座標は同じ / 画像だけscaleXで反転
+      function applyTransform(imgEl, bunny, it) {
+        const flip = !!bunny?.wrap?.classList?.contains("flip");
+        const fx = flip ? -1 : 1;
 
-  // flipでも座標は同じでOK（レイヤを反転させないため）
-  const ox = Number(it.offsetX) || 0;
-  const oy = Number(it.offsetY) || 0;
-  const sc = Number(it.scale) || 1;
+        const ox = Number(it.offsetX) || 0;
+        const oy = Number(it.offsetY) || 0;
+        const sc = Number(it.scale) || 1;
 
-  imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
+        imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
 
-  const baseT =
-    `translate(calc(-50% + ${ox}px), ${oy}px) ` +
-    `scale(${sc}) scaleX(${fx})`;
+        const baseT =
+          `translate(calc(-50% + ${ox}px), ${oy}px) ` +
+          `scale(${sc}) scaleX(${fx})`;
 
-  imgEl.style.setProperty("--isyouT", baseT);
-  imgEl.style.transform = baseT;
-  imgEl.style.zIndex = String(it.z || 10);
-}
-
-  imgEl.style.top = `${(Number(it.anchorY) || 0) * 100}%`;
-
-  const baseT =
-    `translate(calc(-50% + ${ox}px), ${oy}px) ` +
-    `scale(${sc}) scaleX(${fx})`;
-
-  imgEl.style.setProperty("--isyouT", baseT);
-  imgEl.style.transform = baseT;
-  imgEl.style.zIndex = String(it.z || 10);
-}
-
-
+        imgEl.style.setProperty("--isyouT", baseT);
+        imgEl.style.transform = baseT;
+        imgEl.style.zIndex = String(it.z || 10);
+      }
 
       function drawAllForBunny(bunny) {
         if (!bunny?.wrap || bunny.isBaby) return;
@@ -547,10 +539,12 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
           if (!eq[itemKey]) return;
           const it = ITEMS[itemKey];
           if (!it) return;
+
           const img = document.createElement("img");
           img.className = "isyouItem";
           img.dataset.itemKey = itemKey;
           img.src = it.img;
+
           layer.appendChild(img);
           applyTransform(img, bunny, it);
         });
@@ -612,6 +606,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       WB.on?.("bunnyCountChanged", redrawAll);
       WB.on?.("resize", redrawAll);
 
+      // 初回
       redrawAll();
       console.log("[isyou] ready");
     })
