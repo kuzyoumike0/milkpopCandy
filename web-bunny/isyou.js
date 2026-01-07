@@ -1,6 +1,6 @@
 (() => {
   /* =========================
-   * Bunny牧場 app.js（本体）
+   * Bunny牧場 app.js（本体）— FIX: 画面外に出ない版
    * ========================= */
 
   /* ===== Assets ===== */
@@ -37,16 +37,6 @@
   const BABY_SPEED_MUL = 0.65;
   const REA_EVOLVE_RATE = 0.01;
 
-  const OUGON_UNCHI_RATE_PER_DROP = 0.0015;
-  const OUGON_UNCHI_VALUE = 10000;
-
-  const BABY_FOLLOW_GAP = 46;
-  const BABY_FOLLOW_FORCE = 6.0;
-  const BABY_FOLLOW_MAX_SPEED = 180;
-
-  const BASE_RAIN_COUNT_BY_TIER = [0, 14, 26, 42, 68];
-  const GAUGE_PERIOD_RANGE = [7, 14];
-
   const DEPART_COST = 10;
 
   /* ===== Storage ===== */
@@ -71,11 +61,21 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const rand = (a, b) => a + Math.random() * (b - a);
 
-  function fieldRect() {
-    return field.getBoundingClientRect();
+  /* ===== ★ field rect cache（毎フレームgetBoundingClientRectしない） ===== */
+  let FIELD_W = 0;
+  let FIELD_H = 0;
+
+  function refreshFieldSize() {
+    // clientWidth/Height の方がスクロールの影響を受けにくい
+    FIELD_W = Math.max(1, field.clientWidth || field.getBoundingClientRect().width || 1);
+    FIELD_H = Math.max(1, field.clientHeight || field.getBoundingClientRect().height || 1);
   }
+  refreshFieldSize();
+  window.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
+
   function groundY() {
-    return fieldRect().height - 60;
+    // あなたの元ロジック：地面は下から60px上
+    return FIELD_H - 60;
   }
 
   /* ===== Audio ===== */
@@ -97,7 +97,7 @@
   let lastFrame = performance.now();
 
   function updateHud() {
-    coinValueEl.textContent = coins;
+    coinValueEl.textContent = String(coins);
   }
 
   /* =========================
@@ -111,6 +111,10 @@
 
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
+      // ★位置指定がズレないように明示（style.cssにあるなら不要だが安全）
+      this.wrap.style.position = "absolute";
+      this.wrap.style.left = "0px";
+      this.wrap.style.top = "0px";
 
       this.el = document.createElement("img");
       this.el.className = "bunny";
@@ -120,18 +124,51 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      const fr = fieldRect();
-      this.x = rand(20, fr.width - 120);
+      // ★初期位置
+      refreshFieldSize();
+      this.x = rand(20, Math.max(21, FIELD_W - 140));
       this.y = groundY() - 120;
 
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 55 + Math.random() * 60;
       this.vx = 0;
 
+      // ★画像ロード完了時に「実測幅」で再clamp（これが一番効く）
+      this.el.addEventListener("load", () => {
+        this.clampInside();
+        this.applyPos();
+      });
+
       this.wrap.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         playSE(this.isBaby ? seBaby : sePoyo);
       });
+
+      // 最初に一回置く
+      this.clampInside();
+      this.applyPos();
+    }
+
+    getWrapWidth() {
+      // ★offsetWidthが0になりがちなので、rect幅も併用
+      const w1 = this.wrap.offsetWidth || 0;
+      if (w1 > 0) return w1;
+      const w2 = this.wrap.getBoundingClientRect().width || 0;
+      return Math.max(1, w2 || 120);
+    }
+
+    clampInside() {
+      refreshFieldSize();
+      const w = this.getWrapWidth();
+      const PAD = 6;
+
+      const minX = PAD;
+      const maxX = Math.max(minX, FIELD_W - w - PAD);
+
+      this.x = clamp(this.x, minX, maxX);
+
+      // ついでにYも確実に地面へ
+      this.y = groundY() - 120;
     }
 
     evolveIfNeeded() {
@@ -140,35 +177,44 @@
 
       this.isBaby = false;
       if (Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
-      this.el.src = BUNNY_DEFS[this.kind].img;
+
+      const next = BUNNY_DEFS[this.kind]?.img;
+      if (next) this.el.src = next;
+
+      // ★進化した瞬間に幅が変わるので即clamp
+      this.clampInside();
+      this.applyPos();
+    }
+
+    applyPos() {
+      this.wrap.classList.toggle("flip", this.dir < 0);
+      this.wrap.style.left = `${this.x}px`;
+      this.wrap.style.top = `${this.y}px`;
     }
 
     update(dt) {
       this.evolveIfNeeded();
 
       // ===== 移動 =====
-      this.x += this.dir * this.baseSpeed * dt;
+      const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
+      this.x += this.dir * this.baseSpeed * speedMul * dt;
 
-      // ===== ★実測幅で端判定（帽子対応）=====
-      const fr = fieldRect();
-      const w = Math.max(1, this.wrap.offsetWidth || 120);
+      // ===== ★実測幅で端判定（帽子対応） + キャッシュ幅 =====
+      const w = this.getWrapWidth();
       const PAD = 6;
 
       const minX = PAD;
-      const maxX = Math.max(minX, fr.width - w - PAD);
+      const maxX = Math.max(minX, FIELD_W - w - PAD);
 
-      this.x = clamp(this.x, minX, maxX);
-
-      if (this.x <= minX + 0.01) {
+      if (this.x <= minX) {
+        this.x = minX;
         this.dir = 1;
-      }
-      if (this.x >= maxX - 0.01) {
+      } else if (this.x >= maxX) {
+        this.x = maxX;
         this.dir = -1;
       }
 
-      this.wrap.classList.toggle("flip", this.dir < 0);
-      this.wrap.style.left = `${this.x}px`;
-      this.wrap.style.top = `${this.y}px`;
+      this.applyPos();
     }
   }
 
@@ -196,30 +242,36 @@
     updateHud();
     requestAnimationFrame(tick);
 
-    // ★ resize 時も必ず中へ戻す
+    // ★ resize 時も必ず中へ戻す（あなたの処理を“より確実”に）
     window.addEventListener("resize", () => {
-      const fr = fieldRect();
-      const gy = groundY();
-
+      refreshFieldSize();
       for (const b of bunnies) {
-        const w = Math.max(1, b.wrap.offsetWidth || 120);
-        const PAD = 6;
-        const minX = PAD;
-        const maxX = Math.max(minX, fr.width - w - PAD);
-        b.x = clamp(b.x, minX, maxX);
-        b.y = gy - 120;
+        b.clampInside();
+        b.applyPos();
       }
     });
   }
 
-  /* ===== Export ===== */
-  window.WB = {
-    bunnies,
-    spawnBunny,
-    playSE,
-    updateHud,
-    DEPART_COST,
-    seTabidati,
+  /* ===== Export（互換を少し足す） ===== */
+  // omukae.js 側が参照しやすいように最低限だけ整える
+  window.WB = window.WB || {};
+  window.WB.bunnies = bunnies;
+  window.WB.spawnBunny = spawnBunny;
+  window.WB.playSE = playSE;
+  window.WB.updateHud = updateHud;
+  window.WB.DEPART_COST = DEPART_COST;
+  window.WB.seTabidati = seTabidati;
+
+  // コイン互換（omukae.jsが getCoin/spendCoin を使う場合に備える）
+  window.WB.getCoin = () => coins;
+  window.WB.spendCoin = (n) => {
+    n = Math.floor(Number(n) || 0);
+    if (n <= 0) return true;
+    if (coins < n) return false;
+    coins -= n;
+    localStorage.setItem(LS.coins, String(coins));
+    updateHud();
+    return true;
   };
 
   init();
