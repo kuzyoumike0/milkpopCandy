@@ -6,6 +6,7 @@
 // ✅ partyhat は頭の上（top基準+px）
 // ✅ FIX：bunnyWrap.flip は親ごと反転してるので、アクセ側で scaleX しない（=二重反転回避）
 // ✅ partyhat は「ポンッ」と被る
+// ✅ NEW：slot（部類）を導入。hatスロットは partyhat/crown/ribbon を同一位置に揃える
 
 (() => {
   "use strict";
@@ -58,20 +59,29 @@
         title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
       };
 
+      // ✅ NEW：スロット（部類）ごとの共通位置
+      // ここをいじれば「帽子系は全部この位置」が一括で変わる
+      const SLOTS = {
+        hat: {
+          offsetX: 0,
+          offsetY: -50, // ★頭の上：partyhat/crown/ribbon を全部ここへ
+          z: 9999,
+        },
+        // 例：body: { offsetX:0, offsetY:30, z:5000 },
+      };
+
       const ITEMS = {
         partyhat: {
           label: "パーティーハット",
           img: "/assets/isyou/partyhat.png",
           price: 500,
 
-          // ★中央寄せ（耳の間）
-          // 親のflipで左右入れ替わるので、ここは“固定値”でOK
+          slot: "hat",     // ✅ NEW：hat部類
+          // 個別微調整したい時だけ残す（今回は同一位置に揃えるので 0 ）
           offsetX: 0,
-          offsetY: -42,   // 頭の上
+          offsetY: 0,
           scale: 0.32,
           z: 9999,
-
-          // keepUpright:true を付けると「反転しても正面向き」になる（今回は不要）
           // keepUpright: true,
         },
 
@@ -79,8 +89,10 @@
           label: "王冠",
           img: "/assets/isyou/crown.png",
           price: 3500,
+
+          slot: "hat",     // ✅ NEW：hat部類（同じ位置に揃う）
           offsetX: 0,
-          offsetY: -50,
+          offsetY: 0,
           scale: 0.38,
           z: 9999,
         },
@@ -89,10 +101,12 @@
           label: "リボン",
           img: "/assets/isyou/ribbon.png",
           price: 1200,
+
+          slot: "hat",     // ✅ NEW：hat部類（同じ位置に揃う）
           offsetX: 0,
-          offsetY: 30,
+          offsetY: 0,
           scale: 0.45,
-          z: 5000,
+          z: 9999,         // ★hat扱いなので上に乗せる（必要なら下げてOK）
         },
       };
 
@@ -510,8 +524,16 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       function applyTransform(imgEl, bunny, it) {
         const keepUpright = !!it.keepUpright;
 
-        const ox = Number(it.offsetX) || 0;
-        const oy = Number(it.offsetY) || 0;
+        // ✅ NEW：slot（部類）の共通オフセットを加算
+        const slotKey = it.slot ? String(it.slot) : "";
+        const slot = slotKey && SLOTS[slotKey] ? SLOTS[slotKey] : null;
+
+        const sox = slot ? (Number(slot.offsetX) || 0) : 0;
+        const soy = slot ? (Number(slot.offsetY) || 0) : 0;
+        const sz  = slot ? (Number(slot.z) || 0) : 0;
+
+        const ox = (Number(it.offsetX) || 0) + sox;
+        const oy = (Number(it.offsetY) || 0) + soy;
         const sc = Number(it.scale) || 1;
 
         imgEl.style.top = "0px";
@@ -525,7 +547,10 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
         imgEl.style.setProperty("--isyouT", baseT);
         imgEl.style.transform = baseT;
-        imgEl.style.zIndex = String(it.z || 10);
+
+        // ✅ slot.z を優先（無ければ item.z）
+        const finalZ = (sz || 0) || (Number(it.z) || 10);
+        imgEl.style.zIndex = String(finalZ);
       }
 
       function drawAllForBunny(bunny) {
@@ -620,7 +645,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (flip stable)");
+      console.log("[isyou] ready (slot:hat aligned)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
