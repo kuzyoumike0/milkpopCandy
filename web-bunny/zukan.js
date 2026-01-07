@@ -1,9 +1,12 @@
-// zukan.js
+// zukan.js（互換強化版）
 // 図鑑 + 実績 + 称号 UI（スクショ風のカードUI）
 // - 「図鑑」ボタンをHUDに追加
 // - タブ：うさぎ / 実績 / 称号
 // - SYOUGOU, zisseki があれば自動連動
 // - 旅立ち回数（うさぎ別）は localStorage で保持（WBが持っていればそこも拾える）
+// - ✅ WB新旧互換：getBunnies / getCoin など
+// - ✅ CATEGORIES 未定義バグ修正（内部定義）
+// - ✅ 旅立ちイベント(bunnyDeparted/tabidachi)で farewell 加算
 
 (() => {
   if (!window.WB) return;
@@ -38,57 +41,70 @@
   }
 
   /* =========================
+   * WB 互換ヘルパ
+   * ========================= */
+  function getBunnies() {
+    try {
+      if (typeof WB.getBunnies === "function") {
+        const arr = WB.getBunnies();
+        return Array.isArray(arr) ? arr : [];
+      }
+    } catch {}
+    try {
+      if (Array.isArray(WB.bunnies)) return WB.bunnies;
+    } catch {}
+    return [];
+  }
+
+  /* =========================
    * Bunny Master（ここ増やす）
    * ========================= */
-  // key は内部名（shopやspawnで使ってるIDに合わせてね）
-  // img は assets のパス
   const BUNNY_MASTER = [
     {
       key: "bunny1",
       name: "bunny1",
       img: "./assets/bunny.png",
       desc: "基本のうさぎ。コインは控えめ。",
-      flavor:
-        "数えきれない旅立ちの先で、\nここはもう帰る場所になった。",
+      flavor: "数えきれない旅立ちの先で、\nここはもう帰る場所になった。",
     },
-    {
-      key: "bunny3",
-      name: "bunny3",
-      img: "./assets/bunny3.png",
-      desc: "安定してコインを稼ぐ中級うさぎ。",
-    },
-    {
-      key: "bunny4",
-      name: "bunny4",
-      img: "./assets/bunny4.png",
-      desc: "大量のコインを生み出す上級うさぎ。",
-    },
-    {
-      key: "bunny5",
-      name: "bunny5",
-      img: "./assets/bunny5.png",
-      desc: "牧場最上級クラス。圧倒的生産力。",
-    },
-    {
-      key: "reabunny",
-      name: "reabunny",
-      img: "./assets/reabunny.png",
-      desc: "突然変異でのみ現れる幻のうさぎ。",
-    },
+    { key: "bunny3", name: "bunny3", img: "./assets/bunny3.png", desc: "安定してコインを稼ぐ中級うさぎ。" },
+    { key: "bunny4", name: "bunny4", img: "./assets/bunny4.png", desc: "大量のコインを生み出す上級うさぎ。" },
+    { key: "bunny5", name: "bunny5", img: "./assets/bunny5.png", desc: "牧場最上級クラス。圧倒的生産力。" },
+    { key: "reabunny", name: "reabunny", img: "./assets/reabunny.png", desc: "突然変異でのみ現れる幻のうさぎ。" },
   ];
 
   // 画像src→key推定（WB.bunnies の構造が不明でも拾えるように）
   function guessKeyFromBunnyObj(b) {
     if (!b) return null;
-    const src =
-      (typeof b === "string" ? b : (b.src || b.image || b.img || b.asset || "")) + "";
-    const low = src.toLowerCase();
-    if (low.includes("reabunny")) return "reabunny";
-    if (low.includes("bunny5")) return "bunny5";
-    if (low.includes("bunny4")) return "bunny4";
-    if (low.includes("bunny3")) return "bunny3";
-    if (low.includes("babybunny")) return "babybunny";
-    if (low.includes("bunny")) return "bunny1";
+
+    // いろんな実装の「画像参照」を全部拾う
+    const candidates = [];
+
+    // 文字列だけ渡されるケース
+    if (typeof b === "string") candidates.push(b);
+
+    // オブジェクトのありがちなプロパティ
+    if (typeof b?.kind === "string") candidates.push(b.kind);
+    if (typeof b?.adultSrc === "string") candidates.push(b.adultSrc);
+    if (typeof b?.src === "string") candidates.push(b.src);
+    if (typeof b?.image === "string") candidates.push(b.image);
+    if (typeof b?.img === "string") candidates.push(b.img);
+    if (typeof b?.asset === "string") candidates.push(b.asset);
+
+    // DOM参照があるケース
+    try {
+      if (b?.el?.src) candidates.push(String(b.el.src));
+      if (b?.img?.src) candidates.push(String(b.img.src));
+    } catch {}
+
+    const joined = candidates.filter(Boolean).join(" ").toLowerCase();
+
+    if (joined.includes("reabunny")) return "reabunny";
+    if (joined.includes("bunny5")) return "bunny5";
+    if (joined.includes("bunny4")) return "bunny4";
+    if (joined.includes("bunny3")) return "bunny3";
+    if (joined.includes("babybunny")) return "babybunny";
+    if (joined.includes("bunny")) return "bunny1";
     return null;
   }
 
@@ -103,9 +119,12 @@
   // 今いるうさぎから自動で図鑑登録
   function scanCurrentBunnies() {
     try {
-      const list = WB.bunnies;
+      const list = getBunnies();
       if (!Array.isArray(list)) return;
-      for (const b of list) discover(guessKeyFromBunnyObj(b));
+      for (const b of list) {
+        const k = guessKeyFromBunnyObj(b);
+        if (k && k !== "babybunny") discover(k);
+      }
     } catch {}
   }
 
@@ -283,7 +302,6 @@
 #${PANEL_ID} .btn.primary{ background: #ffd6e7; }
 #${PANEL_ID} .btn[disabled]{ opacity:.55; cursor:not-allowed; box-shadow:none; }
 
-/* HUDボタン（既存の見た目に寄せるならstyle.css側でOK） */
 #${BTN_ID}{ margin-left: 8px; }
 `;
     document.head.appendChild(s);
@@ -351,13 +369,12 @@
     scanCurrentBunnies();
 
     const items = BUNNY_MASTER.map((b) => {
-      const unlocked = !!store.discovered[b.key]; // 見つけたら解放
+      const unlocked = !!store.discovered[b.key];
       const farewell = Number(store.farewellByType[b.key] || 0);
 
       const title = unlocked ? b.name : "？？？";
       const desc = unlocked ? (b.desc || "") : "";
       const flavor = unlocked ? (b.flavor || "") : "";
-
       const descAll = [desc, flavor].filter(Boolean).join("\n");
 
       return `
@@ -391,7 +408,6 @@
     const master = Array.isArray(z?.ACH_MASTER) ? z.ACH_MASTER : [];
     const ach = z?.ach || loadJson("wb_ach_v4", loadJson("wb_ach_v3", {}));
 
-    // masterが無い場合でも、キー一覧は出す
     const list = master.length
       ? master.map((a) => ({
           id: a.id,
@@ -434,6 +450,20 @@
     });
   }
 
+  /* =========================
+   * Titles（SYOUGOU連動）
+   * ========================= */
+
+  // ✅ CATEGORIES 未定義バグ修正：このファイル内で持つ
+  // SYOUGOU側のカウントキーに合わせてね（例：unchi/tabidachi/hanabi/slot_win/omukae）
+  const CATEGORIES = [
+    { key: "unchi",     label: "ウンチ",     emoji: "💩" },
+    { key: "tabidachi", label: "旅立ち",     emoji: "✈️" },
+    { key: "hanabi",    label: "花火",       emoji: "🎆" },
+    { key: "slot_win",  label: "スロット",   emoji: "🎰" },
+    { key: "omukae",    label: "お迎え",     emoji: "🐰" },
+  ];
+
   function renderTitles(body) {
     const s = window.SYOUGOU;
     const master = Array.isArray(s?.getTitlesMaster?.()) ? s.getTitlesMaster() : [];
@@ -442,7 +472,6 @@
 
     const counts = s?.getAllCounts?.() || {};
 
-    // 進捗
     const catProgress = CATEGORIES.map((c) => {
       const n = Number(counts[c.key] || 0);
       const next = s?.getNextMilestone?.(c.key);
@@ -513,7 +542,10 @@
   function open(tab = "bunny") {
     const p = buildPanel();
     p.style.display = "block";
-    // タブ切替
+
+    // 開くたびに最新の発見を拾う
+    scanCurrentBunnies();
+
     p.querySelectorAll(".tab").forEach((x) => x.classList.remove("on"));
     const t = p.querySelector(`.tab[data-tab="${tab}"]`);
     if (t) t.classList.add("on");
@@ -548,15 +580,12 @@
     open,
     close,
 
-    // 図鑑解放
-    discover,                 // discover("bunny4")
-    scanCurrentBunnies,       // 現在のbunniesから解放
+    discover,
+    scanCurrentBunnies,
 
-    // 旅立ち回数（うさぎ別）
-    addFarewellByType,        // addFarewellByType("bunny1")
+    addFarewellByType,
     getFarewellByType: (k) => Number(store.farewellByType[k] || 0),
 
-    // データ
     store,
     BUNNY_MASTER,
   };
@@ -564,8 +593,26 @@
   /* =========================
    * Hooks
    * ========================= */
+
   // うさぎ増減 → 図鑑スキャン
   try { WB.on?.("bunnyCountChanged", scanCurrentBunnies); } catch {}
+
+  // ✅ 旅立ち通知 → 旅立ち回数（うさぎ別）を加算
+  // tabidati.js（互換強化版）が emit("bunnyDeparted",{kind}) している前提
+  try {
+    WB.on?.("bunnyDeparted", (p) => {
+      const key = String(p?.kind || "") || null;
+      if (key) addFarewellByType(key, 1);
+    });
+  } catch {}
+
+  // もし別名イベントも使ってるなら拾う（SYOUGOU連動用に emit している場合）
+  try {
+    WB.on?.("tabidachi", (p) => {
+      const key = String(p?.kind || "") || null;
+      if (key) addFarewellByType(key, 1);
+    });
+  } catch {}
 
   // 起動
   window.addEventListener("load", () => {
