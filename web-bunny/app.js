@@ -1,44 +1,22 @@
-/* app.js — Milkpop牧場（お迎え=omukae.js依存版）
+/* app.js — Milkpop牧場（CSS: bunnyWrap前提 / お迎え=omukae.js依存）
  * - 初期：bunny.png（大人）2匹
- * - お迎え（shopBtn）は app.js では購入処理しない
- *   → WB.emit("omukae:open", { catalog }) を投げるだけ
- *   → omukae.js が UI / 支払い / 生成を担当
- *
- * - omukae.js から使う用API:
+ * - お迎え（shopBtn）は WB.emit("omukae:open") するだけ（UI/購入はomukae.js）
+ * - omukae.js から:
  *   - WB.spendCoin(cost)
- *   - WB.createBunny({ isBaby:true, targetAdultSrc:ASSET.bunny1|3|4|5 })
- *   - WB.omukaeCatalog（商品一覧）
+ *   - WB.createBunny({ isBaby:true, targetAdultSrc:"./assets/bunny3.png" })
+ *   - WB.omukaeCatalog
  *
  * - クリック時のみコインドロップ（放置ドロップなし）
  * - coin価値: coin1=1 / coin2=5 / coin3=10 / coin4=100
  * - ゲージ量でティア(1..4)決定（1低〜4高）
- * - MAX到達“瞬間だけ”ハートふわふわ演出（MAX中は表示のみ）
- * - baby→3分で進化：targetAdultSrc があればそれへ進化
+ * - MAX到達“瞬間だけ”ハートふわふわ（MAX中は表示のみ）
+ * - baby→3分で進化：targetAdultSrc があればそれへ確定進化
  *   - ただし targetAdultSrc が bunny1 の場合のみ 0.5% で reabunny
  * - reset：うさぎ + 所持コイン + 落ちコインのみ初期化（他LS保持）
  */
 
 (() => {
   "use strict";
-
-  /* =========================
-   * Inject CSS (hart fuwafuwa)
-   * ========================= */
-  (() => {
-    const css = `
-      @keyframes wbHartFuwa {
-        0%   { transform: translate(-50%, -100%) translateY(0)   scale(1); }
-        25%  { transform: translate(-50%, -100%) translateY(-6px) scale(1.06); }
-        50%  { transform: translate(-50%, -100%) translateY(0)   scale(1); }
-        75%  { transform: translate(-50%, -100%) translateY(-4px) scale(1.04); }
-        100% { transform: translate(-50%, -100%) translateY(0)   scale(1); }
-      }
-      .wb-hart-fuwafuwa { animation: wbHartFuwa 1.2s ease-in-out 2; }
-    `;
-    const style = document.createElement("style");
-    style.textContent = css;
-    document.head.appendChild(style);
-  })();
 
   /* =========================
    * Helpers
@@ -66,21 +44,12 @@
     return;
   }
 
-  // クリック不能対策（レイヤーを明示）
-  bunnyLayer.style.position = bunnyLayer.style.position || "absolute";
-  bunnyLayer.style.inset = bunnyLayer.style.inset || "0";
-  bunnyLayer.style.zIndex = "20";
-
-  coinLayer.style.position = coinLayer.style.position || "absolute";
-  coinLayer.style.inset = coinLayer.style.inset || "0";
-  coinLayer.style.zIndex = "30";
-
   /* =========================
    * Constants
    * ========================= */
   const LS = {
     coin: "wb_coin_v1",
-    bunnies: "wb_bunnies_v10_omukaeDepends",
+    bunnies: "wb_bunnies_v11_wrapCss",
   };
 
   const ASSET = {
@@ -103,7 +72,7 @@
     seCoin: "./assets/coin.mp3",
   };
 
-  // omukae.js が参照する「商品一覧」(コストは仮。omukae.js側で上書きしてもOK)
+  // omukae.js が参照する「商品一覧」(costは仮。omukae.js側でインフレ等で上書きOK)
   const OMUKAE_CATALOG = [
     { key: "bunny1", name: "bunny1", src: ASSET.bunny1, cost: 200 },
     { key: "bunny3", name: "bunny3", src: ASSET.bunny3, cost: 200 },
@@ -119,31 +88,22 @@
   };
 
   const START_BUNNIES = 2;
-
   const CLICK_COOLDOWN_MS = 1000;
   const BABY_GROW_MS = 3 * 60 * 1000;
 
-  const COIN_FOOT_Y_OFFSET = 6;
-
-  const SIZE = {
-    adultW: 96,
-    adultH: 96,
-    babyScale: 0.65,
-    coinW: 28,
-    coinH: 28,
-    hartW: 36,
-    hartH: 36,
-  };
-
   const GAUGE = {
     max: 100,
-    perSec: 4,
-    drainOnDrop: 35,
-    showHartAt: 100,
+    perSec: 4,          // 1秒あたりの増加
+    drainOnDrop: 35,    // クリックドロップで減少
+    showHartAt: 100,    // MAX到達時のみ表示
   };
 
   // bunny1指定の時だけ 0.5% で reabunny
   const REA_RULE = { fromBunny1ToReaChance: 0.005 };
+
+  // CSSの coin は 32px 前提（style.css）なので合わせる
+  const COIN_W = 32;
+  const COIN_H = 32;
 
   /* =========================
    * Audio
@@ -241,6 +201,7 @@
   }
 
   function getFloorY() {
+    // だいたい地面ライン。必要ならCSSに合わせて調整。
     return Math.max(0, field.clientHeight - 74);
   }
 
@@ -263,18 +224,13 @@
     el.draggable = false;
 
     const floorY = getFloorY();
-    const px = clamp(x, 0, field.clientWidth - SIZE.coinW);
+    const px = clamp(x, 0, field.clientWidth - COIN_W);
     const py = clamp(y, 0, floorY);
 
-    el.style.position = "absolute";
     el.style.left = `${px}px`;
     el.style.top = `${py}px`;
-    el.style.width = `${SIZE.coinW}px`;
-    el.style.height = `${SIZE.coinH}px`;
-    el.style.pointerEvents = "auto";
-    el.style.userSelect = "none";
-    el.style.zIndex = "40";
 
+    // style.css: #coinLayer pointer-events:none なので coin は pointer-events:auto が有効
     const collect = () => {
       if (!spawnedCoins.has(id)) return;
       spawnedCoins.delete(id);
@@ -282,7 +238,6 @@
       playSE(SE.coin);
       addCoin(def.value);
     };
-
     el.addEventListener("mouseenter", collect, { passive: true });
     el.addEventListener("click", collect);
 
@@ -299,81 +254,71 @@
   }
 
   /* =========================
-   * Bunny
+   * Bunny (CSS: .bunnyWrap / .bunny / .bunnyHeart)
    * ========================= */
-  function bunnyW(b) {
-    return b.isBaby ? Math.round(SIZE.adultW * SIZE.babyScale) : SIZE.adultW;
-  }
-  function bunnyH(b) {
-    return b.isBaby ? Math.round(SIZE.adultH * SIZE.babyScale) : SIZE.adultH;
-  }
-  function applyBunnySize(b) {
-    b.el.style.width = `${bunnyW(b)}px`;
-    b.el.style.height = `${bunnyH(b)}px`;
-  }
-  function applyBunnyTransform(b) {
-    const flip = b.dir >= 0 ? 1 : -1;
-    b.el.style.transform = `scaleX(${flip})`;
-  }
-  function clampBunnyInField(b) {
-    const w = bunnyW(b);
-    const h = bunnyH(b);
-    const maxX = Math.max(0, field.clientWidth - w);
-    const floorY = getFloorY();
-    const y = clamp(floorY - h + 22, 0, floorY);
+  function placeWrap(b) {
+    const maxX = Math.max(0, field.clientWidth - 140); // .bunnyWrap width
     b.x = clamp(b.x, 0, maxX);
-    b.y = y;
+
+    const floorY = getFloorY();
+    // wrap を地面に合わせる（wrap height 140）
+    b.y = clamp(floorY - 140 + 22, 0, floorY);
+
+    b.wrap.style.left = `${b.x}px`;
+    b.wrap.style.top = `${b.y}px`;
+
+    // flip は wrap に付ける（CSS準拠）
+    if (b.dir < 0) b.wrap.classList.add("flip");
+    else b.wrap.classList.remove("flip");
   }
 
-  function ensureHart(b) {
-    if (b.hartEl) return;
-    const h = document.createElement("img");
-    h.className = "hart";
-    h.src = ASSET.hart;
-    h.alt = "hart";
-    h.draggable = false;
-
-    h.style.position = "absolute";
-    h.style.width = `${SIZE.hartW}px`;
-    h.style.height = `${SIZE.hartH}px`;
-    h.style.pointerEvents = "none";
-    h.style.userSelect = "none";
-    h.style.opacity = "0";
-    h.style.transform = "translate(-50%, -100%)";
-    h.style.zIndex = "25";
-
-    bunnyLayer.appendChild(h);
-    b.hartEl = h;
+  function setHeartVisible(b, isVisible, animateOnce) {
+    if (isVisible) {
+      b.heart.classList.add("show");
+      if (animateOnce) {
+        // show は常時無限アニメなので、「瞬間だけふわふわ」を実現するため
+        // show を一旦付けて、少ししたら外して“表示は維持”したいが、
+        // 仕様は「MAX時だけハート」＝MAX中表示OKなので、
+        // ここでは animateOnce=true のときだけ 2.6秒後に show を外す。
+        // （MAX中ずっとふわふわさせたい場合は外さない）
+        setTimeout(() => {
+          // MAX中でも「ふわふわは瞬間だけ」なので外す
+          b.heart.classList.remove("show");
+        }, 2600);
+      }
+    } else {
+      b.heart.classList.remove("show");
+    }
   }
 
-  function playHartFuwa(b) {
-    b.hartEl.classList.remove("wb-hart-fuwafuwa");
-    void b.hartEl.offsetWidth;
-    b.hartEl.classList.add("wb-hart-fuwafuwa");
-    setTimeout(() => b.hartEl?.classList.remove("wb-hart-fuwafuwa"), 2800);
-  }
-
-  function updateHart(b) {
-    ensureHart(b);
-
-    const w = bunnyW(b);
-    const cx = b.x + w * 0.5;
-    const topY = b.y - 6;
-
-    b.hartEl.style.left = `${cx}px`;
-    b.hartEl.style.top = `${topY}px`;
-
+  function updateHeart(b) {
+    // heart の表示条件：MAXの時だけ
     const isMax = b.gauge >= GAUGE.showHartAt;
-    b.hartEl.style.opacity = isMax ? "1" : "0";
 
+    // MAX到達“瞬間だけ”ふわふわ
     if (isMax && b.maxAnimArmed) {
       b.maxAnimArmed = false;
-      playHartFuwa(b);
+      setHeartVisible(b, true, true);
       saveBunnies();
-    } else if (!isMax && !b.maxAnimArmed) {
-      b.maxAnimArmed = true;
-      saveBunnies();
+      return;
     }
+
+    // MAXでないなら非表示＆再アーム
+    if (!isMax) {
+      if (!b.maxAnimArmed) {
+        b.maxAnimArmed = true;
+        saveBunnies();
+      }
+      setHeartVisible(b, false, false);
+      return;
+    }
+
+    // MAXだが到達済み（ふわふわはしない、表示は維持…の仕様なら show を付ける）
+    // ただし show を付けると無限ふわふわになるので、ここは表示だけにしたい。
+    // 画像自体を見せるだけにするなら、CSSを少し変える必要がある。
+    // ここでは「MAX時はハート表示、ふわふわは瞬間だけ」に合わせて、
+    // show を付けず opacityだけ上げる（インラインで上書き）。
+    b.heart.style.opacity = "1";
   }
 
   function calcDropCount(b) {
@@ -387,32 +332,30 @@
   }
 
   function dropCoinsFromBunny(b) {
-    const w = bunnyW(b);
-    const h = bunnyH(b);
-    const footX = b.x + w * 0.5;
-    const footY = b.y + h - COIN_FOOT_Y_OFFSET;
-
     const tier = b.isBaby ? 1 : tierFromGauge(b.gauge);
     const count = calcDropCount(b);
 
+    // だいたい足元（wrap 140 の下辺 / bunny画像が bottom 0）
+    const footX = b.x + 60;            // 140の中央
+    const footY = b.y + 140 - 10;
+
     for (let i = 0; i < count; i++) {
-      const cx = footX + rand(-10, 10) - SIZE.coinW / 2;
-      const cy = footY + rand(-4, 2) - SIZE.coinH / 2;
+      const cx = footX + rand(-12, 12) - COIN_W / 2;
+      const cy = footY + rand(-6, 2) - COIN_H / 2;
       spawnCoinAtTier(tier, cx, cy);
     }
 
     if (!b.isBaby) {
       drainGaugeOnDrop(b);
-      updateHart(b);
+      updateHeart(b);
       saveBunnies();
     }
   }
 
   function evolveBaby(b) {
-    // 指定進化があればそれ、なければ通常bunny
     let target = b.targetAdultSrc || ASSET.bunny;
 
-    // bunny1指定だけ 0.5% で reabunny に昇格
+    // bunny1指定だけ 0.5% で reabunny
     if (target === ASSET.bunny1 && Math.random() < REA_RULE.fromBunny1ToReaChance) {
       target = ASSET.reabunny;
     }
@@ -421,9 +364,9 @@
     b.growAt = 0;
     b.adultSrc = target;
 
-    b.el.src = b.adultSrc;
-    applyBunnySize(b);
-    clampBunnyInField(b);
+    b.wrap.classList.remove("baby");
+    b.img.src = b.adultSrc;
+
     saveBunnies();
   }
 
@@ -438,14 +381,28 @@
     adultSrc,
     targetAdultSrc,
   } = {}) {
-    const el = document.createElement("img");
-    el.className = "bunny";
-    el.draggable = false;
-    el.alt = "bunny";
+    // CSS準拠：wrapがクリック判定
+    const wrap = document.createElement("div");
+    wrap.className = "bunnyWrap";
+
+    const img = document.createElement("img");
+    img.className = "bunny";
+    img.draggable = false;
+    img.alt = "bunny";
+
+    const heart = document.createElement("img");
+    heart.className = "bunnyHeart";
+    heart.src = ASSET.hart;
+    heart.alt = "heart";
+    heart.draggable = false;
+
+    wrap.appendChild(img);
+    wrap.appendChild(heart);
+    bunnyLayer.appendChild(wrap);
 
     const b = {
       bornAt: Number.isFinite(bornAt) ? bornAt : now(),
-      x: Number.isFinite(x) ? x : rand(40, Math.max(41, field.clientWidth - 120)),
+      x: Number.isFinite(x) ? x : rand(40, Math.max(41, field.clientWidth - 180)),
       y: 0,
       vx: rand(0.25, 0.6),
       dir: Number.isFinite(dir) ? Math.sign(dir) || 1 : (Math.random() < 0.5 ? -1 : 1),
@@ -456,36 +413,26 @@
       maxAnimArmed: (maxAnimArmed !== false),
       adultSrc: typeof adultSrc === "string" ? adultSrc : "",
       targetAdultSrc: typeof targetAdultSrc === "string" ? targetAdultSrc : "",
-      el,
-      hartEl: null,
+      wrap,
+      img,
+      heart,
     };
 
     if (b.isBaby) {
-      el.src = ASSET.baby;
+      wrap.classList.add("baby");
+      img.src = ASSET.baby;
       b.adultSrc = "";
     } else {
       b.adultSrc = b.adultSrc || ASSET.bunny;
-      el.src = b.adultSrc;
+      img.src = b.adultSrc;
     }
 
-    // クリック不能対策（強制）
-    el.style.position = "absolute";
-    el.style.pointerEvents = "auto";
-    el.style.zIndex = "60";
-    el.style.userSelect = "none";
-    el.style.webkitUserSelect = "none";
-    el.style.touchAction = "manipulation";
+    // heart 初期は非表示
+    heart.style.opacity = "0";
 
-    applyBunnySize(b);
-    clampBunnyInField(b);
-    applyBunnyTransform(b);
+    placeWrap(b);
 
-    el.style.left = `${b.x}px`;
-    el.style.top = `${b.y}px`;
-
-    ensureHart(b);
-    updateHart(b);
-
+    // ✅ クリックは wrap に付ける（.bunnyはpointer-events:noneなのでこれ必須）
     const onTap = (ev) => {
       ev?.stopPropagation?.();
       const t = now();
@@ -495,10 +442,9 @@
       playSE(SE.poyo);
       dropCoinsFromBunny(b);
     };
-    el.addEventListener("pointerdown", onTap);
-    el.addEventListener("click", onTap);
+    wrap.addEventListener("pointerdown", onTap);
+    wrap.addEventListener("click", onTap);
 
-    bunnyLayer.appendChild(el);
     bunnies.push(b);
     saveBunnies();
     return b;
@@ -506,8 +452,7 @@
 
   function clearAllBunnies() {
     for (const b of bunnies) {
-      try { b.el.remove(); } catch {}
-      try { b.hartEl?.remove(); } catch {}
+      try { b.wrap.remove(); } catch {}
     }
     bunnies.length = 0;
   }
@@ -521,40 +466,39 @@
     lastTickAt = t;
 
     for (const b of bunnies) {
+      // 成長
       if (b.isBaby && b.growAt && t >= b.growAt) {
         evolveBaby(b);
       }
 
+      // ゲージ（adultのみ）
       if (!b.isBaby) {
         b.gauge = clamp(b.gauge + GAUGE.perSec * dtSec, 0, GAUGE.max);
       } else {
         b.gauge = 0;
       }
 
+      // 移動
       b.x += b.vx * b.dir;
-      const w = bunnyW(b);
-      const maxX = Math.max(0, field.clientWidth - w);
+      const maxX = Math.max(0, field.clientWidth - 140);
       if (b.x <= 0) { b.x = 0; b.dir = 1; }
       else if (b.x >= maxX) { b.x = maxX; b.dir = -1; }
 
-      clampBunnyInField(b);
-      b.el.style.left = `${b.x}px`;
-      b.el.style.top = `${b.y}px`;
-      applyBunnyTransform(b);
+      placeWrap(b);
 
-      updateHart(b);
+      // ハート
+      // showクラスは無限アニメなので、MAX中の表示は opacity を使う
+      const isMax = b.gauge >= GAUGE.showHartAt;
+      if (isMax) b.heart.style.opacity = "1";
+      else b.heart.style.opacity = "0";
+      updateHeart(b);
     }
 
     rafId = requestAnimationFrame(step);
   }
 
   function onResize() {
-    for (const b of bunnies) {
-      clampBunnyInField(b);
-      b.el.style.left = `${b.x}px`;
-      b.el.style.top = `${b.y}px`;
-      updateHart(b);
-    }
+    for (const b of bunnies) placeWrap(b);
     saveBunnies();
   }
 
@@ -573,6 +517,7 @@
   WB.spendCoin = spendCoin;
 
   WB.createBunny = (opts = {}) => createBunny(opts);
+  WB.getBunnies = () => bunnies;
 
   WB.resetCoreOnly = () => {
     if (rafId) cancelAnimationFrame(rafId);
@@ -612,7 +557,7 @@
   /* =========================
    * Buttons
    * ========================= */
-  // ★お迎えボタンは omukae.js へ通知するだけ
+  // お迎えボタンは omukae.js へ通知するだけ
   shopBtn?.addEventListener("click", () => {
     WB.emit("omukae:open", { catalog: WB.omukaeCatalog });
   });
@@ -658,5 +603,5 @@
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(step);
 
-  WB.emit("core:ready", { version: "app.js-core-v10-omukaeDepends", startBunnies: bunnies.length });
+  WB.emit("core:ready", { version: "app.js-core-v11-wrapCss", startBunnies: bunnies.length });
 })();
