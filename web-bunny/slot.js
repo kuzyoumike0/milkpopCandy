@@ -1,6 +1,9 @@
 (() => {
   const PANEL_ID = "slotStarMachinePanel3x3";
-  const SLOT_COST = 50;
+
+  // ★掛け金候補
+  const BETS = [50, 100, 500, 1000, 5000, 10000];
+  const BASE_BET = BETS[0]; // 払い戻し倍率の基準（=50）
 
   const MACHINE_SRC = "./assets/slot_machine.png";
 
@@ -12,16 +15,50 @@
 
   /* ===== 絵柄 ===== */
   const SYMBOLS = [
-    { name: "coin2",    src: "./assets/coin2.png",       w: 30, pay: 100 },
-    { name: "coin3",    src: "./assets/coin3.png",       w: 20, pay: 200 },
-    { name: "coin4",    src: "./assets/coin4.png",       w: 10, pay: 500 },   // ← 次点（coin4）
-    { name: "babybunny",src: "./assets/babybunny.png",   w: 15 },
-    { name: "reabunny", src: "./assets/reabunny.png",    w:  5 },             // ← 2番手
-    { name: "ougon",    src: "./assets/ougonunchi.png",  w:  1, pay: 1500 },  // ← 最上位
+    { name: "coin2",     src: "./assets/coin2.png",      w: 30, pay: 100  }, // payは「50掛け基準」
+    { name: "coin3",     src: "./assets/coin3.png",      w: 20, pay: 200  },
+    { name: "coin4",     src: "./assets/coin4.png",      w: 10, pay: 500  }, // ← 次点（coin4）
+    { name: "babybunny", src: "./assets/babybunny.png",  w: 15            },
+    { name: "reabunny",  src: "./assets/reabunny.png",   w:  5            }, // ← 2番手
+    { name: "ougon",     src: "./assets/ougonunchi.png", w:  1, pay: 1500 }, // ← 最上位
   ];
 
   const SPIN = { loops: 22, colDelay: 220, baseDuration: 980 };
   const $ = (q, p = document) => p.querySelector(q);
+
+  /* =========================
+   * Bet state
+   * ========================= */
+  let currentBet = BASE_BET;
+
+  function betMult() {
+    return Math.max(1, Math.floor(currentBet / BASE_BET));
+  }
+
+  function updateBetUI(panel) {
+    if (!panel) return;
+    panel.querySelectorAll("[data-bet]").forEach((b) => {
+      const v = Number(b.getAttribute("data-bet")) || 0;
+      b.classList.toggle("active", v === currentBet);
+    });
+
+    const spinBtn = $(".spin", panel);
+    const spin10Btn = $(".spin10", panel);
+    if (spinBtn) spinBtn.textContent = `回す（-${currentBet}）`;
+    if (spin10Btn) spin10Btn.textContent = `10連（-${currentBet * 10}）`;
+
+    const betNow = $(".betNow", panel);
+    if (betNow) betNow.textContent = String(currentBet);
+
+    const rate = $(".betRate", panel);
+    if (rate) rate.textContent = `×${betMult()}`;
+  }
+
+  function setBet(v, panel) {
+    const nv = BETS.includes(v) ? v : BASE_BET;
+    currentBet = nv;
+    updateBetUI(panel);
+  }
 
   /* =========================
    * Audio
@@ -146,8 +183,8 @@
     const coins = parseCoins(text);
     if (coins !== null && coins > 0) {
       requestAnimationFrame(() => {
-        if (coins >= 1500) el.classList.add("popMega");
-        else el.classList.add(coins >= 500 ? "popBig" : "popNum");
+        if (coins >= 1500 * betMult()) el.classList.add("popMega");
+        else el.classList.add(coins >= 500 * betMult() ? "popBig" : "popNum");
       });
     }
 
@@ -275,7 +312,6 @@
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
 
-      // ★ougonだけ虹 / reabunnyは太め / coin4は中 / それ以外は通常
       const cls =
         "paylinePath" +
         (tier >= 3 ? " rainbow" : "") +
@@ -289,7 +325,6 @@
       layer.appendChild(svg);
     });
 
-    // ハズレ線は短めで消す
     if (!winLines || !winLines.length) {
       setTimeout(() => {
         try { layer.innerHTML = ""; } catch {}
@@ -298,20 +333,16 @@
   }
 
   function getBestTierFromWins(winLines, names) {
-    // winLines が空なら tier 0
     if (!winLines || winLines.length === 0) return 0;
 
-    // 最上位判定（ougon）
     for (const line of winLines) {
       const sym = names[line[0]];
       if (sym === "ougon") return 3;
     }
-    // 次点（reabunny）
     for (const line of winLines) {
       const sym = names[line[0]];
       if (sym === "reabunny") return 2;
     }
-    // 次（coin4）
     for (const line of winLines) {
       const sym = names[line[0]];
       if (sym === "coin4") return 1;
@@ -324,8 +355,8 @@
 
     const machine = panel.querySelector(".machine") || panel;
 
-    const mega = tier >= 3;           // ougon
-    const big  = tier >= 2 || totalPay >= 1000 || totalLines >= 3; // reabunny以上 or 大当たり
+    const mega = tier >= 3;
+    const big  = tier >= 2 || totalPay >= (1000 * betMult()) || totalLines >= 3;
 
     machine.classList.add("winFx");
     if (big) machine.classList.add("winBig"); else machine.classList.remove("winBig");
@@ -348,7 +379,6 @@
     spawnAura(panel, mega);
     spawnSpotlights(panel, mega);
 
-    // 勝ちセル
     const cells = Array.from(panel.querySelectorAll(".cell"));
     (winLines || []).flat().forEach((i) => {
       const c = cells[i];
@@ -369,9 +399,9 @@
    * CSS（中央固定＆豪華演出＋虹ライン）
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("slotStyleLuxV1")) return;
+    if (document.getElementById("slotStyleLuxV2Bet")) return;
     const s = document.createElement("style");
-    s.id = "slotStyleLuxV1";
+    s.id = "slotStyleLuxV2Bet";
     s.textContent = `
 #${PANEL_ID}{
   --winTop: 38%;
@@ -698,7 +728,7 @@
   100%{ transform: translateY(760px) rotate(620deg); opacity:0; }
 }
 
-/* UIバー（下パネル基準） */
+/* UIバー */
 #${PANEL_ID} .controlBar{
   position:absolute;
   left:50%;
@@ -733,6 +763,20 @@
   box-shadow:0 12px 32px rgba(0,0,0,.14);
 }
 #${PANEL_ID} .btn.primary{ background:#ffd6e7; }
+#${PANEL_ID} .btn.active{
+  outline: 3px solid rgba(255, 180, 210, .9);
+  box-shadow:0 12px 32px rgba(0,0,0,.16), 0 0 0 3px rgba(255, 180, 210, .35);
+}
+
+/* ベット行 */
+#${PANEL_ID} .betRow{
+  width: 100%;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
 
 /* 結果文字 */
 #${PANEL_ID} .result{
@@ -811,12 +855,10 @@
       p.id = PANEL_ID;
       document.body.appendChild(p);
     } else {
-      // index.html内に置かれてても確実にbody直下へ
       if (p.parentElement !== document.body) document.body.appendChild(p);
     }
     panelRef = p;
 
-    // 既に構築済みならOK
     if (p.querySelector(".machine")) return p;
 
     p.innerHTML = `
@@ -843,8 +885,15 @@
 
   <div class="controlBar controls">
     <div class="chip">所持：<b class="have">0</b> 🪙</div>
-    <button class="btn primary spin" type="button">回す（-${SLOT_COST}）</button>
-    <button class="btn spin10" type="button">10連</button>
+
+    <div class="chip">掛け：<b class="betNow">${BASE_BET}</b> 🪙 <span class="betRate">×1</span></div>
+
+    <div class="betRow">
+      ${BETS.map(v => `<button class="btn bet" type="button" data-bet="${v}">${v}</button>`).join("")}
+    </div>
+
+    <button class="btn primary spin" type="button">回す（-${BASE_BET}）</button>
+    <button class="btn spin10" type="button">10連（-${BASE_BET * 10}）</button>
   </div>
 </div>
 <button class="closeBtn" aria-label="close" type="button">×</button>
@@ -860,8 +909,17 @@
     $(".spin", p).addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); spin(p, 1); });
     $(".spin10", p).addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); spin(p, 10); });
 
-    // ★「他の部分クリックで非表示」防止：
-    // backdrop と close だけ閉じる（machine内クリックは閉じない）
+    // bet buttons
+    p.querySelectorAll("[data-bet]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const v = Number(btn.getAttribute("data-bet")) || BASE_BET;
+        setBet(v, p);
+        oneShot(COIN_SE, 0.55);
+      });
+    });
+
     $(".closeBtn", p).addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closePanel(); });
     $(".backdrop", p).addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closePanel(); });
     $(".machine", p).addEventListener("click", (e) => { e.stopPropagation(); });
@@ -873,6 +931,8 @@
       if (img.complete) onReady();
     }
 
+    // 初期ベットUI
+    setBet(currentBet, p);
     return p;
   }
 
@@ -965,10 +1025,10 @@
     if (spinning) return;
 
     const have = getCoin();
-    const cost = SLOT_COST * count;
+    const cost = currentBet * count;
+
     if (have < cost) {
       showResult(panel, "コインが足りない…！", 2200);
-      // ★ハズレ扱いでもラインは出す
       drawPaylinesAlways(panel, [], 0);
       return;
     }
@@ -977,6 +1037,7 @@
 
     setCoin(have - cost);
     syncHave(panel);
+    updateBetUI(panel);
 
     oneShot(START_SE, 0.9);
     startReelLoop();
@@ -988,9 +1049,11 @@
     let totalLines = 0;
     let totalPay = 0;
 
-    // 最後の判定情報（演出用）
     let lastWinLines = [];
     let lastNames = [];
+
+    // ★掛け金倍率（50→×1 / 100→×2 ...）
+    const mult = betMult();
 
     try {
       for (let t = 0; t < count; t++) {
@@ -1011,7 +1074,7 @@
         let payThis = 0;
         for (const line of w) {
           const sym = res[line[0]];
-          if (sym.pay) payThis += sym.pay;
+          if (sym.pay) payThis += sym.pay * mult; // ★倍率をかける
         }
 
         totalLines += w.length;
@@ -1020,13 +1083,11 @@
         lastWinLines = w;
         lastNames = names;
 
-        // 10連中も当たり時は軽く豪華
         if (w.length > 0 && count > 1) {
           const tier = getBestTierFromWins(w, names);
           drawPaylinesAlways(panel, w, tier);
           triggerWinFx(panel, w, tier, payThis, w.length);
         } else {
-          // 当たり無しでも薄いライン（常時）
           drawPaylinesAlways(panel, [], 0);
         }
       }
@@ -1038,10 +1099,7 @@
 
     if (totalPay > 0) setCoin(getCoin() + totalPay);
 
-    // ★演出優先度：ougon > reabunny > coin4
     const bestTier = getBestTierFromWins(lastWinLines, lastNames);
-
-    // ★ライン演出は常に入れる（当たりライン or ハズレ全ライン）
     drawPaylinesAlways(panel, lastWinLines, bestTier);
 
     if (totalLines > 0) {
@@ -1052,12 +1110,13 @@
         bestTier >= 2 ? 4800 :
         bestTier >= 1 ? 4200 : 3600;
 
-      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙`, hold);
+      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙（掛け${currentBet}×${mult}）`, hold);
     } else {
-      showResult(panel, "はずれ！", 2400);
+      showResult(panel, `はずれ！（掛け${currentBet}）`, 2400);
     }
 
     syncHave(panel);
+    updateBetUI(panel);
   }
 
   /* =========================
@@ -1070,6 +1129,7 @@
     lockScroll();
     p.style.display = "block";
     syncHave(p);
+    updateBetUI(p);
 
     requestAnimationFrame(() => requestAnimationFrame(() => refreshAllCells(p)));
   }
@@ -1096,11 +1156,13 @@
 
     if (slotBtn) slotBtn.addEventListener("click", (e) => { e.preventDefault(); openPanel(); });
 
-    // コイン変化があれば表示更新
     const cv = $("#coinValue");
     if (cv) {
       const mo = new MutationObserver(() => {
-        if (panelRef && panelRef.style.display !== "none") syncHave(panelRef);
+        if (panelRef && panelRef.style.display !== "none") {
+          syncHave(panelRef);
+          updateBetUI(panelRef);
+        }
       });
       mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
