@@ -18,24 +18,21 @@
   };
 
   const ITEMS = [
-    {
-      key: "partyhat",
-      name: "パーティーハット",
-      emoji: "🎉",
-      price: 2500,
-      src: "./assets/isyou/partyhat.png",
-      // うさぎ頭への相対位置（調整用）
-      // bunnyWrap を基準に absolute で置く
-      // 基本は「上にちょい出して頭に被せる」位置
-      style: {
-        // % は bunnyWrap の幅/高さに対する比率
-        leftPct: 50,     // 中央寄せ
-        topPct: 6,       // 上の方
-        widthPct: 38,    // 帽子の大きさ
-        rotateDeg: -8,   // 少し傾ける
-      },
-    },
-  ];
+  {
+  key: "partyhat",
+  name: "パーティーハット",
+  emoji: "🎉",
+  price: 2500,
+  src: "./assets/isyou/partyhat.png",
+  style: {
+    leftPct: 56,     // 耳の間に寄せる（少し右）
+    topPct: 2,       // かなり上
+    widthPct: 22,    // 小さめ
+    rotateDeg: 18,   // 画像っぽく傾ける
+    liftPct: -10,    // ★追加：上に持ち上げ（マイナスで上）
+  },
+},
+
 
   /* =========================
    * Helpers
