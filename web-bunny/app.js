@@ -1,15 +1,20 @@
-/* app.js — Milkpop牧場（v12.7 FREEZE-KILL + SPREAD + HEART-SWAY）
+/* app.js — Milkpop牧場（v12.8 BABY-RETURN + SPREAD + HEART-SWAY）
  * ✅ 追加修正：
  *  - hart.png：MAX中は常に「ゆらゆら」＋ MAX到達瞬間だけ「ふわっ」
  *  - 回収幅が大きすぎ問題：
  *    - 当たり判定（padding）を縮小
  *    - hover回収は「地面に落ちてから」だけ有効（散らばる前に吸われない）
  *    - マグネットは「地面付近」だけ効く（空中で吸われない）
+ * ✅ v12.8:
+ *  - baby復活：isBaby=true で生成 → 3分後に targetAdultSrc へ成長
+ *  - babyは小さめ表示（.baby）
+ *  - babyのドロップは常に1枚
+ *  - 画面外に行きがち対策：状態ごとの幅でclamp
  */
 
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v12.7", Date.now());
+  console.log("[app.js] LOADED v12.8", Date.now());
 
   /* ===== helpers ===== */
   const $ = (q, p = document) => p.querySelector(q);
@@ -33,7 +38,7 @@
     return;
   }
 
-  /* ===== inject CSS（heart sway + float） ===== */
+  /* ===== inject CSS（heart sway + float + baby scale） ===== */
   (() => {
     const css = `
       @keyframes wbHeartSway {
@@ -54,6 +59,12 @@
       .bunnyHeart.show{
         animation: wbHeartFloat 1.1s ease-in-out 2, wbHeartSway 2.2s ease-in-out infinite;
       }
+
+      /* baby: 小さく（見た目だけ） */
+      .bunnyWrap.baby{
+        transform: scale(0.78);
+        transform-origin: left top;
+      }
     `;
     const st = document.createElement("style");
     st.textContent = css;
@@ -69,6 +80,9 @@
     bunny5: "./assets/bunny5.png",
     reabunny: "./assets/reabunny.png",
 
+    // ★ baby画像がある場合はこれを使う（無いなら大人のままでも動く）
+    babybunny: "./assets/babybunny.png",
+
     hart: "./assets/hart.png",
 
     coin1: "./assets/coin1.png",
@@ -81,10 +95,10 @@
   };
 
   const OMUKAE_CATALOG = [
-    { key: "bunny1", name: "bunny1", src: ASSET.bunny1, cost: 200 },
-    { key: "bunny3", name: "bunny3", src: ASSET.bunny3, cost: 200 },
-    { key: "bunny4", name: "bunny4", src: ASSET.bunny4, cost: 200 },
-    { key: "bunny5", name: "bunny5", src: ASSET.bunny5, cost: 200 },
+    { key: "bunny1", name: "通常みるぽ", src: ASSET.bunny1, cost: 200 },
+    { key: "bunny3", name: "毒タイプみるぽ", src: ASSET.bunny3, cost: 200 },
+    { key: "bunny4", name: "水タイプみるぽ", src: ASSET.bunny4, cost: 200 },
+    { key: "bunny5", name: "お正月みるぽ", src: ASSET.bunny5, cost: 200 },
   ];
 
   const COIN_TIER = {
@@ -96,8 +110,10 @@
 
   const LS = {
     coin: "wb_coin_v1",
-    bunnies: "wb_bunnies_v12_wrapStable",
+    // ★保存形式を更新（baby対応）
+    bunnies: "wb_bunnies_v12_8_baby",
     legacyBunnyKeys: [
+      "wb_bunnies_v12_wrapStable",
       "wb_bunnies_v10_omukaeDepends",
       "wb_bunnies_v11_wrapCss",
       "wb_bunnies_v9",
@@ -122,6 +138,14 @@
 
   // hover回収は「地面に落ちてから」だけ（散らばる前に吸われない）
   const HOVER_ENABLE_DELAY = 0.35; // sec（生成後すぐは無効）
+
+  // ★ baby成長
+  const BABY_GROW_MS = 3 * 60 * 1000;
+
+  // ★当たり判定・画面外対策用：状態ごとの“想定幅”
+  const BUNNY_W_ADULT = 140;
+  const BUNNY_W_BABY  = 110; // babyは小さめ扱い
+  const BUNNY_H       = 140;
 
   /* ===== Audio ===== */
   const SE = {
@@ -203,12 +227,14 @@
       if (!raw) return [];
       const arr = JSON.parse(raw);
       if (!Array.isArray(arr)) return [];
-      // ★復元は常に大人（babyは絶対に出さない）
       return arr.map(x => ({
         bornAt: Number(x?.bornAt),
         x: Number(x?.x),
         dir: Number(x?.dir),
         adultSrc: typeof x?.adultSrc === "string" ? x.adultSrc : "",
+        isBaby: !!x?.isBaby,
+        targetAdultSrc: typeof x?.targetAdultSrc === "string" ? x.targetAdultSrc : "",
+        babyUntil: Number(x?.babyUntil),
       })).filter(x => Number.isFinite(x.bornAt));
     } catch { return []; }
   }
@@ -219,6 +245,9 @@
       x: Math.round(b.x),
       dir: b.dir,
       adultSrc: b.adultSrc || "",
+      isBaby: !!b.isBaby,
+      targetAdultSrc: b.targetAdultSrc || "",
+      babyUntil: Number.isFinite(b.babyUntil) ? b.babyUntil : 0,
     }));
     localStorage.setItem(LS.bunnies, JSON.stringify(data));
   }
@@ -226,7 +255,8 @@
   /* ===== util ===== */
   function getFloorY() { return Math.max(0, field.clientHeight - 74); }
 
-  function tierFromGauge(g) {
+  function tierFromGauge(g, isBaby = false) {
+    if (isBaby) return 1; // babyは常にtier1扱い
     g = clamp(g, 0, GAUGE.max);
     if (g < 25) return 1;
     if (g < 50) return 2;
@@ -265,7 +295,6 @@
     el.style.zIndex = "40";
 
     // ✅ 当たり判定「大きすぎ」修正：控えめにする
-    // （前：18px → 今：6px）
     el.style.padding = "6px";
     el.style.margin  = "-6px";
 
@@ -317,12 +346,16 @@
   }
 
   /* ===== bunny ===== */
+  function bunnyW(b) { return b.isBaby ? BUNNY_W_BABY : BUNNY_W_ADULT; }
+
   function placeWrap(b) {
-    const maxX = Math.max(0, field.clientWidth - 140);
+    const w = bunnyW(b);
+    const maxX = Math.max(0, field.clientWidth - w);
     b.x = clamp(b.x, 0, maxX);
 
     const floorY = getFloorY();
-    b.y = clamp(floorY - 140 + 22, 0, floorY);
+    // 高さも“想定”で揃える（見た目がscaleされてても、床から浮きにくくする）
+    b.y = clamp(floorY - BUNNY_H + 22, 0, floorY);
 
     const lx = (b._lx ?? NaN), ly = (b._ly ?? NaN);
     if (b.x !== lx) b.wrap.style.left = `${b.x}px`;
@@ -362,19 +395,22 @@
   }
 
   function calcDropCount(b) {
+    // ★babyは常に1枚
+    if (b.isBaby) return 1;
+
     const step = Math.floor(clamp(b.gauge, 0, GAUGE.max) / 25);
     return clamp(1 + step + (b.gauge >= GAUGE.max ? 1 : 0), 1, 8);
   }
 
   function dropCoinsFromBunny(b) {
-    const tier = tierFromGauge(b.gauge);
+    const tier = tierFromGauge(b.gauge, b.isBaby);
     const def = COIN_TIER[tier] || COIN_TIER[1];
     const spread = def.spread ?? 1.0;
 
     const count = calcDropCount(b);
 
-    const footX = b.x + 70;
-    const footY = b.y + 140 - 22;
+    const footX = b.x + (bunnyW(b) * 0.5);
+    const footY = b.y + BUNNY_H - 22;
 
     const posX = clamp(12 * spread, 12, 20);
     const posY = clamp(6  * spread, 6,  10);
@@ -388,9 +424,27 @@
       );
     }
 
+    // babyでもゲージは減らして良い（演出テンポ調整）
     b.gauge = clamp(b.gauge - GAUGE.drainOnDrop, 0, GAUGE.max);
     updateHeart(b);
     saveBunnies();
+  }
+
+  function growUp(b) {
+    if (!b || !b.isBaby) return;
+    b.isBaby = false;
+    b.babyUntil = 0;
+
+    // 成長先が指定されていればそれへ
+    const nextSrc = (b.targetAdultSrc || b.adultSrc || ASSET.bunny);
+    b.adultSrc = nextSrc;
+    b.img.src = nextSrc;
+
+    b.wrap.classList.remove("baby");
+    placeWrap(b);
+    saveBunnies();
+
+    WB.emit("bunny:grew", { bornAt: b.bornAt, adultSrc: b.adultSrc });
   }
 
   function createBunny(opts = {}) {
@@ -412,17 +466,25 @@
     wrap.appendChild(heart);
     bunnyLayer.appendChild(wrap);
 
-    // ★babyは絶対に使わない
-    let adultSrc =
-      (typeof opts.adultSrc === "string" && opts.adultSrc && !opts.adultSrc.includes("babybunny"))
-        ? opts.adultSrc
-        : ASSET.bunny;
+    // ★ isBaby / targetAdultSrc 対応
+    const bornAt = Number.isFinite(opts.bornAt) ? opts.bornAt : now();
+    const isBaby = !!opts.isBaby;
 
-    img.src = adultSrc;
-    wrap.classList.remove("baby");
+    // 成体の見た目（将来）
+    const targetAdultSrc =
+      (typeof opts.targetAdultSrc === "string" && opts.targetAdultSrc) ? opts.targetAdultSrc :
+      (typeof opts.adultSrc === "string" && opts.adultSrc) ? opts.adultSrc :
+      ASSET.bunny;
+
+    // 今表示する画像
+    const currentSrc = isBaby ? (ASSET.babybunny || targetAdultSrc) : targetAdultSrc;
+    img.src = currentSrc;
+
+    if (isBaby) wrap.classList.add("baby");
+    else wrap.classList.remove("baby");
 
     const b = {
-      bornAt: Number.isFinite(opts.bornAt) ? opts.bornAt : now(),
+      bornAt,
       x: Number.isFinite(opts.x) ? opts.x : rand(40, Math.max(41, field.clientWidth - 180)),
       y: 0,
       vx: rand(16, 30), // px/sec
@@ -430,7 +492,12 @@
       lastClickAt: 0,
       gauge: 0,
       maxAnimArmed: true,
-      adultSrc,
+
+      isBaby,
+      babyUntil: isBaby ? (Number.isFinite(opts.babyUntil) ? opts.babyUntil : (bornAt + BABY_GROW_MS)) : 0,
+      targetAdultSrc,
+      adultSrc: targetAdultSrc,
+
       wrap, img, heart,
       _lx: NaN, _ly: NaN, _flip: null,
     };
@@ -438,6 +505,16 @@
     setHeartState(b, "hide");
     placeWrap(b);
     updateHeart(b);
+
+    // ★復元時、既に成長時間を過ぎていたら即成長
+    if (b.isBaby) {
+      const remain = b.babyUntil - now();
+      if (remain <= 0) {
+        growUp(b);
+      } else {
+        setTimeout(() => growUp(b), remain);
+      }
+    }
 
     const onTap = (ev) => {
       ev?.stopPropagation?.();
@@ -454,12 +531,15 @@
 
     bunnies.push(b);
     saveBunnies();
+
+    WB.emit("bunnyCountChanged", { count: bunnies.length });
     return b;
   }
 
   function clearAllBunnies() {
     for (const b of bunnies) { try { b.wrap.remove(); } catch {} }
     bunnies.length = 0;
+    WB.emit("bunnyCountChanged", { count: 0 });
   }
 
   /* ===== Loop ===== */
@@ -471,10 +551,15 @@
 
       // --- bunny ---
       for (const b of bunnies) {
+        // 成長チェック（念のため）
+        if (b.isBaby && b.babyUntil && now() >= b.babyUntil) {
+          growUp(b);
+        }
+
         b.gauge = clamp(b.gauge + GAUGE.perSec * dt, 0, GAUGE.max);
 
         b.x += b.vx * dt * b.dir;
-        const maxX = Math.max(0, field.clientWidth - 140);
+        const maxX = Math.max(0, field.clientWidth - bunnyW(b));
         if (b.x <= 0) { b.x = 0; b.dir = 1; }
         else if (b.x >= maxX) { b.x = maxX; b.dir = -1; }
 
@@ -605,10 +690,14 @@
   const saved = loadBunnies();
   if (saved.length > 0) {
     for (const s of saved) {
+      // 復元：baby状態も復帰（期限を見て即成長もする）
       createBunny({
         bornAt: s.bornAt,
         x: Number.isFinite(s.x) ? s.x : undefined,
         dir: Number.isFinite(s.dir) ? s.dir : undefined,
+        isBaby: !!s.isBaby,
+        babyUntil: Number.isFinite(s.babyUntil) ? s.babyUntil : undefined,
+        targetAdultSrc: (s.targetAdultSrc || s.adultSrc || ASSET.bunny),
         adultSrc: (s.adultSrc || ASSET.bunny),
       });
     }
@@ -619,5 +708,5 @@
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(step);
 
-  WB.emit("core:ready", { version: "app.js-core-v12.7-heart-sway", startBunnies: bunnies.length });
+  WB.emit("core:ready", { version: "app.js-core-v12.8-baby-return", startBunnies: bunnies.length });
 })();
