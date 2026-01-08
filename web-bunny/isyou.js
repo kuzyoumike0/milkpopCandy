@@ -1,8 +1,7 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋fit＋SE）完全版（V29）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋fit＋SE）完全版（V29.1）
 // ✅ 最重要（いちばんバグらない方式）
-// 1) 位置ズレ対策：hatは座標計算ゼロ → wrapのinset:0で常に100%重ね（ズレの原因を消す）
-// 2) 反転ズレ対策：ゲーム側の反転が「wrapではなくimgにだけ掛かる」ケースがある
-//    → bunny画像の“実際の反転”を検出して、hatにも同じ反転を適用（ダブル反転は回避）
+// 1) 位置ズレ対策：hatは「wrap100%」ではなく「bunny画像の枠」に追従（offset系でtransform/flipでも安定）
+// 2) 反転ズレ対策：wrapではなくimgにだけ反転が掛かるケースを検出 → hatも同じ反転を適用（ダブル反転回避）
 // ✅ assets/isyou/*.png を最優先で必ず試す
 // ✅ 装着決定時SE
 // ✅ 装着モード中：うさぎクリック→赤枠→決定 / 外すも同様
@@ -318,6 +317,7 @@
    * ========================= */
   function injectStyles() {
     if (document.getElementById("isyouStyleV29")) return;
+
     const s = document.createElement("style");
     s.id = "isyouStyleV29";
     s.textContent = `
@@ -436,7 +436,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
 .bunnyWrap{ overflow: visible !important; }
 
-/* ✅ 位置ズレの原因を絶つ：inset:0 で100%重ね（座標計算ゼロ） */
 /* ✅ “うさぎ画像の枠”に合わせて .isyouAcc を配置する（wrap全体ではない） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
@@ -447,13 +446,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   overflow: visible !important;
   transform:none !important;
 }
-
 .bunnyWrap .isyouAcc > div{
   position:absolute;
   inset:0;
   transform-origin: 50% 50%;
 }
-
 .bunnyWrap .isyouAcc img{
   display:block;
   width:100%;
@@ -462,7 +459,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   pointer-events:none;
   transform-origin: 50% 50%;
 }
-
+`;
     document.head.appendChild(s);
   }
 
@@ -785,7 +782,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（V29：inset:0 + 反転追従）
+   * Accessory render（V29.1：bunny画像枠へ追従 + 反転追従）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
@@ -840,12 +837,42 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     }
   }
 
+  // ✅ bunnyImg の offset を wrap まで積み上げ（Rect禁止：transform/flipでもズレない）
+  function getOffsetToAncestor(el, ancestor) {
+    let x = 0, y = 0;
+    let cur = el;
+    while (cur && cur !== ancestor) {
+      x += cur.offsetLeft || 0;
+      y += cur.offsetTop || 0;
+      cur = cur.offsetParent;
+    }
+    return { x, y };
+  }
+
+  // ✅ isyouAcc を「うさぎ画像の表示枠」に一致させる
+  function syncAccToBunnyImg(wrap, bunnyImg, box) {
+    if (!wrap || !bunnyImg || !box) return;
+
+    const { x, y } = getOffsetToAncestor(bunnyImg, wrap);
+    const w = bunnyImg.offsetWidth || 0;
+    const h = bunnyImg.offsetHeight || 0;
+    if (w <= 0 || h <= 0) return;
+
+    box.style.left = `${x}px`;
+    box.style.top = `${y}px`;
+    box.style.width = `${w}px`;
+    box.style.height = `${h}px`;
+  }
+
   function placeAcc(wrap, slot, itemKey) {
     if (!wrap) return;
 
     const bunnyImg = getBunnyImg(wrap);
     const box = ensureAccContainer(wrap);
     if (!box || !bunnyImg) return;
+
+    // ✅ ここが本命：hatの基準を「wrap」ではなく「bunny画像枠」に合わせる
+    syncAccToBunnyImg(wrap, bunnyImg, box);
 
     removeAccSlot(wrap, slot);
 
@@ -861,7 +888,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ 位置は常に100%重ね（inset:0）
+    // ✅ boxがbunny画像枠なので、その中で100%重ねるだけ
     node.style.left = "0px";
     node.style.top = "0px";
     node.style.width = "100%";
@@ -869,14 +896,12 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     node.style.transformOrigin = "50% 50%";
 
     // ✅ 反転は「ダブル反転回避」しながら追従
-    // - wrap自体が反転しているなら、子も勝手に反転するので追加反転しない
-    // - wrapは反転していないが bunnyImg が反転しているなら、hatも同じ反転をかける
     const wrapMir = isMirrored(wrap);
     const imgMir  = isMirrored(bunnyImg);
     const needMirror = (!wrapMir && imgMir);
 
     node.style.transform = needMirror ? "scaleX(-1)" : "none";
-    img.style.transform = "none"; // img個別は触らない（nodeで一括反転）
+    img.style.transform = "none";
 
     setSrcWithFallback(img, it.imgs, () => {});
   }
@@ -884,6 +909,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   function applyEquipsForWrap(wrap) {
     const bornAt = getBornAtFromWrap(wrap);
     if (!bornAt) return;
+
+    // ✅ 先に同期（ロード直後のズレ防止）
+    const bunnyImg = getBunnyImg(wrap);
+    const box = wrap.querySelector(":scope > .isyouAcc");
+    if (bunnyImg && box) syncAccToBunnyImg(wrap, bunnyImg, box);
 
     const eq = state.equipped[String(bornAt)] || {};
     const key = eq.hat;
@@ -1013,7 +1043,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     preloadEquipSe();
 
-    setTimeout(applyEquipsAll, 200);
+    // 初回＆遅延（画像サイズ確定の揺れ吸収）
+    setTimeout(applyEquipsAll, 120);
+    setTimeout(applyEquipsAll, 420);
     setTimeout(applyEquipsAll, 900);
     setTimeout(applyEquipsAll, 1600);
 
@@ -1021,6 +1053,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       WB?.on?.("bunnyCountChanged", () => setTimeout(applyEquipsAll, 50));
       WB?.on?.("bunnySpawned", () => setTimeout(applyEquipsAll, 50));
       WB?.on?.("resize", () => setTimeout(applyEquipsAll, 50));
+    } catch {}
+
+    // ✅ CSS/レイアウト変化でも追従し続ける（軽量）
+    try {
+      const ro = new ResizeObserver(() => {
+        if (state.mode !== "equip") setTimeout(applyEquipsAll, 0);
+      });
+      document.querySelectorAll(".bunnyWrap").forEach(w => ro.observe(w));
     } catch {}
   }
 
