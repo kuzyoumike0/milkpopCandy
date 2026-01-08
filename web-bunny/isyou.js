@@ -1,16 +1,15 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V30.4）
-// ✅ 修正点（重要）
-// 1) hatが「他のうさぎより最前に出る」問題を根絶
-//    → bunnyWrap を isolation:isolate で必ずスタッキングコンテキスト化
-// 2) hat等は “実寸サイズ（natural）” のまま、耳と耳の間にフィット（naturalPoint）
-// 3) 重さ対策：アクセがある時だけ軽い同期ループ（~12fps）維持
-// 4) 赤枠はglobalで確実表示
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V30.0）
+// ✅「赤枠が出ない」「hatが出ない」を“二度と”潰す方針（根絶）
+// 1) 赤枠は outline に依存しない：最前面オーバーレイに「選択枠DIV」を描画（確実に見える）
+// 2) hat も wrap 直下ではなく「オーバーレイ」に描画（DOM/overflow/stackingに負けない）
+// 3) 装着モード中のクリックでコインが出る問題：pointerdown/pointerup/click を capture で完全遮断（bunnyLayer内）
+// 4) ID（bornAt）が取れない環境でも動く：bornAt優先 + 取れなければ img に data-isyou-key を付与して永続キーにする（localStorageのkeyとして使う）
 //
 // ★そのまま isyou.js をこれに差し替え★
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V30.4", Date.now());
+  console.log("[isyou.js] LOADED V30.0", Date.now());
 
   /* =========================
    * Wait
@@ -159,8 +158,8 @@
    * Config / Items
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v11",
-    equipped: "wb_isyou_equipped_v11",
+    owned: "wb_isyou_owned_v8",
+    equipped: "wb_isyou_equipped_v8",
   };
 
   function imgCandidates(name) {
@@ -172,25 +171,13 @@
     ].map(absUrl);
   }
 
-  // ✅ 耳と耳の間に “実寸サイズ” で置く
-  // px/py は「うさぎ画像内のポイント」(0〜1)
-  const FIT = {
-    headBetweenEars: { mode: "naturalPoint", px: 0.50, py: 0.03, x: 0, y: -6, scale: 1 },
-    eyeMask:         { mode: "naturalPoint", px: 0.50, py: 0.43, x: 0, y:  0, scale: 1 },
-  };
-
   const ITEMS = {
-    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: FIT.headBetweenEars },
-    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900, fit: FIT.headBetweenEars },
-    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700, fit: FIT.headBetweenEars },
-    ahiru:    { slot: "hat", label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450, fit: { ...FIT.headBetweenEars, py: 0.05, y: -2 } },
-    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650, fit: FIT.eyeMask },
+    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500 },
+    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
+    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
+    ahiru:    { slot: "hat", label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450 },
+    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
   };
-
-  function getItemFit(itemKey) {
-    const it = ITEMS[itemKey];
-    return it?.fit || null;
-  }
 
   /* =========================
    * State
@@ -199,13 +186,13 @@
     owned: {},
     equipped: {},
 
-    mode: "browse",
+    mode: "browse",          // "browse" | "equip"
     selectedItem: null,
-    pendingAction: "equip",
+    pendingAction: "equip",  // "equip" | "remove"
     removeSlot: null,
 
     selectedImg: null,
-    selectedKey: null,
+    selectedKey: null,       // bornAt or fallback persistent key
   };
 
   let WB = null;
@@ -292,6 +279,7 @@
     const dk = img.getAttribute("data-isyou-key");
     if (dk) return dk;
 
+    // 「同じ構成なら安定」するキー（src + DOM内index）を作って img に埋める
     const layer = document.getElementById("bunnyLayer") || document.body;
     const imgs = Array.from(layer.querySelectorAll("img"));
     const idx = Math.max(0, imgs.indexOf(img));
@@ -303,31 +291,29 @@
 
   function getKeyFromImg(img) {
     if (!img) return null;
+
+    // 1) bornAt（最強）
     const b = imgToBornAt.get(img);
     if (b) return b;
 
+    // 2) data-bornAt系が付いてるならそれ
     const ds = img.dataset || {};
     const d = ds.bornAt || ds.bornat || ds.born_at;
     if (d) return String(d);
 
+    // 3) fallback
     return ensureFallbackKeyOnImg(img);
   }
 
   /* =========================
-   * Styles（アクセは各wrap内 / 赤枠はglobal box）
+   * Styles（赤枠はDIV、hatもDIV）
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV304")) return;
+    if (document.getElementById("isyouStyleV300")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV304";
+    s.id = "isyouStyleV300";
     s.textContent = `
-/* ✅ bunnyWrap を必ずスタッキングコンテキスト化（帽子が他うさぎより前に出る問題の根治） */
-.bunnyWrap{
-  position: relative;
-  isolation: isolate;
-}
-
 #isyouBackdrop{
   position: fixed; inset:0;
   background: rgba(0,0,0,.36);
@@ -433,40 +419,39 @@
 #isyouConfirmBar button.primary{ background:#ffd6e7; }
 #isyouConfirmBar button.danger{ background: rgba(255,80,80,.12); }
 
-/* ✅ 選択枠（確実に見えるglobal box） */
+/* ✅ overlay（選択枠＆hatはここに描画） */
+#isyouOverlay{
+  position:absolute;
+  left:0; top:0;
+  width:100%; height:100%;
+  pointer-events:none;
+  z-index: 2147482000;
+  overflow: visible;
+}
+.isyouHat{
+  position:absolute;
+  left:0; top:0;
+  width:10px; height:10px;
+  pointer-events:none;
+  transform-origin: 50% 50%;
+}
+.isyouHat img{
+  width:100%;
+  height:100%;
+  object-fit: contain;
+  display:block;
+}
 #isyouSelectBox{
-  position:fixed;
+  position:absolute;
   left:-9999px; top:-9999px;
   width:0; height:0;
   pointer-events:none;
-  z-index:2147483650;
   border-radius: 18px;
   box-sizing: border-box;
   border: 4px solid rgba(255, 64, 64, .95);
   box-shadow:
     0 0 0 3px rgba(255,255,255,.95),
     0 14px 34px rgba(0,0,0,.22);
-}
-
-/* ✅ 各うさぎwrap内アクセ：同じスタッキングで自然に重なる */
-.isyouAcc{
-  position:absolute !important;
-  left:0; top:0;
-  width:0; height:0;
-  pointer-events:none !important;
-  overflow: visible !important;
-}
-.isyouAcc .slot{
-  position:absolute;
-  left:0; top:0;
-  transform-origin: 50% 50%;
-}
-.isyouAcc img{
-  width:100%;
-  height:100%;
-  display:block;
-  object-fit: contain;
-  pointer-events:none;
 }
 `;
     document.head.appendChild(s);
@@ -510,81 +495,38 @@
   }
 
   /* =========================
-   * Red selection box (global)
+   * Overlay
    * ========================= */
+  let overlay = null;
   let selectBox = null;
 
-  function ensureSelectBox() {
-    if (selectBox && selectBox.isConnected) return selectBox;
-    selectBox = document.createElement("div");
-    selectBox.id = "isyouSelectBox";
-    document.body.appendChild(selectBox);
-    return selectBox;
-  }
+  function ensureOverlay() {
+    const host =
+      document.getElementById("bunnyLayer") ||
+      document.getElementById("field") ||
+      document.body;
 
-  function hideSelectBox() {
-    ensureSelectBox();
-    selectBox.style.left = "-9999px";
-    selectBox.style.top = "-9999px";
-    selectBox.style.width = "0px";
-    selectBox.style.height = "0px";
-  }
-
-  function syncSelectBoxToImg(img) {
-    if (!img || !img.isConnected) { hideSelectBox(); return; }
-    ensureSelectBox();
-    const ir = img.getBoundingClientRect();
-    if (ir.width <= 0 || ir.height <= 0) return;
-    selectBox.style.left = `${ir.left}px`;
-    selectBox.style.top  = `${ir.top }px`;
-    selectBox.style.width  = `${ir.width }px`;
-    selectBox.style.height = `${ir.height}px`;
-  }
-
-  /* =========================
-   * Accessory container per wrap
-   * ========================= */
-  function ensureSafePositioning(el) {
     try {
-      const pos = getComputedStyle(el).position;
-      if (pos === "static") el.style.position = "relative";
+      const pos = getComputedStyle(host).position;
+      if (pos === "static") host.style.position = "relative";
     } catch {}
-  }
 
-  function ensureWrapStacking(wrap) {
-    if (!wrap) return;
-    // ✅ これが「他うさぎより帽子が前に出る」を根治する
-    try { wrap.style.isolation = "isolate"; } catch {}
-    ensureSafePositioning(wrap);
-    try { wrap.style.overflow = "visible"; } catch {}
-  }
-
-  function getWrapFromBunnyImg(img) {
-    if (!img) return null;
-    return img.closest?.(".bunnyWrap") || img.parentElement || null;
-  }
-
-  function ensureAccContainer(wrap) {
-    if (!wrap) return null;
-    ensureWrapStacking(wrap);
-
-    let box = wrap.querySelector(":scope > .isyouAcc");
-    if (!box) {
-      box = document.createElement("div");
-      box.className = "isyouAcc";
-      wrap.appendChild(box);
+    overlay = document.getElementById("isyouOverlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "isyouOverlay";
+      host.appendChild(overlay);
     } else {
-      // DOM順で画像より後に置き直し（同wrap内で確実に上に出す）
-      try { wrap.appendChild(box); } catch {}
+      try { host.appendChild(overlay); } catch {}
     }
-    return box;
-  }
 
-  function removeAccSlot(wrap, slot) {
-    if (!wrap) return;
-    const box = wrap.querySelector(":scope > .isyouAcc");
-    if (!box) return;
-    box.querySelectorAll(`[data-slot="${slot}"]`).forEach(n => { try { n.remove(); } catch {} });
+    selectBox = overlay.querySelector("#isyouSelectBox");
+    if (!selectBox) {
+      selectBox = document.createElement("div");
+      selectBox.id = "isyouSelectBox";
+      overlay.appendChild(selectBox);
+    }
+    return overlay;
   }
 
   function isMirrored(el) {
@@ -599,149 +541,81 @@
     }
   }
 
-  // rect差分で “wrap内座標” に同期（flip/transformしても安定）
-  function syncAccToImgRect(wrap, img, box) {
-    if (!wrap || !img || !box) return false;
-    try {
-      const wr = wrap.getBoundingClientRect();
-      const ir = img.getBoundingClientRect();
-      const w = ir.width || 0;
-      const h = ir.height || 0;
-      if (w <= 0 || h <= 0) return false;
-
-      box.style.left = `${(ir.left - wr.left)}px`;
-      box.style.top  = `${(ir.top  - wr.top )}px`;
-      box.style.width  = `${w}px`;
-      box.style.height = `${h}px`;
-      return true;
-    } catch {
-      return false;
-    }
+  function hideSelectBox() {
+    ensureOverlay();
+    selectBox.style.left = "-9999px";
+    selectBox.style.top = "-9999px";
+    selectBox.style.width = "0px";
+    selectBox.style.height = "0px";
   }
 
-  // ✅ fit（実寸 + 耳の間）を反映
-  function applyFitToNode(node, fit, accImg) {
-    const mode = String(fit?.mode || "ratio");
+  function syncSelectBoxToImg(img) {
+    if (!img || !img.isConnected) { hideSelectBox(); return; }
+    ensureOverlay();
+    const ovRect = overlay.getBoundingClientRect();
+    const ir = img.getBoundingClientRect();
+    if (ir.width <= 0 || ir.height <= 0) return;
 
-    if (mode === "naturalPoint") {
-      const scale = Number(fit?.scale ?? 1) || 1;
-      const nw = (accImg?.naturalWidth  || 0);
-      const nh = (accImg?.naturalHeight || 0);
-
-      const wpx = Math.max(1, Math.round((nw || 64) * scale));
-      const hpx = Math.max(1, Math.round((nh || 64) * scale));
-
-      node.style.width  = `${wpx}px`;
-      node.style.height = `${hpx}px`;
-
-      const px = Math.min(1, Math.max(0, Number(fit?.px ?? 0.5)));
-      const py = Math.min(1, Math.max(0, Number(fit?.py ?? 0.0)));
-
-      const x = Number(fit?.x ?? 0) || 0;
-      const y = Number(fit?.y ?? 0) || 0;
-
-      node.style.left = `${px * 100}%`;
-      node.style.top  = `${py * 100}%`;
-      node.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
-      return;
-    }
-
-    // fallback（使わない想定）
-    node.style.left = "0%";
-    node.style.top  = "0%";
-    node.style.width = "100%";
-    node.style.height = "100%";
-    node.style.transform = "";
+    selectBox.style.left = `${ir.left - ovRect.left}px`;
+    selectBox.style.top  = `${ir.top  - ovRect.top }px`;
+    selectBox.style.width  = `${ir.width }px`;
+    selectBox.style.height = `${ir.height}px`;
   }
 
-  // アクセ要素の再利用（重くならない）
-  const liveAcc = new Map(); // key -> { img, wrap, box, slotNodes: Map(slot->node), itemBySlot: Map(slot->itemKey) }
+  function removeHatByKey(key, slot = "hat") {
+    if (!key) return;
+    ensureOverlay();
+    overlay.querySelectorAll(`.isyouHat[data-key="${CSS.escape(String(key))}"][data-slot="${CSS.escape(slot)}"]`)
+      .forEach(n => { try { n.remove(); } catch {} });
+  }
 
-  function upsertAcc(img, slot, itemKey) {
+  function placeHatByImg(img, itemKey) {
+    if (!img) return;
     const key = getKeyFromImg(img);
     if (!key) return;
-
-    const wrap = getWrapFromBunnyImg(img);
-    if (!wrap) return;
-
-    const box = ensureAccContainer(wrap);
-    if (!box) return;
-
-    // entry
-    let ent = liveAcc.get(String(key));
-    if (!ent) {
-      ent = { img, wrap, box, slotNodes: new Map(), itemBySlot: new Map() };
-      liveAcc.set(String(key), ent);
-    } else {
-      ent.img = img;
-      ent.wrap = wrap;
-      ent.box = box;
-    }
-
-    // slot node
-    let node = ent.slotNodes.get(slot);
-    if (!node || !node.isConnected) {
-      node = document.createElement("div");
-      node.className = "slot";
-      node.dataset.slot = slot;
-      ent.box.appendChild(node);
-      ent.slotNodes.set(slot, node);
-    } else {
-      try { ent.box.appendChild(node); } catch {}
-    }
-
-    ent.itemBySlot.set(slot, itemKey);
-
-    // img tag
-    let accImg = node.querySelector("img");
-    if (!accImg) {
-      accImg = document.createElement("img");
-      accImg.alt = slot;
-      node.appendChild(accImg);
-    }
 
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // 反転追従（wrap単位の重なりなので自然）
-    const wrapMir = isMirrored(wrap);
-    const imgMir  = isMirrored(img);
-    // nodeのtransformは “fit” が使うので、反転は img側で行う
-    accImg.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
+    ensureOverlay();
+    removeHatByKey(key, "hat");
 
-    // src
-    setSrcWithFallback(accImg, it.imgs, () => {
-      // ✅ 読み込み後に実寸 fit を確定
-      const fit = getItemFit(itemKey);
-      if (fit) applyFitToNode(node, fit, accImg);
-      scheduleSyncLoop();
+    const hat = document.createElement("div");
+    hat.className = "isyouHat";
+    hat.dataset.key = String(key);
+    hat.dataset.slot = "hat";
+
+    const hatImg = document.createElement("img");
+    hatImg.alt = "hat";
+    hat.appendChild(hatImg);
+    overlay.appendChild(hat);
+
+    const sync = () => {
+      if (!hat.isConnected) return;
+      if (!img.isConnected) { try { hat.remove(); } catch {} ; return; }
+
+      const ovRect = overlay.getBoundingClientRect();
+      const ir = img.getBoundingClientRect();
+      if (ir.width <= 0 || ir.height <= 0) return;
+
+      hat.style.left = `${ir.left - ovRect.left}px`;
+      hat.style.top  = `${ir.top  - ovRect.top }px`;
+      hat.style.width  = `${ir.width }px`;
+      hat.style.height = `${ir.height}px`;
+
+      // 画像が反転してたら帽子も反転（常に追従）
+      hat.style.transform = isMirrored(img) ? "scaleX(-1)" : "none";
+    };
+
+    sync();
+    requestAnimationFrame(sync);
+    setTimeout(sync, 60);
+    setTimeout(sync, 180);
+
+    setSrcWithFallback(hatImg, it.imgs, () => {
+      requestAnimationFrame(sync);
+      setTimeout(sync, 80);
     });
-
-    // 先に仮適用（naturalWidthまだ0なら64基準）
-    const fit = getItemFit(itemKey);
-    if (fit) applyFitToNode(node, fit, accImg);
-
-    scheduleSyncLoop();
-  }
-
-  function removeAccByKey(key, slot = "hat") {
-    const ent = liveAcc.get(String(key));
-    if (ent?.slotNodes) {
-      const node = ent.slotNodes.get(slot);
-      if (node && node.isConnected) { try { node.remove(); } catch {} }
-      ent.slotNodes.delete(slot);
-      ent.itemBySlot.delete(slot);
-      if (ent.slotNodes.size === 0) liveAcc.delete(String(key));
-    }
-
-    // 既存DOMも念のため削除
-    const imgs = getAllBunnyImgs();
-    for (const img of imgs) {
-      const k = getKeyFromImg(img);
-      if (String(k) !== String(key)) continue;
-      const wrap = getWrapFromBunnyImg(img);
-      removeAccSlot(wrap, slot);
-    }
   }
 
   /* =========================
@@ -749,19 +623,25 @@
    * ========================= */
   function getAllBunnyImgs() {
     const out = [];
+
+    // WB優先
     const list = getBunnies();
     for (const b of list) {
       const img = b?.img || b?.bunnyImg || b?.node;
       if (img && img.tagName === "IMG") out.push(img);
     }
+
+    // DOM fallback
     const layer = document.getElementById("bunnyLayer") || document.body;
     layer.querySelectorAll("img").forEach((img) => {
       if (img && img.tagName === "IMG") out.push(img);
     });
+
     return Array.from(new Set(out));
   }
 
   function applyEquipsAll() {
+    ensureOverlay();
     rebuildImgBornAtMap();
 
     const imgs = getAllBunnyImgs();
@@ -772,85 +652,14 @@
       const eq = state.equipped[String(key)] || {};
       const hatKey = eq.hat;
 
-      if (hatKey && ITEMS[hatKey]) upsertAcc(img, "hat", hatKey);
-      else {
-        const wrap = getWrapFromBunnyImg(img);
-        removeAccSlot(wrap, "hat");
-        liveAcc.delete(String(key));
-      }
+      if (hatKey && ITEMS[hatKey]) placeHatByImg(img, hatKey);
+      else removeHatByKey(key, "hat");
     }
 
+    // 選択枠も追従
     if (state.mode === "equip" && state.selectedImg) {
       syncSelectBoxToImg(state.selectedImg);
-    }
-
-    scheduleSyncLoop();
-  }
-
-  /* =========================
-   * ✅ 軽量同期ループ（重さ解消）
-   * ========================= */
-  let __syncRaf = 0;
-  let __syncLast = 0;
-
-  function scheduleSyncLoop() {
-    if (__syncRaf) return;
-    if (liveAcc.size === 0 && !(state.mode === "equip" && state.selectedImg)) return;
-    __syncRaf = requestAnimationFrame(syncTick);
-  }
-
-  function syncTick(ts) {
-    __syncRaf = 0;
-
-    if (ts - __syncLast < 80) {
-      scheduleSyncLoop();
-      return;
-    }
-    __syncLast = ts;
-
-    if (state.mode === "equip" && state.selectedImg) {
-      syncSelectBoxToImg(state.selectedImg);
-    }
-
-    if (liveAcc.size > 0) {
-      for (const [key, ent] of liveAcc) {
-        const img = ent.img;
-        if (!img || !img.isConnected) { liveAcc.delete(key); continue; }
-
-        const wrap = getWrapFromBunnyImg(img);
-        if (!wrap) { liveAcc.delete(key); continue; }
-        ensureWrapStacking(wrap);
-
-        const box = ensureAccContainer(wrap);
-        if (!box) { liveAcc.delete(key); continue; }
-
-        ent.wrap = wrap;
-        ent.box = box;
-
-        syncAccToImgRect(wrap, img, box);
-
-        // fit/反転を維持
-        const wrapMir = isMirrored(wrap);
-        const imgMir  = isMirrored(img);
-
-        for (const [slot, node] of ent.slotNodes.entries()) {
-          if (!node || !node.isConnected) continue;
-
-          const itemKey = ent.itemBySlot.get(slot);
-          const it = itemKey ? ITEMS[itemKey] : null;
-          const accImg = node.querySelector("img");
-
-          if (it && accImg) {
-            const fit = getItemFit(itemKey);
-            if (fit) applyFitToNode(node, fit, accImg);
-            accImg.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
-          }
-        }
-      }
-    }
-
-    if (liveAcc.size > 0 || (state.mode === "equip" && state.selectedImg)) {
-      scheduleSyncLoop();
+      requestAnimationFrame(() => syncSelectBoxToImg(state.selectedImg));
     }
   }
 
@@ -862,8 +671,6 @@
 
   function ensureModal() {
     injectStyles();
-    ensureSelectBox();
-
     if (!backdrop) {
       backdrop = document.createElement("div");
       backdrop.id = "isyouBackdrop";
@@ -874,7 +681,6 @@
       modal.id = "isyouModal";
       backdrop.appendChild(modal);
     }
-
     backdrop.onclick = (e) => {
       if (state.mode === "equip") { e.stopPropagation(); return; }
       if (e.target === backdrop) closeModal();
@@ -1158,9 +964,7 @@
     state.equipped[id][it.slot] = itemKey;
 
     saveAll();
-
-    upsertAcc(img, it.slot, itemKey);
-    scheduleSyncLoop();
+    applyEquipsAll();
 
     playEquipSe();
     toast(`✨ 装着：${it.label}`);
@@ -1168,8 +972,9 @@
   }
 
   function confirmRemove() {
+    const img = state.selectedImg;
     const key = state.selectedKey;
-    if (!key) return;
+    if (!img || !key) return;
 
     const slot = state.removeSlot || "hat";
     const id = String(key);
@@ -1179,14 +984,14 @@
     if (!Object.keys(state.equipped[id]).length) delete state.equipped[id];
 
     saveAll();
-    removeAccByKey(key, slot);
+    removeHatByKey(key, slot);
 
     toast("🧺 外したよ！");
     cancelEquipMode(false);
   }
 
   /* =========================
-   * Selection（クリックでimg選択 → 赤枠追従）
+   * Selection（クリックでimg選択 → 赤枠DIVを同期）
    * ========================= */
   function selectImg(img) {
     if (!img) return;
@@ -1197,8 +1002,11 @@
     state.selectedImg = img;
     state.selectedKey = key;
 
+    ensureOverlay();
     syncSelectBoxToImg(img);
-    scheduleSyncLoop();
+    requestAnimationFrame(() => syncSelectBoxToImg(img));
+    setTimeout(() => syncSelectBoxToImg(img), 60);
+
     updateConfirmBar();
   }
 
@@ -1216,6 +1024,7 @@
     if (!e?.target) return;
     if (!isInsideBunnyLayer(e.target)) return;
 
+    // モーダル内は除外
     if (backdrop && backdrop.style.display !== "none") {
       const inModal = e.target?.closest?.("#isyouModal");
       if (inModal) return;
@@ -1239,6 +1048,7 @@
 
     if (img && img.tagName === "IMG") selectImg(img);
   }
+
   function onPointerUpCapture(e) { blockGameClickIfEquipMode(e); }
   function onClickCapture(e) { blockGameClickIfEquipMode(e); }
 
@@ -1272,34 +1082,34 @@
     WB = wb || null;
     loadAll();
     injectStyles();
-    ensureSelectBox();
+    ensureOverlay();
 
     injectHudButton();
     ensureModal();
     ensureConfirmBar();
 
+    // ✅ 3種をcaptureで遮断（コイン根絶）
     document.addEventListener("pointerdown", onPointerDownCapture, true);
     document.addEventListener("pointerup", onPointerUpCapture, true);
     document.addEventListener("click", onClickCapture, true);
 
     preloadEquipSe();
 
+    // 初回＆遅延（画像確定待ち）
     setTimeout(applyEquipsAll, 120);
     setTimeout(applyEquipsAll, 420);
     setTimeout(applyEquipsAll, 900);
     setTimeout(applyEquipsAll, 1600);
 
-    window.addEventListener("resize", () => scheduleSyncLoop(), { passive: true });
-    window.addEventListener("scroll",  () => scheduleSyncLoop(), { passive: true });
+    // レイアウト変化追従
+    window.addEventListener("resize", () => setTimeout(applyEquipsAll, 0), { passive: true });
+    window.addEventListener("scroll",  () => setTimeout(applyEquipsAll, 0), { passive: true });
 
+    // DOM追加にも追従
     try {
       const layer = document.getElementById("bunnyLayer");
       if (layer) {
-        let t = 0;
-        const mo = new MutationObserver(() => {
-          clearTimeout(t);
-          t = setTimeout(() => applyEquipsAll(), 50);
-        });
+        const mo = new MutationObserver(() => setTimeout(applyEquipsAll, 0));
         mo.observe(layer, { childList: true, subtree: true, attributes: true });
       }
     } catch {}
@@ -1309,14 +1119,14 @@
     injectStyles();
     loadAll();
     injectHudButton();
-    ensureSelectBox();
+    ensureOverlay();
 
     if (window.WB) attach(window.WB);
     else waitFor(() => window.WB).then((wb) => attach(wb)).catch(() => attach(null));
   });
 
   /* =========================
-   * Debug / public
+   * Public debug
    * ========================= */
   window.ISYOU = {
     openModal,
@@ -1324,6 +1134,5 @@
     applyEquipsAll,
     _state: state,
     _items: ITEMS,
-    _liveAcc: () => liveAcc,
   };
 })();
