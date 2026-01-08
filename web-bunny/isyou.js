@@ -1,9 +1,9 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（V23）
-// ✅ FIX: 反転してもズレない → getBoundingClientRect の“見た目矩形”を wrap 内座標に変換して完全一致
-// ✅ FIX: partyhat 以外の hat も「うさぎ同サイズ同位置」に強制（hatスロットは全て full-fit）
-// ✅ FIX: assets/isyou/*.png を最優先で必ず試す（表示されないミスを二度としない）
-// ✅ 追加: aimasuku.png（face）/ ahiru.png（pet）
-// ✅ bunnyWrap の既存レイアウトを壊さない（positionは static の場合だけ relative を付与）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit＋SE）完全版（V24）
+// ✅ FIX: 反転してもズレない → getBoundingClientRect の“見た目矩形差分”で wrap 内座標に変換して一致
+// ✅ FIX: hat は全部「うさぎ同サイズ同位置」（full）
+// ✅ FIX: aimasuku / ahiru のズレ → アンカー計算の “謎の -0.40” を廃止し、slotごとに lift を明示（face/pet は lift=0）
+// ✅ NEW: かぶせた（装着決定）時にSEを鳴らす（複数候補を順に試す）
+// ✅ assets/isyou/*.png を最優先で必ず試す（表示ミスを二度としない）
 
 (() => {
   "use strict";
@@ -140,11 +140,55 @@
   }
 
   /* =========================
+   * SE（装着時）
+   * ========================= */
+  const EQUIP_SE_CANDIDATES = [
+    "./assets/isyou_se.mp3",
+    "./assets/equip.mp3",
+    "./assets/poyo.mp3",
+    "./assets/coin.mp3",
+  ];
+
+  let __equipSeAudio = null;
+  let __equipSeReady = false;
+
+  function preloadEquipSe() {
+    if (__equipSeAudio) return;
+    __equipSeAudio = new Audio();
+    __equipSeAudio.preload = "auto";
+
+    // 最初に成功したやつを固定
+    let idx = 0;
+    const tryNext = () => {
+      if (!__equipSeAudio) return;
+      if (idx >= EQUIP_SE_CANDIDATES.length) return;
+      __equipSeReady = false;
+      __equipSeAudio.src = EQUIP_SE_CANDIDATES[idx++];
+      __equipSeAudio.load();
+    };
+
+    __equipSeAudio.oncanplaythrough = () => { __equipSeReady = true; };
+    __equipSeAudio.onerror = () => tryNext();
+
+    tryNext();
+  }
+
+  function playEquipSe() {
+    try {
+      preloadEquipSe();
+      if (!__equipSeAudio) return;
+      // ユーザー操作（決定ボタン）内で鳴るので通常OK
+      __equipSeAudio.currentTime = 0;
+      __equipSeAudio.play().catch(() => {});
+    } catch {}
+  }
+
+  /* =========================
    * Config
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v6",
-    equipped: "wb_isyou_equipped_v6",
+    owned: "wb_isyou_owned_v7",
+    equipped: "wb_isyou_equipped_v7",
   };
 
   // ✅ assets/isyou を先頭固定（表示ミスを二度としない）
@@ -162,19 +206,22 @@
   }
 
   const ITEMS = {
-    // ✅ hatは全部 “full” に強制（= うさぎ同サイズ同位置）
+    // ✅ hat は全部 full（= うさぎ同サイズ同位置）
     partyhat: { slot: "hat",  label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
     crown:    { slot: "hat",  label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900, fit: "full" },
     ribbon:   { slot: "hat",  label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700, fit: "full" },
 
     // 追加
-    aimasuku: { slot: "face", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
-    ahiru:    { slot: "pet",  label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450 },
+    aimasuku: { slot: "face", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650, fit: "anchor" },
+    ahiru:    { slot: "pet",  label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450, fit: "anchor" },
   };
 
-  const ANCHOR = {
-    face: { x: 0.50, y: 0.34, w: 0.55 },
-    pet:  { x: 0.78, y: 0.74, w: 0.38 },
+  // ✅ “謎の -0.40” を廃止：slotごとに lift を明示（face/pet は lift=0）
+  const SLOT_ANCHOR = {
+    // face: 目のあたりに「かぶせる」想定（上に持ち上げない）
+    face: { x: 0.50, y: 0.42, w: 0.55, lift: 0.00 },
+    // pet: 足元寄り（上に持ち上げない）
+    pet:  { x: 0.78, y: 0.80, w: 0.40, lift: 0.00 },
   };
 
   /* =========================
@@ -286,9 +333,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV23")) return;
+    if (document.getElementById("isyouStyleV24")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV23";
+    s.id = "isyouStyleV24";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -792,7 +839,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
   }
 
-  // ✅ 見た目矩形（transform/flip含む）を wrap 内座標に変換 → 100%一致
+  // ✅ 見た目矩形（transform/flip含む）を wrap 内座標に変換 → 一致
   function rectInWrapByClientRect(wrap, imgEl) {
     const br = imgEl.getBoundingClientRect();
     const wr = wrap.getBoundingClientRect();
@@ -800,7 +847,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       left: br.left - wr.left,
       top: br.top - wr.top,
       w: br.width,
-      h: br.height
+      h: br.height,
     };
   }
 
@@ -835,14 +882,19 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.height = `${r.h}px`;
     }
 
-    function fitAnchor(slotKey) {
+    function fitSlotAnchor(slotKey) {
       const r = rectInWrapByClientRect(wrap, bunnyImg);
       if (r.w <= 1 || r.h <= 1) return;
 
-      const a = ANCHOR[slotKey];
-      const pw = r.w * (a.w || 0.55);
-      const px = r.left + r.w * (a.x || 0.5) - pw / 2;
-      const py = r.top  + r.h * (a.y || 0.34) - pw * 0.40;
+      const a = SLOT_ANCHOR[slotKey];
+      if (!a) return;
+
+      const pw = r.w * (a.w ?? 0.55);
+      const px = r.left + r.w * (a.x ?? 0.5) - pw / 2;
+
+      // ✅ lift を明示（face/pet は 0）
+      const lift = (a.lift ?? 0); // 0..1（pw基準）
+      const py = r.top + r.h * (a.y ?? 0.5) - pw * lift;
 
       node.style.left = `${px}px`;
       node.style.top  = `${py}px`;
@@ -854,7 +906,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const fit =
       (slot === "hat" || it.fit === "full")
         ? fitFullSameAsBunny
-        : () => fitAnchor(slot);
+        : () => fitSlotAnchor(slot);
 
     setSrcWithFallback(img, it.imgs, () => {
       requestAnimationFrame(() => requestAnimationFrame(fit));
@@ -909,6 +961,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     saveAll();
     applyEquipsForWrap(wrap);
+
+    // ✅ かぶせた時のSE
+    playEquipSe();
 
     toast(`✨ 装着：${it.label}`);
     cancelEquipMode(false);
@@ -999,6 +1054,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     ensureConfirmBar();
 
     document.addEventListener("pointerdown", onPointerDownCapture, true);
+
+    // SE を先読み（ユーザー操作で再生されるので安全）
+    preloadEquipSe();
 
     setTimeout(applyEquipsAll, 200);
     setTimeout(applyEquipsAll, 900);
