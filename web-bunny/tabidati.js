@@ -18,6 +18,14 @@
 
   // はみ出し防止クランプ用
   let clampTimer = null;
+function syAdd(key, n = 1) {
+  try {
+    if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
+  } catch {}
+  // syougou.js がまだ来てない時の保険
+  window.__syougouQueue = window.__syougouQueue || [];
+  window.__syougouQueue.push([key, n]);
+}
 
   /* =========================
    * WB互換ヘルパ（v12.8対応）
