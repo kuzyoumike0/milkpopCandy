@@ -1,4 +1,4 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（partyhat表示FIX）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（partyhat=うさぎ同サイズ同位置FIX）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
@@ -9,7 +9,8 @@
 // ✅ FIX：位置計算は offset 優先（transform/flipでも安定）+ 連続fit
 // ✅ FIX：partyhat等が404でも「候補パスを順に試す」ので必ず表示される（環境差吸収）
 // ✅ FIX：うさぎが下がるのを遮断（line-height/font-size/余白）
-// ✅ FIX：bornAt の取得を強化（WBのwrap参照差異でも必ず拾う → “装着したのに出ない”の主要原因を潰す）
+// ✅ FIX：bornAt の取得を強化（WBのwrap参照差異でも必ず拾う）
+// ✅ NEW：partyhat は「うさぎ画像と完全一致（同サイズ・同位置）」で重ねる
 // ✅ 重要：hat は置き換え（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
 
@@ -151,26 +152,23 @@
 
   function imgCandidates(name) {
     return [
-      // isyou.js と同じフォルダ基準
       toAbs(`./${name}`),
-
-      // 相対パス（ページ基準）
       "./assets/isyou/" + name,
       "./assets/" + name,
       "./isyou/" + name,
-
-      // ルート基準（/assets/...）
       "/assets/isyou/" + name,
       "/assets/" + name,
     ];
   }
 
+  // ✅ partyhat を「うさぎ同サイズ同位置」にするため fit:"full" を追加
   const ITEMS = {
-    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500 },
+    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
     crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
     ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
   };
 
+  // 通常の帽子位置（partyhatはfullなので使わない）
   const ANCHOR = {
     hat: { x: 0.50, y: 0.06, w: 0.58 },
   };
@@ -252,11 +250,9 @@
     return [];
   }
 
-  // ✅ bornAt 取得を強化（ここがズレると “装着したのに表示されない” になる）
   function getBornAtFromWrap(wrap) {
     if (!wrap) return null;
 
-    // dataset/attribute に入ってる環境もある
     const ds = wrap.dataset || {};
     const d1 = ds.bornAt || ds.bornat || ds.born_at;
     if (d1) return d1;
@@ -266,18 +262,15 @@
 
     const list = getBunnies();
 
-    // 参照が完全一致
     let b = list.find((x) => x?.wrap === wrap || x?.el === wrap || x?.root === wrap);
     if (b?.bornAt != null) return b.bornAt;
 
-    // “wrapが別要素” な実装（子孫一致で拾う）
     b = list.find((x) => {
       const w = x?.wrap || x?.el || x?.root;
       return w && (w === wrap || w.contains?.(wrap) || wrap.contains?.(w));
     });
     if (b?.bornAt != null) return b.bornAt;
 
-    // “画像一致” で拾う（最後の保険）
     const img = wrap.querySelector(":scope > img.bunny, :scope > img") || wrap.querySelector("img.bunny, img");
     if (img) {
       b = list.find((x) => x?.img === img || x?.bunnyImg === img || x?.node === img);
@@ -291,9 +284,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV13")) return;
+    if (document.getElementById("isyouStyleV14")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV13";
+    s.id = "isyouStyleV14";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -408,7 +401,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ✅ うさぎ下がり遮断（位置はアプリ側を尊重して上書きしない） */
+/* ✅ うさぎ下がり遮断 */
 .bunnyWrap{
   overflow: visible !important;
   display: block !important;
@@ -638,7 +631,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       </div>
     `;
 
-    // サムネは候補パスで確実に表示
     modal.querySelectorAll("img[data-itemthumb]").forEach((img) => {
       const key = img.getAttribute("data-itemthumb");
       const it = ITEMS[key];
@@ -824,9 +816,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    const a = ANCHOR[slot] || ANCHOR.hat;
-
-    function fit() {
+    function rectInWrap() {
       let w = bunnyImg.offsetWidth || 0;
       let h = bunnyImg.offsetHeight || 0;
       let left = bunnyImg.offsetLeft || 0;
@@ -840,20 +830,43 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
         left = (br.left - wr.left);
         top  = (br.top  - wr.top);
       }
+      return { w, h, left, top };
+    }
 
-      if (w <= 1 || h <= 1) return;
+    // ✅ partyhat: うさぎ画像と完全一致（同サイズ・同位置）
+    function fitFull() {
+      const r = rectInWrap();
+      if (r.w <= 1 || r.h <= 1) return;
 
-      const pw = w * (a.w || 0.58);
-      const px = left + w * (a.x || 0.5) - pw / 2;
-      const py = top  + h * (a.y || 0.06) - pw * 0.40;
+      node.style.left = `${r.left}px`;
+      node.style.top  = `${r.top}px`;
+      node.style.width  = `${r.w}px`;
+      node.style.height = `${r.h}px`;
+
+      // 画像は枠にぴったり（partyhat.pngが“うさぎ同サイズセル”なら完全一致）
+      img.style.width = "100%";
+      img.style.height = "100%";
+      img.style.objectFit = "contain";
+    }
+
+    // 通常帽子（耳間に置く）
+    const a = ANCHOR[slot] || ANCHOR.hat;
+    function fitAnchor() {
+      const r = rectInWrap();
+      if (r.w <= 1 || r.h <= 1) return;
+
+      const pw = r.w * (a.w || 0.58);
+      const px = r.left + r.w * (a.x || 0.5) - pw / 2;
+      const py = r.top  + r.h * (a.y || 0.06) - pw * 0.40;
 
       node.style.left = `${px}px`;
       node.style.top  = `${py}px`;
-      node.style.width = `${pw}px`;
+      node.style.width  = `${pw}px`;
       node.style.height = `${pw}px`;
     }
 
-    // ✅ 候補パスを順に試す（表示されない最大原因を潰す）
+    const fit = (it.fit === "full") ? fitFull : fitAnchor;
+
     setSrcWithFallback(img, it.imgs, () => {
       requestAnimationFrame(() => requestAnimationFrame(fit));
     });
@@ -940,7 +953,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected"));
     wrap.classList.add("isyouSelected");
     state.selectedWrap = wrap;
-    state.selectedBornAt = getBornAtFromWrap(wrap); // ✅ 強化版
+    state.selectedBornAt = getBornAtFromWrap(wrap);
     updateConfirmBar();
   }
 
@@ -999,7 +1012,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     document.addEventListener("pointerdown", onPointerDownCapture, true);
 
-    // 初期＆遅延で2回（画像ロード遅れ対策）
     setTimeout(applyEquipsAll, 200);
     setTimeout(applyEquipsAll, 900);
     setTimeout(applyEquipsAll, 1600);
