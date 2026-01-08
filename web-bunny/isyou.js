@@ -1,4 +1,4 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋flip補正＋赤枠選択）完全版
+// isyou.js — お洒落（ショップ＋着せ替え＋flip補正＋赤枠選択）完全版（FIX：装着中コイン落とし停止＆付け替え可＆SE）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
@@ -7,8 +7,9 @@
 // ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる：autoズレ対策）
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ FIX：他のうさぎより帽子だけ上に出ない（bunnyWrapをスタッキングコンテキスト化＋zを小さく）
-// ✅ NEW：衣装付け替え（装着）中は「コイン落とし」を止める（captureで止める）
-// ✅ NEW：装着成功時に Onoma-Pop03-1(High).mp3 を鳴らす
+// ✅ FIX：装着モード中「コイン落とし系クリック」を止めつつ、付け替えクリックは動く（listener 1本化）
+// ✅ SE：装着成功時に Onoma-Pop03-1(High).mp3 を鳴らす（Audio）
+// ✅ お洒落ボタンのclickに“別モジュールtap”が混ざってた問題を除去（openModalだけ）
 
 (() => {
   "use strict";
@@ -100,7 +101,6 @@
           z: 2,
           keepUpright: false,
         },
-        // ✅ aimasuku：うさぎと完全一致（同サイズ・同位置）
         aimasuku: {
           label: "アイマスク",
           img: "/assets/isyou/aimasuku.png",
@@ -132,7 +132,6 @@
        * ========================= */
       // 置き場所が違う場合はここだけパス変更してください
       const EQUIP_SE_SRC = "/assets/Onoma-Pop03-1(High).mp3";
-
       const equipSE = new Audio(EQUIP_SE_SRC);
       equipSE.preload = "auto";
       equipSE.volume = 1.0;
@@ -151,9 +150,9 @@
        * CSS
        * ========================= */
       (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV12")) return;
+        if (document.getElementById("isyouStyleFinalV13")) return;
         const s = document.createElement("style");
-        s.id = "isyouStyleFinalV12";
+        s.id = "isyouStyleFinalV13";
         s.textContent = `
 #hud{ pointer-events:auto; }
 #isyouBtn{
@@ -552,8 +551,8 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         render();
       }
 
+      // ✅ お洒落ボタン：openModalだけ（他モジュールtap混入を除去）
       btn.addEventListener("click", () => {
-        // ここで一度だけ audio unlock を試す（以降は装着時に play できる）
         WB.unlockAudioOnce?.();
         openModal();
       });
@@ -748,54 +747,46 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       /* =========================
-       * ✅ 装着中は「コイン落とし系クリック」を止める（最優先capture）
+       * ✅ 装着モード：付け替えできて、コインは落とさない（1本化）
        * ========================= */
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
 
-        // モーダル操作は止めない
-        if (e.target?.closest?.(".isyouModal")) return;
-
-        // うさぎ周りを触ったら、その先のクリック処理（コイン落とし等）を止める
-        const wrap = e.target?.closest?.(".bunnyWrap");
-        if (wrap) {
-          try { e.preventDefault?.(); } catch {}
-          try { e.stopPropagation?.(); } catch {}
-          try { e.stopImmediatePropagation?.(); } catch {}
-        }
-      }, { capture: true });
-
-      /* =========================
-       * Equip mode click
-       * ========================= */
-      document.addEventListener("pointerdown", (e) => {
-        if (!equipMode) return;
+        // モーダル内は通常操作（ボタン押せる）
         if (e.target?.closest?.(".isyouModal")) return;
 
         const wrap = e.target?.closest?.(".bunnyWrap");
         if (!wrap) return;
 
-        const bunny = (getBunnyList() || []).find((b) => b && b.wrap === wrap) || null;
-        if (!bunny || bunny.isBaby) return;
+        // ここから先：必ず「通常ゲーム側のクリック処理（コイン落とし等）」を止める
+        // ※ ただし装着処理はこの中でやり切る
+        try { e.preventDefault?.(); } catch {}
 
-        if (selectedBornAt == null) {
-          setSelectedTarget(bunny);
+        const bunny = (getBunnyList() || []).find((b) => b && b.wrap === wrap) || null;
+        if (!bunny || bunny.isBaby) {
+          try { e.stopPropagation?.(); } catch {}
+          try { e.stopImmediatePropagation?.(); } catch {}
           return;
         }
 
-        if (bunny.bornAt === selectedBornAt) {
+        // --- 装着ロジック ---
+        if (selectedBornAt == null) {
+          setSelectedTarget(bunny);
+        } else if (bunny.bornAt === selectedBornAt) {
           let pickedHat = null;
           for (const k of selectedItems) {
             const it = ITEMS[k];
             if (it && String(it.slot || "") === "hat") { pickedHat = k; break; }
           }
-
-          if (pickedHat) setEquipExclusiveBySlot(bunny, pickedHat);
+          if (pickedHat) setEquipExclusiveBySlot(bunny, pickedHat); // ←中でSE鳴る
           else clearEquipBySlot(bunny, "hat");
-          return;
+        } else {
+          setSelectedTarget(bunny);
         }
 
-        setSelectedTarget(bunny);
+        // 最後に止める（ゲーム側のコイン落とし等へ流さない）
+        try { e.stopPropagation?.(); } catch {}
+        try { e.stopImmediatePropagation?.(); } catch {}
       }, { capture: true });
 
       /* =========================
@@ -819,7 +810,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (equip blocks coin drop + equip se)");
+      console.log("[isyou] ready (equip blocks coin drop + equip works + equip se)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
