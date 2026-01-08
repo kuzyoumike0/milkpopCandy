@@ -1,852 +1,732 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋flip補正＋赤枠選択）完全版
-// ✅ #hud待機して「お洒落ボタン」が必ず出る
-// ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
-// ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
-// ✅ 赤枠は見えるように選択中だけ z-index を上げる
-// ✅ FIX：アンカー座標を getBoundingClientRect ではなく offset 系で取る（flipでもズレない）
-// ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる：autoズレ対策）
-// ✅ 重要：hat は「置き換え」（同時に1つだけ）
-// ✅ FIX：他のうさぎより帽子だけ上に出ない（bunnyWrapをスタッキングコンテキスト化＋zを小さく）
-// ✅ NEW：衣装付け替え（装着）中は「コイン落とし」を止める（captureで止める）
-// ✅ NEW：装着/付け替え/外す 成功時に /assets/isyou/Onoma-Pop03-1(High).mp3 を鳴らす
-// ✅ NEW：装着タブに「外す」ボタン（選択中のうさぎのhatを外す）
-
 (() => {
   "use strict";
+  console.log("[app.js] LOADED v16.3 (idle drop OFF + baby size stable via wrap-scale)", Date.now());
 
-  const WAIT_MS = 12000;
-  const TICK_MS = 50;
+  /* =========================
+   * Assets / Defs
+   * ========================= */
+  const ASSETS = {
+    babyBunny: "./assets/babybunny.png",
+    hart: "./assets/hart.png",
 
-  function waitFor(getter, timeoutMs = WAIT_MS) {
-    const start = Date.now();
-    return new Promise((resolve, reject) => {
-      const t = setInterval(() => {
-        try {
-          const v = getter();
-          if (v) { clearInterval(t); resolve(v); return; }
-        } catch {}
-        if (Date.now() - start > timeoutMs) {
-          clearInterval(t);
-          reject(new Error("waitFor timeout"));
-        }
-      }, TICK_MS);
-    });
+    coinSE: "./assets/coin.mp3",
+    poyoSE: "./assets/poyo.mp3",
+    babySE: "./assets/babybunny.mp3",
+    tabidatiSE: "./assets/tabidati.mp3",
+
+    ougonUnchi: "./assets/ougonunchi.png",
+    coins: [
+      "./assets/coin1.png",
+      "./assets/coin2.png",
+      "./assets/coin3.png",
+      "./assets/coin4.png",
+    ],
+  };
+
+  const BUNNY_DEFS = {
+    bunny1:   { label: "通常みるぽ",     img: "./assets/bunny1.png",   price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:   { label: "毒タイプみるぽ", img: "./assets/bunny3.png",   price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:   { label: "水タイプみるぽ", img: "./assets/bunny4.png",   price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:   { label: "お正月みるぽ",   img: "./assets/bunny5.png",   price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+  };
+
+  /* =========================
+   * Balance
+   * ========================= */
+  const BABY_DURATION_MS = 3 * 60 * 1000;
+  const BABY_SPEED_MUL   = 0.65;
+  const REA_EVOLVE_RATE  = 0.01;
+
+  const DEPART_COST = 10;
+
+  /* =========================
+   * Charge（個体ごと / UIなし）
+   * - baby はチャージしない（ゲージ無し・ハート無し）
+   * ========================= */
+  const CHARGE_MAX = 100;
+  const CHARGE_PER_SEC = 3.0;
+  const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
+
+  /* =========================
+   * Storage
+   * ========================= */
+  const LS = {
+    coins:     "wb_coins_v6",
+    bunnies:   "wb_bunnies_v6",
+    dex:       "wb_dex_v1",
+    unchi:     "wb_unchi_v1",
+    title:     "wb_title_v1",
+    titleList: "wb_title_list_v1",
+  };
+
+  /* =========================
+   * DOM
+   * ========================= */
+  const field       = document.getElementById("field");
+  const bunnyLayer  = document.getElementById("bunnyLayer");
+  const coinLayer   = document.getElementById("coinLayer");
+  const coinValueEl = document.getElementById("coinValue");
+
+  const shopBtn   = document.getElementById("shopBtn");
+  const departBtn = document.getElementById("departBtn");
+  const resetBtn  = document.getElementById("resetBtn");
+  const rankBtn   = document.getElementById("rankBtn");
+  const slotBtn   = document.getElementById("slotBtn");
+
+  if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
+    console.error("[app.js] 必要DOMが見つかりません");
+    return;
   }
 
-  function waitForWB() {
-    return waitFor(() => (window.WB && typeof window.WB.on === "function" ? window.WB : null));
+  /* =========================
+   * Event bus（WB互換）
+   * ========================= */
+  const __events = new Map();
+  function on(ev, fn) {
+    if (!__events.has(ev)) __events.set(ev, new Set());
+    __events.get(ev).add(fn);
   }
-  function waitForHUD() {
-    return waitFor(() => document.getElementById("hud"));
+  function off(ev, fn) { __events.get(ev)?.delete(fn); }
+  function emit(ev, payload) {
+    __events.get(ev)?.forEach((fn) => { try { fn(payload); } catch {} });
   }
 
-  Promise.all([waitForWB(), waitForHUD()])
-    .then(([WB, hud]) => {
-      if (window.__ISYOU_INITED__) return;
-      window.__ISYOU_INITED__ = true;
+  /* =========================
+   * Utils / Field size cache
+   * ========================= */
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rand  = (a, b) => a + Math.random() * (b - a);
 
-      /* =========================
-       * Config
-       * ========================= */
-      const LS = {
-        owned: "wb_isyou_owned_v2",
-        equipped: "wb_isyou_equipped_v2",
-        title: (WB.LS && WB.LS.title) ? WB.LS.title : "wb_title_v1",
-      };
+  let FIELD_W = 1, FIELD_H = 1;
+  function refreshFieldSize() {
+    FIELD_W = Math.max(1, field.clientWidth  || field.getBoundingClientRect().width  || 1);
+    FIELD_H = Math.max(1, field.clientHeight || field.getBoundingClientRect().height || 1);
+  }
+  refreshFieldSize();
+  window.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
 
-      const SLOTS = {
-        hat: { anchorX: 0.59, anchorY: 0.18, offsetX: 0, offsetY: 0, z: 2 },
-      };
+  function groundY() { return FIELD_H - 60; }
 
-      const ITEMS = {
-        partyhat: {
-          label: "パーティーハット",
-          img: "/assets/isyou/partyhat.png",
-          price: 500,
-          slot: "hat",
-          fitToBunny: true,
-          offsetX: 0,
-          offsetY: 0,
-          scale: 1,
-          z: 2,
-          keepUpright: false,
-        },
-        crown: {
-          label: "王冠",
-          img: "/assets/isyou/crown.png",
-          price: 3500,
-          slot: "hat",
-          fitToBunny: true,
-          offsetX: 0,
-          offsetY: 0,
-          scale: 1,
-          z: 2,
-          keepUpright: false,
-        },
-        ribbon: {
-          label: "リボン",
-          img: "/assets/isyou/ribbon.png",
-          price: 1200,
-          slot: "hat",
-          fitToBunny: true,
-          offsetX: 0,
-          offsetY: 0,
-          scale: 1,
-          z: 2,
-          keepUpright: false,
-        },
-        aimasuku: {
-          label: "アイマスク",
-          img: "/assets/isyou/aimasuku.png",
-          price: 1200,
-          slot: "hat",
-          fitToBunny: true,
-          offsetX: 0,
-          offsetY: 0,
-          scale: 1,
-          z: 2,
-          keepUpright: false,
-        },
-        ahiru: {
-          label: "ぷかアヒル",
-          img: "/assets/isyou/ahiru.png",
-          price: 600,
-          slot: "hat",
-          fitToBunny: true,
-          offsetX: 0,
-          offsetY: 0,
-          scale: 1,
-          z: 2,
-          keepUpright: false,
-        },
-      };
+  /* =========================
+   * Audio
+   * ========================= */
+  const sePoyo     = new Audio(ASSETS.poyoSE);
+  const seBaby     = new Audio(ASSETS.babySE);
+  const seCoin     = new Audio(ASSETS.coinSE);
+  const seTabidati = new Audio(ASSETS.tabidatiSE);
 
-      /* =========================
-       * SE (装着/付け替え/外す)
-       * ========================= */
-      const EQUIP_SE_SRC = "/assets/isyou/Onoma-Pop03-1(High).mp3";
-      let equipSE = null;
+  let audioUnlocked = false;
+  function unlockAudioOnce() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+    try {
+      sePoyo.muted = true;
+      sePoyo.currentTime = 0;
+      sePoyo.play()
+        .then(() => { sePoyo.pause(); sePoyo.currentTime = 0; sePoyo.muted = false; })
+        .catch(() => (sePoyo.muted = false));
+    } catch {}
+  }
+  window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
 
-      function getEquipSE() {
-        if (equipSE) return equipSE;
-        equipSE = new Audio(EQUIP_SE_SRC);
-        equipSE.preload = "auto";
-        equipSE.volume = 1.0;
-        return equipSE;
+  function playSE(a) {
+    try { a.currentTime = 0; a.play().catch(() => {}); } catch {}
+  }
+
+  /* =========================
+   * CSS injection
+   * - コイン小さく
+   * - ハート小さめ＆ゆらゆら
+   * - ✅ babyは img ではなく wrap を縮める（transform競合対策）
+   * ========================= */
+  (function injectCssOnce() {
+    if (document.getElementById("wbPerBunnyChargeCss_v2")) return;
+    const st = document.createElement("style");
+    st.id = "wbPerBunnyChargeCss_v2";
+    st.textContent = `
+      .coin{
+        width:26px !important;
+        height:26px !important;
       }
 
-      function playEquipSE() {
-        try {
-          WB.unlockAudioOnce?.();
-          const a = getEquipSE();
-          a.currentTime = 0;
-          const p = a.play();
-          if (p && typeof p.catch === "function") p.catch(() => {});
-        } catch {}
+      /* ✅ babyはwrapごと縮める（imgのtransform競合を回避） */
+      .bunnyWrap.babyWrap{
+        transform: scale(0.78);
+        transform-origin: bottom center;
       }
 
-      /* =========================
-       * CSS
-       * ========================= */
-      (function injectCSS() {
-        if (document.getElementById("isyouStyleFinalV13")) return;
-        const s = document.createElement("style");
-        s.id = "isyouStyleFinalV13";
-        s.textContent = `
-#hud{ pointer-events:auto; }
-#isyouBtn{
-  pointer-events:auto;
-  z-index:2147483647;
-  font-weight:900;
-  border:none;
-  border-radius:12px;
-  padding:8px 12px;
-  cursor:pointer;
-  background:#ffe6f2;
-  box-shadow:0 6px 18px rgba(0,0,0,.18);
-  margin-left:8px;
-}
-#isyouBtn:hover{ filter:brightness(1.03); }
+      /* ✅ hart.png を小さく */
+      .wbChargeHart {
+        position:absolute;
+        z-index:9999;
+        pointer-events:none;
+        user-select:none;
+        -webkit-user-drag:none;
+        transform: translate(-50%, -50%);
+        animation: wbHartBob 1.05s ease-in-out infinite;
+        filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
+        width:28px;
+        height:28px;
+      }
+      @keyframes wbHartBob {
+        0%   { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
+        50%  { transform: translate(-50%, -50%) translateY(-7px) rotate(3deg) scale(1.03); }
+        100% { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
+      }
+    `;
+    document.head.appendChild(st);
+  })();
 
-/* ✅ wrap内で重なりを閉じ込める（他のうさぎより帽子が前に出ない） */
-.bunnyWrap{ isolation:isolate; }
+  /* =========================
+   * State / Storage helpers
+   * ========================= */
+  let coins = (() => {
+    const n = parseInt(localStorage.getItem(LS.coins) || "0", 10);
+    return Number.isFinite(n) ? n : 0;
+  })();
 
-/* うさぎ画像を1、アクセを2にする（同じうさぎの上にだけ乗る） */
-.bunnyWrap .bunny{ position:relative; z-index:1; }
+  function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
 
-/* レイヤ */
-.isyouLayer{ position:absolute; inset:0; pointer-events:none; z-index:2; }
-.isyouItem{
-  position:absolute;
-  left:0; top:0;
-  transform-origin:50% 50%;
-  pointer-events:none;
-  user-select:none;
-  -webkit-user-drag:none;
-  z-index:2;
-}
+  function updateHud() {
+    coinValueEl.textContent = String(coins);
+    emit("hudUpdated", { coins });
+  }
 
-/* 装着モード赤枠 */
-body.isyouEquipMode .bunnyWrap:hover{
-  outline:4px solid rgba(255,64,64,.60);
-  outline-offset:3px;
-  border-radius:18px;
-}
-.bunnyWrap.isyouSelectedTarget{
-  outline:4px solid rgba(255,64,64,.92);
-  outline-offset:3px;
-  border-radius:18px;
-  box-shadow:0 0 0 2px rgba(255,255,255,.65) inset;
-  position:relative;
-  z-index:2147483590 !important;
-}
+  function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
-/* partyhat：ポンッ */
-.bunnyWrap.isyouPopHat .isyouItem[data-item-key="partyhat"]{
-  animation:isyouPop 220ms ease-out;
-}
-@keyframes isyouPop{
-  0%{ transform: var(--isyouT) scale(0.1); }
-  70%{ transform: var(--isyouT) scale(1.15); }
-  100%{ transform: var(--isyouT) scale(1.0); }
-}
+  function loadBunnyMeta() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(LS.bunnies) || "null");
+      if (!Array.isArray(arr)) return null;
+      return arr.map(x => ({
+        bornAt: Number(x?.bornAt) || Date.now(),
+        kind: safeKind(x?.kind),
+      }));
+    } catch { return null; }
+  }
 
-/* モーダル */
-.isyouBackdrop{
-  position:fixed; inset:0;
-  background:rgba(0,0,0,.45);
-  display:grid; place-items:center;
-  z-index:2147483600;
-}
-.isyouModal{
-  width:min(92vw,560px);
-  max-height:86vh;
-  background:#fff;
-  border-radius:18px;
-  padding:14px;
-  box-shadow:0 20px 60px rgba(0,0,0,.30);
-  overflow:auto;
-  pointer-events:auto;
-}
-body.isyouEquipMode .isyouBackdrop{ pointer-events:none; background:rgba(0,0,0,.25); }
-body.isyouEquipMode .isyouModal{ pointer-events:auto; }
+  function saveBunnyMeta() {
+    localStorage.setItem(
+      LS.bunnies,
+      JSON.stringify(bunnies.map(b => ({ bornAt: b.bornAt, kind: b.kind })))
+    );
+  }
 
-.isyouHeader{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
-.isyouTitle{ font-weight:900; }
-.isyouClose{ border:none; background:#eee; border-radius:12px; padding:6px 10px; cursor:pointer; }
-.isyouTabs{ display:flex; gap:8px; margin-top:10px; }
-.isyouTab{ border:none; padding:8px 10px; border-radius:12px; cursor:pointer; background:#f3f3f3; font-weight:800; }
-.isyouTab.on{ background:#ffe6f2; }
-.isyouGrid{ margin-top:12px; display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
-.isyouCard{ background:#fff; border-radius:14px; padding:10px; box-shadow:0 6px 18px rgba(0,0,0,.12); }
-.isyouCardHead{ display:flex; align-items:center; gap:10px; }
-.isyouThumb{ width:54px; height:54px; object-fit:contain; }
-.isyouName{ font-weight:900; }
-.isyouRow{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.isyouBtn{
-  border:none; padding:7px 10px; border-radius:12px; cursor:pointer;
-  background:#fff; box-shadow:0 4px 12px rgba(0,0,0,.12);
-  font-weight:800;
-}
-.isyouBtn.primary{ background:#ffe6f2; }
-.isyouBtn.danger{ background:#ffecec; }
-.isyouSmall{ font-size:12px; opacity:.85; }
-        `;
-        document.head.appendChild(s);
-      })();
+  /* =========================
+   * Drops（ティア対応）
+   * ========================= */
+  const dropsOnField = [];
+  const dropByEl = new WeakMap();
 
-      /* =========================
-       * Storage
-       * ========================= */
-      function loadJSON(key, fallback) {
-        try {
-          const v = JSON.parse(localStorage.getItem(key) || "null");
-          return v && typeof v === "object" ? v : fallback;
-        } catch {
-          return fallback;
+  class CoinDrop {
+    constructor(x, y, tierIndex = 0) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() * 2 - 1) * 110;
+      this.vy = -(420 + Math.random() * 240);
+      this.gravity = 2200;
+      this.bounce  = 0.22 + Math.random() * 0.12;
+      this.floor   = groundY();
+
+      const el = document.createElement("img");
+      el.className = "coin";
+      this.tier = clamp(Math.floor(tierIndex), 0, ASSETS.coins.length - 1);
+      el.src = ASSETS.coins[this.tier];
+      el.draggable = false;
+      this.el = el;
+
+      dropByEl.set(el, this);
+      el.addEventListener("pointerenter", () => this.collect());
+      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
+      el.addEventListener("click", () => this.collect());
+
+      coinLayer.appendChild(el);
+      this.render();
+    }
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+    update(dt) {
+      this.floor = groundY();
+      this.vy += this.gravity * dt;
+      this.x  += this.vx * dt;
+      this.y  += this.vy * dt;
+
+      if (this.y >= this.floor) {
+        this.y = this.floor;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+          this.vx *= 0.72;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
         }
       }
-      const owned = loadJSON(LS.owned, {});
-      const equipped = loadJSON(LS.equipped, {});
-      function saveAll() {
-        localStorage.setItem(LS.owned, JSON.stringify(owned));
-        localStorage.setItem(LS.equipped, JSON.stringify(equipped));
-      }
+      this.render();
+    }
+    collect() {
+      if (!this.el || !this.el.isConnected) return;
 
-      /* =========================
-       * Coins
-       * ========================= */
-      function getCoins() {
-        if (typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0;
-        if (typeof WB.coins === "number") return WB.coins;
-        return 0;
-      }
-      function spendCoins(amount) {
-        amount = Math.max(0, Math.floor(Number(amount) || 0));
-        if (amount <= 0) return true;
-        if (typeof WB.spendCoin === "function") return !!WB.spendCoin(amount);
-        if (typeof WB.coins === "number") {
-          if (WB.coins < amount) return false;
-          WB.coins -= amount;
-          WB.updateHud?.();
-          WB.saveCoins?.();
-          return true;
-        }
-        return false;
-      }
+      // coin1=+1, coin2=+2, coin3=+3, coin4=+4
+      coins += (this.tier + 1);
+      saveCoins();
+      updateHud();
+      playSE(seCoin);
 
-      /* =========================
-       * HUD Button
-       * ========================= */
-      let btn = document.getElementById("isyouBtn");
-      if (!btn) {
-        btn = document.createElement("button");
-        btn.id = "isyouBtn";
-        btn.textContent = "お洒落";
-        const shopBtn = document.getElementById("shopBtn");
-        if (shopBtn && shopBtn.parentElement === hud) hud.insertBefore(btn, shopBtn);
-        else hud.appendChild(btn);
-      }
+      try { this.el.remove(); } catch {}
+      const idx = dropsOnField.indexOf(this);
+      if (idx >= 0) dropsOnField.splice(idx, 1);
+    }
+  }
 
-      /* =========================
-       * Modal
-       * ========================= */
-      let backdrop = null;
-      let tab = "shop";
-      let equipMode = false;
+  function spawnClickCoins(bunny, count = 1, tierPicker = () => 0) {
+    const r  = bunny.wrap.getBoundingClientRect();
+    const fr = field.getBoundingClientRect();
+    const baseX  = (r.left - fr.left) + r.width  * 0.55;
+    const baseY  = (r.top  - fr.top)  + r.height * 0.82;
 
-      const selectedItems = new Set(); // hatは1つだけ選ぶ
-      let selectedBornAt = null;
+    for (let i = 0; i < count; i++) {
+      const x = baseX + rand(-14, 14);
+      const y = baseY + rand(-6, 6);
+      const tier = tierPicker();
+      const c = new CoinDrop(x, y, tier);
+      dropsOnField.push(c);
+    }
+  }
 
-      function getBunnyList() {
-        return Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
-      }
+  /* =========================
+   * Bunny
+   * ========================= */
+  const bunnies = [];
 
-      function clearSelectedTargetVisual() {
-        (getBunnyList() || []).forEach((b) => b?.wrap?.classList?.remove("isyouSelectedTarget"));
-      }
-      function setSelectedTarget(bunnyOrNull) {
-        clearSelectedTargetVisual();
-        if (!bunnyOrNull) { selectedBornAt = null; return; }
-        selectedBornAt = bunnyOrNull.bornAt;
-        bunnyOrNull.wrap?.classList?.add("isyouSelectedTarget");
-      }
-      function getSelectedBunny() {
-        if (selectedBornAt == null) return null;
-        return (getBunnyList() || []).find((b) => b && b.bornAt === selectedBornAt) || null;
-      }
+  class Bunny {
+    constructor(bornAt, kind = "bunny1") {
+      this.bornAt = Number(bornAt) || Date.now();
+      this.kind   = safeKind(kind);
 
-      function closeModal() {
-        equipMode = false;
-        document.body.classList.remove("isyouEquipMode");
-        selectedItems.clear();
-        setSelectedTarget(null);
-        try { backdrop?.remove(); } catch {}
-        backdrop = null;
-      }
+      this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
 
-      function openModal() {
-        if (backdrop) return;
+      this.wrap = document.createElement("div");
+      this.wrap.className = "bunnyWrap";
+      this.wrap.style.position = "absolute";
+      this.wrap.style.left = "0px";
+      this.wrap.style.top  = "0px";
 
-        backdrop = document.createElement("div");
-        backdrop.className = "isyouBackdrop";
+      this.el = document.createElement("img");
+      this.el.className = "bunny";
+      this.el.draggable = false;
 
-        const modal = document.createElement("div");
-        modal.className = "isyouModal";
-        modal.addEventListener("click", (e) => e.stopPropagation());
+      this.wrap.appendChild(this.el);
+      bunnyLayer.appendChild(this.wrap);
 
-        const head = document.createElement("div");
-        head.className = "isyouHeader";
+      this.charge = 0;
+      this.chargeReady = false;
 
-        const title = document.createElement("div");
-        title.className = "isyouTitle";
-        title.textContent = "🎀 お洒落";
+      this.hartEl = null;
 
-        const close = document.createElement("button");
-        close.className = "isyouClose";
-        close.textContent = "×";
-        close.addEventListener("click", closeModal);
+      refreshFieldSize();
+      this.x = rand(20, Math.max(21, FIELD_W - 140));
+      this.y = groundY() - 120;
+      this.dir = Math.random() < 0.5 ? -1 : 1;
+      this.baseSpeed = 55 + Math.random() * 60;
 
-        head.appendChild(title);
-        head.appendChild(close);
+      this.evolveIfNeeded(true);
+      this.syncSprite();
 
-        const tabs = document.createElement("div");
-        tabs.className = "isyouTabs";
+      const tap = (e) => {
+        // ✅ 装着モード中はコイン落としをしない（お洒落の付け替え優先）
+        if (document.body.classList.contains("isyouEquipMode")) return;
 
-        const tabShop = document.createElement("button");
-        tabShop.className = "isyouTab";
-        tabShop.textContent = "ショップ";
+        e?.preventDefault?.();
+        unlockAudioOnce();
+        playSE(this.isBaby ? seBaby : sePoyo);
 
-        const tabEquip = document.createElement("button");
-        tabEquip.className = "isyouTab";
-        tabEquip.textContent = "装着";
-
-        tabs.appendChild(tabShop);
-        tabs.appendChild(tabEquip);
-
-        const body = document.createElement("div");
-
-        function render() {
-          tabShop.classList.toggle("on", tab === "shop");
-          tabEquip.classList.toggle("on", tab === "equip");
-          body.innerHTML = "";
-
-          const coinLine = document.createElement("div");
-          coinLine.className = "isyouSmall";
-          coinLine.textContent = `所持コイン：${getCoins()} 🪙`;
-          body.appendChild(coinLine);
-
-          if (tab === "shop") {
-            const grid = document.createElement("div");
-            grid.className = "isyouGrid";
-
-            Object.entries(ITEMS).forEach(([key, it]) => {
-              const card = document.createElement("div");
-              card.className = "isyouCard";
-
-              const top = document.createElement("div");
-              top.className = "isyouCardHead";
-
-              const img = document.createElement("img");
-              img.className = "isyouThumb";
-              img.src = it.img;
-
-              const name = document.createElement("div");
-              name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${owned[key] || 0}</div>`;
-
-              top.appendChild(img);
-              top.appendChild(name);
-
-              const row = document.createElement("div");
-              row.className = "isyouRow";
-
-              const buy = document.createElement("button");
-              buy.className = "isyouBtn primary";
-              buy.textContent = `購入（${it.price}🪙）`;
-              buy.addEventListener("click", () => {
-                const ok = spendCoins(it.price);
-                if (!ok) {
-                  buy.textContent = "コイン不足";
-                  setTimeout(() => (buy.textContent = `購入（${it.price}🪙）`), 700);
-                  return;
-                }
-                owned[key] = (owned[key] || 0) + 1;
-                saveAll();
-                WB.updateHud?.();
-                render();
-              });
-
-              row.appendChild(buy);
-              card.appendChild(top);
-              card.appendChild(row);
-              grid.appendChild(card);
-            });
-
-            body.appendChild(grid);
-          }
-
-          if (tab === "equip") {
-            const rowTop = document.createElement("div");
-            rowTop.className = "isyouRow";
-
-            const toggle = document.createElement("button");
-            toggle.className = "isyouBtn primary";
-            toggle.textContent = equipMode ? "装着モード：ON" : "装着モード：OFF";
-            toggle.addEventListener("click", () => {
-              equipMode = !equipMode;
-              document.body.classList.toggle("isyouEquipMode", equipMode);
-              if (!equipMode) setSelectedTarget(null);
-              render();
-            });
-
-            // ✅ 外すボタン（選択中のうさぎのhatを外す）
-            const offBtn = document.createElement("button");
-            offBtn.className = "isyouBtn danger";
-            offBtn.textContent = "外す（帽子）";
-            offBtn.disabled = !getSelectedBunny();
-            offBtn.addEventListener("click", () => {
-              const b = getSelectedBunny();
-              if (!b) return;
-              clearEquipBySlot(b, "hat"); // ✅ 外した時もSEはここで鳴る
-              render();
-            });
-
-            const hint = document.createElement("div");
-            hint.className = "isyouSmall";
-            hint.textContent = "①アイテム選択（hatは1つだけ） ②うさぎをクリックで赤枠 ③同じうさぎを再クリックで着せ替え / 外す";
-
-            rowTop.appendChild(toggle);
-            rowTop.appendChild(offBtn);
-            rowTop.appendChild(hint);
-            body.appendChild(rowTop);
-
-            const sel = getSelectedBunny();
-            const targetLine = document.createElement("div");
-            targetLine.className = "isyouSmall";
-            targetLine.style.marginTop = "6px";
-            targetLine.textContent = sel
-              ? `装着対象：${sel.kind || "bunny"}（ID: ${sel.bornAt}）`
-              : "装着対象：未選択（うさぎをクリックして赤枠で選択）";
-            body.appendChild(targetLine);
-
-            const grid = document.createElement("div");
-            grid.className = "isyouGrid";
-
-            Object.entries(ITEMS).forEach(([key, it]) => {
-              const count = owned[key] || 0;
-
-              const card = document.createElement("div");
-              card.className = "isyouCard";
-
-              const top = document.createElement("div");
-              top.className = "isyouCardHead";
-
-              const img = document.createElement("img");
-              img.className = "isyouThumb";
-              img.src = it.img;
-
-              const name = document.createElement("div");
-              name.innerHTML = `<div class="isyouName">${it.label}</div><div class="isyouSmall">所持：${count}</div>`;
-
-              top.appendChild(img);
-              top.appendChild(name);
-
-              const row = document.createElement("div");
-              row.className = "isyouRow";
-
-              const pick = document.createElement("button");
-              pick.className = "isyouBtn";
-              const onSel = selectedItems.has(key);
-              pick.textContent = onSel ? "選択中" : "選択";
-              pick.style.background = onSel ? "#ffe6f2" : "#fff";
-              pick.disabled = count <= 0;
-
-              pick.addEventListener("click", () => {
-                if (count <= 0) return;
-
-                const slot = String(it.slot || "");
-                if (slot === "hat") {
-                  for (const k of Array.from(selectedItems)) {
-                    const other = ITEMS[k];
-                    if (other && String(other.slot || "") === "hat") selectedItems.delete(k);
-                  }
-                  if (selectedItems.has(key)) selectedItems.delete(key);
-                  else selectedItems.add(key);
-                } else {
-                  if (selectedItems.has(key)) selectedItems.delete(key);
-                  else selectedItems.add(key);
-                }
-                render();
-              });
-
-              row.appendChild(pick);
-              card.appendChild(top);
-              card.appendChild(row);
-              grid.appendChild(card);
-            });
-
-            body.appendChild(grid);
-          }
+        // babyはcoin1 1枚だけ
+        if (this.isBaby) {
+          spawnClickCoins(this, 1, () => 0);
+          return;
         }
 
-        tabShop.addEventListener("click", () => { tab = "shop"; render(); });
-        tabEquip.addEventListener("click", () => { tab = "equip"; render(); });
+        const plan = this.getDropPlanFromOwnCharge();
+        spawnClickCoins(this, plan.count, plan.pickTier);
 
-        modal.appendChild(head);
-        modal.appendChild(tabs);
-        modal.appendChild(body);
+        this.consumeOwnCharge();
+        this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
+      };
 
-        backdrop.appendChild(modal);
-        backdrop.addEventListener("click", closeModal);
+      this.wrap.addEventListener("pointerdown", tap);
+      this.wrap.addEventListener("click", tap);
 
-        document.body.appendChild(backdrop);
-        render();
-      }
-
-      btn.addEventListener("click", () => {
-        WB.unlockAudioOnce?.();
-        openModal();
+      this.el.addEventListener("load", () => {
+        this.clampInside();
+        this.applyPos();
+        this.positionHeart();
       });
 
-      /* =========================
-       * Accessory draw
-       * ========================= */
-      function ensureLayer(bunny) {
-        if (!bunny?.wrap) return null;
-        let layer = bunny.wrap.querySelector(".isyouLayer");
-        if (!layer) {
-          layer = document.createElement("div");
-          layer.className = "isyouLayer";
-          bunny.wrap.appendChild(layer);
+      this.clampInside();
+      this.applyPos();
+    }
+
+    syncSprite() {
+      // ✅ babyはwrapごと縮める（transform競合に強い）
+      this.wrap.classList.toggle("babyWrap", this.isBaby);
+
+      // classは保険で残す（他JSが参照してもOK）
+      this.el.classList.toggle("baby", this.isBaby);
+
+      this.el.src = this.isBaby
+        ? ASSETS.babyBunny
+        : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
+    }
+
+    ensureHeartEl() {
+      if (this.hartEl && this.hartEl.isConnected) return this.hartEl;
+      const el = document.createElement("img");
+      el.className = "wbChargeHart";
+      el.src = ASSETS.hart;
+      el.draggable = false;
+      el.style.display = "none";
+      field.appendChild(el);
+      this.hartEl = el;
+      return el;
+    }
+
+    showHeart() {
+      const el = this.ensureHeartEl();
+      el.style.display = "block";
+      this.positionHeart();
+    }
+
+    hideHeart() {
+      if (!this.hartEl) return;
+      this.hartEl.style.display = "none";
+    }
+
+    positionHeart() {
+      if (!this.hartEl || this.hartEl.style.display === "none") return;
+      const r  = this.wrap.getBoundingClientRect();
+      const fr = field.getBoundingClientRect();
+      const x = (r.left - fr.left) + r.width * 0.5;
+      const y = (r.top  - fr.top)  + r.height * 0.08;
+      this.hartEl.style.left = `${x}px`;
+      this.hartEl.style.top  = `${y}px`;
+    }
+
+    addOwnCharge(delta) {
+      if (this.isBaby) return;
+      if (this.chargeReady) return;
+      delta = Number(delta) || 0;
+      if (delta <= 0) return;
+
+      this.charge = clamp(this.charge + delta, 0, CHARGE_MAX);
+      if (this.charge >= CHARGE_MAX) {
+        this.charge = CHARGE_MAX;
+        this.chargeReady = true;
+        this.showHeart();
+        emit("bunnyChargeReady", { bornAt: this.bornAt });
+      }
+    }
+
+    consumeOwnCharge() {
+      this.charge = 0;
+      this.chargeReady = false;
+      this.hideHeart();
+      emit("bunnyChargeConsumed", { bornAt: this.bornAt });
+    }
+
+    getChargeRatio() {
+      return clamp(this.charge / CHARGE_MAX, 0, 1);
+    }
+
+    getDropPlanFromOwnCharge() {
+      const r0 = this.getChargeRatio();
+      const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
+      const r = Math.min(1, r0 * (1.15 + mul * 0.15));
+
+      const count = clamp(
+        Math.floor((2 + r * 24) * mul),
+        2,
+        60
+      );
+
+      const maxTier = clamp(
+        Math.floor(r * 3 + mul * 0.35),
+        0,
+        ASSETS.coins.length - 1
+      );
+
+      const pickTier = () => {
+        if (maxTier <= 0) return 0;
+
+        const p = 2.2 + mul * 0.35;
+        let sum = 0;
+        const w = [];
+        for (let t = 0; t <= maxTier; t++) {
+          const wt = Math.pow(t + 1, p);
+          w.push(wt);
+          sum += wt;
         }
-        return layer;
-      }
-
-      function getBunnyImgEl(wrap) {
-        return (
-          wrap.querySelector("img.bunnyImg") ||
-          wrap.querySelector("img[data-bunny]") ||
-          wrap.querySelector("img[src*='bunny']") ||
-          wrap.querySelector("img.bunny") ||
-          wrap.querySelector("img")
-        );
-      }
-
-      function getLocalPosWithin(el, root) {
-        let x = 0, y = 0;
-        let cur = el;
-        while (cur && cur !== root) {
-          x += cur.offsetLeft || 0;
-          y += cur.offsetTop || 0;
-          cur = cur.offsetParent;
+        let x = Math.random() * sum;
+        for (let t = 0; t <= maxTier; t++) {
+          x -= w[t];
+          if (x <= 0) return t;
         }
-        return { x, y, ok: (cur === root) };
+        return maxTier;
+      };
+
+      return { count, pickTier };
+    }
+
+    // ✅ 放置排出は無効化
+    idleDrop(dt) { /* idle drop OFF */ }
+
+    getWrapWidth() {
+      const w1 = this.wrap.offsetWidth || 0;
+      if (w1 > 0) return w1;
+      const w2 = this.wrap.getBoundingClientRect().width || 0;
+      return Math.max(1, w2 || 140);
+    }
+
+    clampInside() {
+      refreshFieldSize();
+      const w = this.getWrapWidth();
+      const PAD = 6;
+      const minX = PAD;
+      const maxX = Math.max(minX, FIELD_W - w - PAD);
+      this.x = clamp(this.x, minX, maxX);
+      this.y = groundY() - 120;
+    }
+
+    evolveIfNeeded(isInit = false) {
+      if (!this.isBaby) return;
+      if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
+
+      this.isBaby = false;
+
+      if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) {
+        this.kind = "reabunny";
       }
 
-      function getAnchorPoint(bunny, slotKey) {
-        const wrap = bunny?.wrap;
-        if (!wrap) return { x: 0, y: 0 };
+      this.syncSprite();
+      this.clampInside();
 
-        const img = getBunnyImgEl(wrap);
-        if (!img) return { x: wrap.clientWidth / 2, y: 0 };
+      if (isInit) saveBunnyMeta();
+    }
 
-        const slot = slotKey && SLOTS[slotKey] ? SLOTS[slotKey] : null;
-        const ax = slot && typeof slot.anchorX === "number" ? slot.anchorX : 0.5;
-        const ay = slot && typeof slot.anchorY === "number" ? slot.anchorY : 0.0;
+    applyPos() {
+      this.wrap.classList.toggle("flip", this.dir < 0);
+      this.wrap.style.left = `${this.x}px`;
+      this.wrap.style.top  = `${this.y}px`;
+    }
 
-        const p = getLocalPosWithin(img, wrap);
-        const w = img.offsetWidth || img.clientWidth || 0;
-        const h = img.offsetHeight || img.clientHeight || 0;
+    update(dt) {
+      this.evolveIfNeeded(false);
 
-        return { x: p.x + w * ax, y: p.y + h * ay };
-      }
+      // ✅ 保険：baby中は常にwrapクラス維持（他JSが触っても戻す）
+      if (this.isBaby) this.wrap.classList.add("babyWrap");
+      else this.wrap.classList.remove("babyWrap");
 
-      function applyTransform(imgEl, bunny, it) {
-        const keepUpright = !!it.keepUpright;
+      // ✅ 放置排出しない
+      // this.idleDrop(dt);
 
-        const slotKey = it.slot ? String(it.slot) : "";
-        const slot = slotKey && SLOTS[slotKey] ? SLOTS[slotKey] : null;
+      this.addOwnCharge(CHARGE_PER_SEC * dt);
 
-        const sox = slot ? (Number(slot.offsetX) || 0) : 0;
-        const soy = slot ? (Number(slot.offsetY) || 0) : 0;
+      const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
+      this.x += this.dir * this.baseSpeed * speedMul * dt;
 
-        const ox = (Number(it.offsetX) || 0) + sox;
-        const oy = (Number(it.offsetY) || 0) + soy;
+      const w = this.getWrapWidth();
+      const PAD = 6;
+      const minX = PAD;
+      const maxX = Math.max(minX, FIELD_W - w - PAD);
 
-        if (it.fitToBunny) {
-          const wrap = bunny?.wrap;
-          const bimg = wrap ? getBunnyImgEl(wrap) : null;
-          if (!wrap || !bimg) return;
+      if (this.x <= minX) { this.x = minX; this.dir = 1; }
+      else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
 
-          const p = getLocalPosWithin(bimg, wrap);
-          const w = bimg.offsetWidth  || bimg.clientWidth  || 0;
-          const h = bimg.offsetHeight || bimg.clientHeight || 0;
+      this.applyPos();
 
-          imgEl.style.left = `${p.x}px`;
-          imgEl.style.top  = `${p.y}px`;
-          imgEl.style.width  = `${w}px`;
-          imgEl.style.height = `${h}px`;
+      if (!this.isBaby && this.chargeReady) this.positionHeart();
+    }
+  }
 
-          const cs = getComputedStyle(bimg);
-          imgEl.style.transformOrigin = cs.transformOrigin || "50% 50%";
+  function spawnBunny(kind = "bunny1", bornAt = Date.now()) {
+    const b = new Bunny(bornAt, kind);
+    bunnies.push(b);
+    saveBunnyMeta();
+    emit("bunnyCountChanged", { count: bunnies.length });
+    return b;
+  }
 
-          const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
-          const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
-          const extraFlip = keepUpright ? " scaleX(-1)" : "";
+  function removeBunnyInstance(b) {
+    const idx = bunnies.indexOf(b);
+    if (idx < 0) return false;
+    try { b.wrap.remove(); } catch {}
+    try { b.hartEl?.remove(); } catch {}
+    bunnies.splice(idx, 1);
+    saveBunnyMeta();
+    emit("bunnyCountChanged", { count: bunnies.length });
+    return true;
+  }
 
-          const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
-          imgEl.style.setProperty("--isyouT", t);
-          imgEl.style.transform = t;
+  /* =========================
+   * Touch: スライド回収（コインだけ）
+   * ========================= */
+  let touchCollectActive = false;
+  let touchPointerId = null;
 
-          imgEl.style.zIndex = "2";
-          return;
-        }
+  function collectAtClientPoint(clientX, clientY) {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return;
+    const target = (el.classList?.contains("coin") || el.classList?.contains("ougonunchi"))
+      ? el
+      : el.closest?.(".coin, .ougonunchi");
+    if (!target) return;
+    const drop = dropByEl.get(target);
+    if (drop && typeof drop.collect === "function") drop.collect();
+  }
 
-        const sc = Number(it.scale) || 1;
-        const a = getAnchorPoint(bunny, slotKey);
-        imgEl.style.left = `${a.x}px`;
-        imgEl.style.top  = `${a.y}px`;
+  field.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    touchCollectActive = true;
+    touchPointerId = e.pointerId;
+    collectAtClientPoint(e.clientX, e.clientY);
+  }, { passive: true });
 
-        const extraFlip = keepUpright ? " scaleX(-1)" : "";
-        const baseT =
-          `translate(-50%, -50%) translate(${ox}px, ${oy}px) ` +
-          `scale(${sc})` + extraFlip;
+  field.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (!touchCollectActive) return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    collectAtClientPoint(e.clientX, e.clientY);
+  }, { passive: true });
 
-        imgEl.style.setProperty("--isyouT", baseT);
-        imgEl.style.transform = baseT;
-        imgEl.style.zIndex = "2";
-      }
+  window.addEventListener("pointerup", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    touchCollectActive = false;
+    touchPointerId = null;
+  }, { passive: true });
 
-      function drawAllForBunny(bunny) {
-        if (!bunny?.wrap || bunny.isBaby) return;
+  window.addEventListener("pointercancel", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    touchCollectActive = false;
+    touchPointerId = null;
+  }, { passive: true });
 
-        const key = String(bunny.bornAt);
-        const eq = equipped[key] || {};
-        const layer = ensureLayer(bunny);
-        if (!layer) return;
+  /* =========================
+   * Buttons（emit only）
+   * ========================= */
+  shopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
+  departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
+  rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
+  slotBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:slot",   {}); });
 
-        layer.innerHTML = "";
-        Object.keys(eq).forEach((itemKey) => {
-          if (!eq[itemKey]) return;
-          const it = ITEMS[itemKey];
-          if (!it) return;
-
-          const img = document.createElement("img");
-          img.className = "isyouItem";
-          img.dataset.itemKey = itemKey;
-          img.src = it.img;
-          layer.appendChild(img);
-
-          applyTransform(img, bunny, it);
-        });
-      }
-
-      function redrawAll() {
-        (getBunnyList() || []).forEach(drawAllForBunny);
-      }
-
-      function setEquipExclusiveBySlot(bunny, itemKey) {
-        if (!bunny || bunny.isBaby) return;
-        if ((owned[itemKey] || 0) <= 0) return;
-
-        const it = ITEMS[itemKey];
-        if (!it) return;
-
-        const slot = String(it.slot || "");
-        if (!slot) return;
-
-        const key = String(bunny.bornAt);
-        equipped[key] = equipped[key] || {};
-
-        // ✅ 現在装着中の同slot（付け替え検知）
-        let prev = null;
-        for (const k of Object.keys(equipped[key])) {
-          if (!equipped[key][k]) continue;
-          const other = ITEMS[k];
-          if (other && String(other.slot || "") === slot) { prev = k; break; }
-        }
-
-        // slot内OFF
-        Object.keys(equipped[key]).forEach((k) => {
-          const other = ITEMS[k];
-          if (!other) return;
-          if (String(other.slot || "") === slot) equipped[key][k] = false;
-        });
-
-        equipped[key][itemKey] = true;
-
-        saveAll();
-        drawAllForBunny(bunny);
-
-        // ✅ 装着/付け替えが“変化”した時だけSE
-        if (prev !== itemKey) playEquipSE();
-
-        if (itemKey === "partyhat") {
-          bunny.wrap.classList.add("isyouPopHat");
-          setTimeout(() => bunny.wrap?.classList?.remove("isyouPopHat"), 260);
-        }
-      }
-
-      function clearEquipBySlot(bunny, slot) {
-        if (!bunny || bunny.isBaby) return;
-        slot = String(slot || "");
-        if (!slot) return;
-
-        const key = String(bunny.bornAt);
-        equipped[key] = equipped[key] || {};
-
-        // ✅ 何か付いてたか（外す検知）
-        let hadAny = false;
-
-        Object.keys(equipped[key]).forEach((k) => {
-          const it = ITEMS[k];
-          if (!it) return;
-          if (String(it.slot || "") === slot) {
-            if (equipped[key][k]) hadAny = true;
-            equipped[key][k] = false;
-          }
-        });
-
-        saveAll();
-        drawAllForBunny(bunny);
-
-        // ✅ 外すのに成功（実際に何か外れた）時だけSE
-        if (hadAny) playEquipSE();
-      }
-
-      /* =========================
-       * ✅ 装着中は「コイン落とし系クリック」を止める（最優先capture）
-       * ========================= */
-      document.addEventListener("pointerdown", (e) => {
-        if (!equipMode) return;
-
-        if (e.target?.closest?.(".isyouModal")) return;
-
-        const wrap = e.target?.closest?.(".bunnyWrap");
-        if (wrap) {
-          try { e.preventDefault?.(); } catch {}
-          try { e.stopPropagation?.(); } catch {}
-          try { e.stopImmediatePropagation?.(); } catch {}
-        }
-      }, { capture: true });
-
-      /* =========================
-       * Equip mode click
-       * ========================= */
-      document.addEventListener("pointerdown", (e) => {
-        if (!equipMode) return;
-        if (e.target?.closest?.(".isyouModal")) return;
-
-        const wrap = e.target?.closest?.(".bunnyWrap");
-        if (!wrap) return;
-
-        const bunny = (getBunnyList() || []).find((b) => b && b.wrap === wrap) || null;
-        if (!bunny || bunny.isBaby) return;
-
-        if (selectedBornAt == null) {
-          setSelectedTarget(bunny);
-          return;
-        }
-
-        if (bunny.bornAt === selectedBornAt) {
-          let pickedHat = null;
-          for (const k of selectedItems) {
-            const it = ITEMS[k];
-            if (it && String(it.slot || "") === "hat") { pickedHat = k; break; }
-          }
-
-          if (pickedHat) setEquipExclusiveBySlot(bunny, pickedHat);
-          else clearEquipBySlot(bunny, "hat"); // ✅ 何も選択されてないなら外す
-          return;
-        }
-
-        setSelectedTarget(bunny);
-      }, { capture: true });
-
-      /* =========================
-       * Hooks + flip watcher
-       * ========================= */
-      WB.on?.("bunnyCountChanged", redrawAll);
-      WB.on?.("resize", redrawAll);
-
-      let rafId = null;
-      function startFlipWatcher() {
-        if (rafId) return;
-        let lastSig = "";
-        const loop = () => {
-          const list = getBunnyList();
-          const sig = (list || []).map(b => (b?.wrap?.classList?.contains("flip") ? "1" : "0")).join("");
-          if (sig !== lastSig) { lastSig = sig; redrawAll(); }
-          rafId = requestAnimationFrame(loop);
-        };
-        rafId = requestAnimationFrame(loop);
-      }
-      startFlipWatcher();
-
-      redrawAll();
-      console.log("[isyou] ready (equip/replace/remove se + remove button)");
-    })
-    .catch((err) => {
-      console.warn("[isyou] init failed:", err?.message || err);
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      unlockAudioOnce();
+      if (!confirm("リセットしますか？")) return;
+      localStorage.removeItem(LS.coins);
+      localStorage.removeItem(LS.bunnies);
+      localStorage.removeItem(LS.dex);
+      localStorage.removeItem(LS.unchi);
+      localStorage.removeItem(LS.title);
+      localStorage.removeItem(LS.titleList);
+      emit("resetRequested", {});
+      location.reload();
     });
+  }
+
+  /* =========================
+   * WB Public API（他JSが使う）
+   * ========================= */
+  window.WB = {
+    on, off, emit,
+    ASSETS, BUNNY_DEFS, LS, DEPART_COST,
+    field, shopBtn, departBtn, rankBtn, resetBtn, slotBtn,
+
+    get coins() { return coins; },
+    set coins(v) {
+      coins = Math.max(0, Math.floor(Number(v) || 0));
+      saveCoins();
+      updateHud();
+    },
+
+    getCoin: () => coins,
+    spendCoin: (n) => {
+      n = Math.floor(Number(n) || 0);
+      if (n <= 0) return true;
+      if (coins < n) return false;
+      coins -= n;
+      saveCoins();
+      updateHud();
+      return true;
+    },
+
+    bunnies,
+    getBunnies: () => bunnies,
+    spawnBunny,
+    removeBunnyInstance,
+
+    saveCoins,
+    saveBunnyMeta,
+
+    unlockAudioOnce,
+    playSE,
+    seTabidati,
+
+    updateHud,
+
+    getBunnyCharge: (bornAt) => {
+      const t = Number(bornAt);
+      const b = bunnies.find(x => x && x.bornAt === t);
+      return b ? { charge: b.charge, ready: b.chargeReady, isBaby: b.isBaby } : null;
+    },
+  };
+
+  /* =========================
+   * Init / Loop
+   * ========================= */
+  function initBunnies() {
+    const meta = loadBunnyMeta();
+
+    if (meta && meta.length) {
+      meta.forEach(m => spawnBunny(m.kind, m.bornAt));
+      saveBunnyMeta();
+      return;
+    }
+
+    const t = Date.now();
+    spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
+    spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
+    saveBunnyMeta();
+  }
+
+  let lastFrame = performance.now();
+  function tick(ts) {
+    const dt = Math.min(0.033, (ts - lastFrame) / 1000);
+    lastFrame = ts;
+
+    for (const b of bunnies) b.update(dt);
+    for (const d of dropsOnField) d.update(dt);
+
+    requestAnimationFrame(tick);
+  }
+
+  function init() {
+    refreshFieldSize();
+    initBunnies();
+    updateHud();
+    emit("bunnyCountChanged", { count: bunnies.length });
+
+    requestAnimationFrame(tick);
+
+    window.addEventListener("resize", () => {
+      refreshFieldSize();
+      for (const b of bunnies) { b.clampInside(); b.applyPos(); b.positionHeart?.(); }
+      emit("resize", {});
+    }, { passive: true });
+  }
+
+  init();
 })();
