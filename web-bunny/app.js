@@ -43,7 +43,7 @@
 
   // ✅ ougonunchi 設定
   const OUGON_VALUE  = 10000; // +10000コイン
-  const OUGON_CHANCE = 0.05;  // 10%で出る
+  const OUGON_CHANCE = 0.02;  // 10%で出る
 
   /* =========================
    * Charge（個体ごと / UIなし）
