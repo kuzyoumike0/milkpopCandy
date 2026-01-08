@@ -1,9 +1,11 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（FIX: 反転でも位置ズレない）
-// ✅ partyhat は「うさぎ同サイズ同位置」
-// ✅ FIX: bunnyWrap の position を !important で上書きしない（うさぎ位置がズレる原因）
-// ✅ FIX: 必要時のみ（wrapがstaticの時だけ） wrap.style.position="relative" を付与
-// ✅ FIX: rect は getBoundingClientRect 差分で“見た目”基準（transform/flipでも安定）
-// ✅ FIX: wrap が反転していても、アクセ側を逆flipして座標系を戻し、画像だけ再flipして見た目一致
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版
+// ✅ FIX: assets/isyou/partyhat.png を最優先で必ず試す（表示されないミスを二度としない）
+// ✅ 追加: aimasuku.png（アイマスク） / ahiru.png（アヒル）
+// ✅ bunnyWrap の position を !important で上書きしない（うさぎ位置を壊さない）
+// ✅ static の時だけ inline で relative 付与（配置を壊さない）
+// ✅ rect は getBoundingClientRect 差分で“見た目”基準（transform/flipでも安定）
+// ✅ flip は「アクセコンテナ逆flip」＋「画像だけ再flip」
+// ✅ 複数スロット対応（hat / face / pet）
 
 (() => {
   "use strict";
@@ -115,18 +117,22 @@
   }
 
   /* =========================
-   * 画像候補を順に試す
+   * 画像候補を順に試す（強化版）
    * ========================= */
   function setSrcWithFallback(imgEl, candidates, onOk) {
     const list = (candidates || []).filter(Boolean);
     let i = 0;
+    let last = "";
 
     const tryOne = () => {
       if (i >= list.length) {
         console.warn("[isyou] all candidates failed:", list);
         return;
       }
-      imgEl.src = list[i++];
+      const next = String(list[i++]);
+      if (next === last) return tryOne();
+      last = next;
+      imgEl.src = next;
     };
 
     imgEl.onload = () => { try { onOk?.(); } catch {} };
@@ -139,29 +145,39 @@
    * Config
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v3",
-    equipped: "wb_isyou_equipped_v3",
+    owned: "wb_isyou_owned_v4",
+    equipped: "wb_isyou_equipped_v4",
   };
 
+  // ✅ 二度と同じミスをしない：指定されたパスを最優先で先頭に固定
   function imgCandidates(name) {
     return [
+      `assets/isyou/${name}`,        // ★最優先：ユーザー指定
+      `./assets/isyou/${name}`,      // ★最優先(相対)
+      `assets/${name}`,
+      `./assets/${name}`,
+      `./isyou/${name}`,
       toAbs(`./${name}`),
-      "./assets/isyou/" + name,
-      "./assets/" + name,
-      "./isyou/" + name,
-      "/assets/isyou/" + name,
-      "/assets/" + name,
+      `/assets/isyou/${name}`,
+      `/assets/${name}`,
     ];
   }
 
   const ITEMS = {
-    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
-    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
-    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
+    partyhat: { slot: "hat",  label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
+    crown:    { slot: "hat",  label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
+    ribbon:   { slot: "hat",  label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
+
+    // ✅ 追加（ユーザー画像）
+    aimasuku: { slot: "face", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
+    ahiru:    { slot: "pet",  label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450 },
   };
 
+  // それぞれ「だいたいこのへん」：必要なら微調整できるように独立
   const ANCHOR = {
-    hat: { x: 0.50, y: 0.06, w: 0.58 },
+    hat:  { x: 0.50, y: 0.06, w: 0.58 },
+    face: { x: 0.50, y: 0.34, w: 0.55 }, // 目元
+    pet:  { x: 0.78, y: 0.74, w: 0.38 }, // 右下（足元寄り）
   };
 
   /* =========================
@@ -169,7 +185,7 @@
    * ========================= */
   const state = {
     owned: {},
-    equipped: {},
+    equipped: {}, // { bornAt: { slot: itemKey } }
     mode: "browse",
     selectedItem: null,
     pendingAction: "equip",
@@ -273,9 +289,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV18")) return;
+    if (document.getElementById("isyouStyleV20")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV18";
+    s.id = "isyouStyleV20";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -390,12 +406,10 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ✅ 重要：bunnyWrap の position は上書きしない（うさぎ位置が壊れる） */
-.bunnyWrap{
-  overflow: visible !important;
-}
+/* ✅ bunnyWrap の position は上書きしない（うさぎ位置を壊さない） */
+.bunnyWrap{ overflow: visible !important; }
 
-/* アクセ最前面（座標系はJS側で安全に作る） */
+/* アクセ最前面 */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important;
@@ -528,7 +542,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     toast("🐰 うさぎをクリックして選択 → 「決定」");
   }
 
-  function setRemoveMode(slot = "hat") {
+  function setRemoveMode(slot) {
     state.selectedItem = null;
     state.pendingAction = "remove";
     state.removeSlot = slot;
@@ -562,7 +576,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
         : `<span class="badge lock">未所持</span>`;
 
       const buyBtn = `<button class="btn ${can ? "primary" : ""}" data-buy="${escapeHtml(k)}" ${can ? "" : "disabled"}>購入</button>`;
-
       const equipBtn = owned > 0
         ? `<button class="btn" data-equip="${escapeHtml(k)}">装着モード</button>`
         : `<button class="btn" disabled>装着</button>`;
@@ -596,6 +609,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
           <div class="pill">所持コイン：<b>${have}</b> 🪙</div>
           <div class="row" style="gap:8px;">
             <button class="btn danger" type="button" id="isyouRemoveHat">帽子を外す</button>
+            <button class="btn danger" type="button" id="isyouRemoveFace">顔を外す</button>
+            <button class="btn danger" type="button" id="isyouRemovePet">小物を外す</button>
             <button class="btn" type="button" id="isyouRefresh">更新</button>
           </div>
         </div>
@@ -604,7 +619,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
         <div style="height:8px"></div>
         <div class="mini">
-          ※「装着モード」を押したらモーダルが閉じます。うさぎをクリックして赤枠選択→上のバーで「決定」してください。<br>
+          ※「装着モード」を押したらモーダルが閉じます。うさぎをクリックして赤枠選択→上のバーで「決定」。<br>
           ※「外す」も同じく、赤枠選択→「外す決定」。
         </div>
       </div>
@@ -628,6 +643,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     modal.querySelector("#isyouRemoveHat")?.addEventListener("click", (e) => {
       e.preventDefault(); e.stopPropagation();
       setRemoveMode("hat");
+    });
+    modal.querySelector("#isyouRemoveFace")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      setRemoveMode("face");
+    });
+    modal.querySelector("#isyouRemovePet")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      setRemoveMode("pet");
     });
 
     modal.querySelectorAll("[data-buy]").forEach((btn) => {
@@ -714,22 +737,13 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const modeText =
       state.pendingAction === "equip"
         ? `装着：${it ? it.label : "（未選択）"} / ${sel}`
-        : `外す：${state.removeSlot || "hat"} / ${sel}`;
+        : `外す：${state.removeSlot || "?"} / ${sel}`;
 
     if (t) t.textContent = modeText;
 
     const hasTarget = !!state.selectedBornAt;
     if (doBtn) doBtn.disabled = !(hasTarget && state.pendingAction === "equip" && !!it);
     if (rmBtn) rmBtn.disabled = !(hasTarget && state.pendingAction === "remove");
-  }
-
-  function clearSelection() {
-    try {
-      document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected"));
-    } catch {}
-    state.selectedWrap = null;
-    state.selectedBornAt = null;
-    updateConfirmBar();
   }
 
   function cancelEquipMode(showToast = true) {
@@ -743,15 +757,23 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (showToast) toast("🛑 装着モードを終了");
   }
 
+  function clearSelection() {
+    try {
+      document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected"));
+    } catch {}
+    state.selectedWrap = null;
+    state.selectedBornAt = null;
+    updateConfirmBar();
+  }
+
   /* =========================
-   * Accessory render（FIX: flip完全対策）
+   * Accessory render（flip完全対策）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
     return wrap.querySelector(":scope > img.bunny, :scope > img") || wrap.querySelector("img.bunny, img") || null;
   }
 
-  // ✅ wrap が scaleX(-1) なら true
   function isFlipX(el) {
     try {
       if (!el) return false;
@@ -773,16 +795,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     return false;
   }
 
-  // ✅ ここが“二度と同じミスをしない”ポイント：
-  // - wrapのpositionをCSSで上書きしない
-  // - wrapが static の時だけ inline style で relative にする（配置を壊さない）
+  // ✅ 配置を壊さない：static の時だけ relative を付ける
   function ensureSafePositioning(wrap) {
     try {
       const pos = getComputedStyle(wrap).position;
-      if (pos === "static") {
-        // 既存の absolute 配置を壊さない（staticの時だけ付ける）
-        wrap.style.position = "relative";
-      }
+      if (pos === "static") wrap.style.position = "relative";
     } catch {}
   }
 
@@ -798,7 +815,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       wrap.appendChild(box);
     }
 
-    // ✅ 親wrapが反転していたら、アクセコンテナだけ逆flipして「座標系を通常に戻す」
     const flip = isFlipX(wrap);
     box.style.transform = flip ? "scaleX(-1)" : "none";
     box.style.transformOrigin = "0 0";
@@ -839,7 +855,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ “見た目”矩形（transform/flipがあっても画面上の位置に一致）
     function rectInWrap() {
       const br = bunnyImg.getBoundingClientRect();
       const wr = wrap.getBoundingClientRect();
@@ -854,7 +869,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     function fitFull() {
       const r = rectInWrap();
       if (r.w <= 1 || r.h <= 1) return;
-
       node.style.left = `${r.left}px`;
       node.style.top  = `${r.top}px`;
       node.style.width  = `${r.w}px`;
@@ -880,9 +894,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     function syncFlip() {
       const nowFlip = isFlipX(wrap);
-      // 座標系は box が逆flip、見た目は img を再flip
-      box.style.transform = nowFlip ? "scaleX(-1)" : "none";
-      img.style.transform = nowFlip ? "scaleX(-1)" : "none";
+      box.style.transform = nowFlip ? "scaleX(-1)" : "none"; // 座標系を戻す
+      img.style.transform = nowFlip ? "scaleX(-1)" : "none"; // 見た目を戻す
     }
 
     setSrcWithFallback(img, it.imgs, () => {
@@ -907,8 +920,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (!bornAt) return;
 
     const eq = state.equipped[String(bornAt)] || {};
-    if (eq.hat && ITEMS[eq.hat]) placeAcc(wrap, "hat", eq.hat);
-    else removeAccSlot(wrap, "hat");
+
+    // 複数スロットを適用
+    const slots = ["hat", "face", "pet"];
+    for (const slot of slots) {
+      const key = eq[slot];
+      if (key && ITEMS[key]) placeAcc(wrap, slot, key);
+      else removeAccSlot(wrap, slot);
+    }
   }
 
   function applyEquipsAll() {
@@ -1050,86 +1069,15 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   });
 
   /* =========================
-   * Confirm bar（前回同等）
-   * ========================= */
-  let confirmBar = null;
-
-  function ensureConfirmBar() {
-    if (confirmBar && confirmBar.isConnected) return confirmBar;
-    confirmBar = document.createElement("div");
-    confirmBar.id = "isyouConfirmBar";
-    confirmBar.innerHTML = `
-      <div class="row">
-        <span class="t" id="isyouSelText">未選択</span>
-        <button class="primary" id="isyouDoBtn" type="button">決定</button>
-        <button class="danger" id="isyouRemoveBtn" type="button">外す決定</button>
-        <button id="isyouCancelBtn" type="button">キャンセル</button>
-        <button id="isyouOpenShopBtn" type="button">お洒落を開く</button>
-      </div>
-    `;
-    document.body.appendChild(confirmBar);
-
-    confirmBar.querySelector("#isyouCancelBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      cancelEquipMode();
-    });
-    confirmBar.querySelector("#isyouOpenShopBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      cancelEquipMode(false);
-      openModal();
-    });
-    confirmBar.querySelector("#isyouDoBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      confirmEquip();
-    });
-    confirmBar.querySelector("#isyouRemoveBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      confirmRemove();
-    });
-
-    return confirmBar;
-  }
-
-  function showConfirmBar() {
-    ensureConfirmBar();
-    updateConfirmBar();
-    confirmBar.style.display = "block";
-  }
-
-  function hideConfirmBar() {
-    if (!confirmBar) return;
-    confirmBar.style.display = "none";
-  }
-
-  function updateConfirmBar() {
-    ensureConfirmBar();
-    const t = confirmBar.querySelector("#isyouSelText");
-    const doBtn = confirmBar.querySelector("#isyouDoBtn");
-    const rmBtn = confirmBar.querySelector("#isyouRemoveBtn");
-
-    const it = state.selectedItem ? ITEMS[state.selectedItem] : null;
-    const sel = state.selectedBornAt ? `選択：${state.selectedBornAt}` : "未選択";
-
-    const modeText =
-      state.pendingAction === "equip"
-        ? `装着：${it ? it.label : "（未選択）"} / ${sel}`
-        : `外す：${state.removeSlot || "hat"} / ${sel}`;
-
-    if (t) t.textContent = modeText;
-
-    const hasTarget = !!state.selectedBornAt;
-    if (doBtn) doBtn.disabled = !(hasTarget && state.pendingAction === "equip" && !!it);
-    if (rmBtn) rmBtn.disabled = !(hasTarget && state.pendingAction === "remove");
-  }
-
-  /* =========================
    * Debug / public
    * ========================= */
   window.ISYOU = {
     openModal,
     closeModal,
-    enterEquip: setEquipItem,
+    enterEquip: (k) => setEquipItem(k),
     enterRemoveHat: () => setRemoveMode("hat"),
+    enterRemoveFace: () => setRemoveMode("face"),
+    enterRemovePet: () => setRemoveMode("pet"),
     applyEquipsAll,
     _state: state,
     _scriptBase: SCRIPT_BASE,
