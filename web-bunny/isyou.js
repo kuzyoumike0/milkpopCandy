@@ -1,11 +1,12 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V31.3）
-// ✅ FIX：反転(scaleX(-1))時の「位置ズレ」を補正（x + width してから反転）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V31.4）
+// ✅ FIX：反転(scaleX(-1))が「img本人じゃなく親要素」に付いてても検出して補正（大幅ズレ根絶）
 // ✅ hat は bunny と同じ位置＆サイズ（getBoundingClientRect一致）
 // ✅ びくびく防止：left/top更新しない、transform translate3d で追従
+// ✅ 赤枠は fixed + translate3d（軽い＆確実に見える）
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V31.3", Date.now());
+  console.log("[isyou.js] LOADED V31.4", Date.now());
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -280,10 +281,10 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV313")) return;
+    if (document.getElementById("isyouStyleV314")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV313";
+    s.id = "isyouStyleV314";
     s.textContent = `
 #isyouBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.36);z-index:2147483000;display:none;}
 #isyouModal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(860px,94vw);max-height:min(84vh,820px);overflow:hidden;border-radius:18px;background:rgba(255,255,255,.97);box-shadow:0 24px 70px rgba(0,0,0,.28);display:flex;flex-direction:column;}
@@ -349,16 +350,28 @@
     return overlay;
   }
 
-  function isMirrored(el) {
-    if (!el) return false;
-    try {
-      const t = getComputedStyle(el).transform;
-      if (!t || t === "none") return false;
-      const m = new DOMMatrixReadOnly(t);
-      return (m.a || 0) < 0;
-    } catch {
-      return false;
+  // ✅ ここが本丸：親要素に付いた scaleX(-1) も含め「反転の有無」を検出
+  // - CSS transform の行列 determinant が負なら「鏡映（反転）」扱い
+  // - 祖先分を XOR で畳み込む（反転×反転=元に戻る）
+  function isMirroredDeep(el, stopEl) {
+    let cur = el;
+    let mirrored = 0;
+
+    const stop = stopEl || document.getElementById("bunnyLayer") || document.getElementById("field") || null;
+
+    while (cur && cur !== document.documentElement) {
+      try {
+        const t = getComputedStyle(cur).transform;
+        if (t && t !== "none") {
+          const m = new DOMMatrixReadOnly(t);
+          const det = (m.a * m.d) - (m.b * m.c);
+          if (det < 0) mirrored ^= 1;
+        }
+      } catch {}
+      if (stop && cur === stop) break;
+      cur = cur.parentElement;
     }
+    return !!mirrored;
   }
 
   /* =========================
@@ -489,7 +502,8 @@
     scheduleSyncLoop();
   }
 
-  // ✅ FIX：反転時は tx = x + w にしてから scaleX(-1)
+  // ✅ FIX：反転は「img本人」だけでなく「祖先の反転」も含めて判定
+  // ✅ 反転時は tx = x + w にしてから scaleX(-1)（位置ズレ根絶）
   function syncHatEnt(ent, ovRect) {
     const img = ent.targetImg;
     const hat = ent.hatDiv;
@@ -503,14 +517,15 @@
     const y = ir.top  - ovRect.top;
     const w = ir.width;
     const h = ir.height;
-    const mir = isMirrored(img) ? 1 : 0;
+
+    const mir = isMirroredDeep(img) ? 1 : 0;
 
     const L = ent.last;
 
     if (Math.abs(L.w - w) > SIZE_EPS) { hat.style.width = `${w}px`; L.w = w; }
     if (Math.abs(L.h - h) > SIZE_EPS) { hat.style.height = `${h}px`; L.h = h; }
 
-    const tx = mir ? (x + w) : x; // ★ここがズレ修正の本体
+    const tx = mir ? (x + w) : x;
 
     if (Math.abs(L.tx - tx) > POS_EPS || Math.abs(L.y - y) > POS_EPS || L.mir !== mir) {
       hat.style.transform = mir
@@ -599,7 +614,7 @@
   }
 
   /* =========================
-   * Modal / Confirm / Select
+   * Toast
    * ========================= */
   function toast(text) {
     const t = String(text ?? "").trim();
@@ -634,6 +649,9 @@
     setTimeout(() => { try { el.remove(); } catch {} }, 3200);
   }
 
+  /* =========================
+   * Modal / Confirm / Select
+   * ========================= */
   let backdrop = null;
   let modal = null;
 
