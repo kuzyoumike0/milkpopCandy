@@ -210,10 +210,9 @@
     partyhat: { slot: "hat",  label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
     crown:    { slot: "hat",  label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900, fit: "full" },
     ribbon:   { slot: "hat",  label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700, fit: "full" },
-
-    // 追加
-    aimasuku: { slot: "face", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650, fit: "anchor" },
-    ahiru:    { slot: "pet",  label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450, fit: "anchor" },
+    ahiru:    { slot: "hat",  label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450, fit: "full" },
+    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650, fit: "full" },
+    
   };
 
   // ✅ “謎の -0.40” を廃止：slotごとに lift を明示（face/pet は lift=0）
