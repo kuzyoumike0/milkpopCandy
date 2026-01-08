@@ -1,7 +1,8 @@
 // isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（FIX: 反転でも位置ズレない）
 // ✅ partyhat は「うさぎ同サイズ同位置」
-// ✅ FIX: wrap が scaleX(-1) でも、アクセ側で座標系を“元に戻す”方式（逆flip）でズレを消す
-// ✅ FIX: bunnyWrap のレイアウトを壊す display:block 強制などを撤去（うさぎ自体がズレる原因）
+// ✅ FIX: .bunnyWrap を position:relative にして absolute の基準を固定（左上へ飛ぶズレ解消）
+// ✅ FIX: rect は getBoundingClientRect 差分で“見た目”基準（transform/flipでも安定）
+// ✅ FIX: wrap が反転していても、アクセ側を逆flipして座標系を戻し、画像だけ再flipして見た目一致
 
 (() => {
   "use strict";
@@ -19,7 +20,10 @@
         let v = null;
         try { v = getter(); } catch {}
         if (v) { clearInterval(t); resolve(v); return; }
-        if (Date.now() - start > timeoutMs) { clearInterval(t); reject(new Error("waitFor timeout")); }
+        if (Date.now() - start > timeoutMs) {
+          clearInterval(t);
+          reject(new Error("waitFor timeout"));
+        }
       }, TICK_MS);
     });
   }
@@ -268,9 +272,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV16")) return;
+    if (document.getElementById("isyouStyleV17")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV16";
+    s.id = "isyouStyleV17";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -385,10 +389,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ✅ うさぎ“下がり/ズレ”の原因になる display:block 強制などを撤去
-   - ここでは overflow だけ許可（アクセがはみ出してもOK）
-*/
+/* ✅ 最重要：absolute の基準を bunnyWrap に固定（左上へ飛ぶのを防ぐ） */
 .bunnyWrap{
+  position: relative !important;
   overflow: visible !important;
 }
 
@@ -779,9 +782,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       wrap.appendChild(box);
     }
 
-    // ✅ ここが本命：
-    //   親wrapが反転していたら、アクセコンテナだけ逆flipして「座標系を通常に戻す」
-    //   ただし画像は後で scaleX(-1) して“見た目はうさぎと同じ反転”にする
+    // ✅ 親wrapが反転していたら、アクセコンテナだけ逆flipして「座標系を通常に戻す」
     const flip = isFlipX(wrap);
     box.style.transform = flip ? "scaleX(-1)" : "none";
     box.style.transformOrigin = "0 0";
@@ -824,20 +825,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const wrapFlip = isFlipX(wrap);
 
+    // ✅ 見た目ベースの矩形（transform/flipがあっても“画面上の見え方”に一致）
     function rectInWrap() {
-      let w = bunnyImg.offsetWidth || 0;
-      let h = bunnyImg.offsetHeight || 0;
-      let left = bunnyImg.offsetLeft || 0;
-      let top  = bunnyImg.offsetTop  || 0;
-
-      if (w <= 0 || h <= 0) {
-        const br = bunnyImg.getBoundingClientRect();
-        const wr = wrap.getBoundingClientRect();
-        w = br.width;
-        h = br.height;
-        left = (br.left - wr.left);
-        top  = (br.top  - wr.top);
-      }
+      const br = bunnyImg.getBoundingClientRect();
+      const wr = wrap.getBoundingClientRect();
+      const w = br.width;
+      const h = br.height;
+      const left = (br.left - wr.left);
+      const top  = (br.top  - wr.top);
       return { w, h, left, top };
     }
 
@@ -876,14 +871,13 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       requestAnimationFrame(() => requestAnimationFrame(fit));
     });
 
-    // 初回も反映
     img.style.transform = wrapFlip ? "scaleX(-1)" : "none";
     requestAnimationFrame(() => requestAnimationFrame(fit));
 
     let n = 0;
     const timer = setInterval(() => {
       n++;
-      // wrapのflip状態が途中で変わっても追従
+      // flipが途中で変わっても追従
       const nowFlip = isFlipX(wrap);
       img.style.transform = nowFlip ? "scaleX(-1)" : "none";
       box.style.transform = nowFlip ? "scaleX(-1)" : "none";
