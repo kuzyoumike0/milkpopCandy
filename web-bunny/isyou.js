@@ -1,11 +1,11 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（V21）
+// ✅ FIX: 反転でも帽子がズレない（アクセコンテナは絶対にflipしない／座標だけ左右反転補正）
 // ✅ FIX: assets/isyou/partyhat.png を最優先で必ず試す（表示されないミスを二度としない）
-// ✅ 追加: aimasuku.png（アイマスク） / ahiru.png（アヒル）
+// ✅ 追加: aimasuku.png（face） / ahiru.png（pet）
 // ✅ bunnyWrap の position を !important で上書きしない（うさぎ位置を壊さない）
-// ✅ static の時だけ inline で relative 付与（配置を壊さない）
+// ✅ static の時だけ inline で relative を付ける（壊さない）
 // ✅ rect は getBoundingClientRect 差分で“見た目”基準（transform/flipでも安定）
-// ✅ flip は「アクセコンテナ逆flip」＋「画像だけ再flip」
-// ✅ 複数スロット対応（hat / face / pet）
+// ✅ partyhat は「うさぎ同サイズ同位置」（セル前提＝フルフィット）
 
 (() => {
   "use strict";
@@ -149,11 +149,11 @@
     equipped: "wb_isyou_equipped_v4",
   };
 
-  // ✅ 二度と同じミスをしない：指定されたパスを最優先で先頭に固定
+  // ✅ assets/isyou/xxx を必ず最優先で先頭固定
   function imgCandidates(name) {
     return [
-      `assets/isyou/${name}`,        // ★最優先：ユーザー指定
-      `./assets/isyou/${name}`,      // ★最優先(相対)
+      `assets/isyou/${name}`,        // ★最優先
+      `./assets/isyou/${name}`,      // ★最優先（相対）
       `assets/${name}`,
       `./assets/${name}`,
       `./isyou/${name}`,
@@ -168,16 +168,15 @@
     crown:    { slot: "hat",  label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
     ribbon:   { slot: "hat",  label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
 
-    // ✅ 追加（ユーザー画像）
+    // 追加
     aimasuku: { slot: "face", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
     ahiru:    { slot: "pet",  label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450 },
   };
 
-  // それぞれ「だいたいこのへん」：必要なら微調整できるように独立
   const ANCHOR = {
     hat:  { x: 0.50, y: 0.06, w: 0.58 },
-    face: { x: 0.50, y: 0.34, w: 0.55 }, // 目元
-    pet:  { x: 0.78, y: 0.74, w: 0.38 }, // 右下（足元寄り）
+    face: { x: 0.50, y: 0.34, w: 0.55 },
+    pet:  { x: 0.78, y: 0.74, w: 0.38 },
   };
 
   /* =========================
@@ -289,9 +288,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV20")) return;
+    if (document.getElementById("isyouStyleV21")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV20";
+    s.id = "isyouStyleV21";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -406,10 +405,10 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ✅ bunnyWrap の position は上書きしない（うさぎ位置を壊さない） */
+/* ✅ bunnyWrap を壊さない */
 .bunnyWrap{ overflow: visible !important; }
 
-/* アクセ最前面 */
+/* ✅ アクセ最前面（コンテナは flip しない！） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important;
@@ -417,7 +416,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
-  transform-origin: 0 0 !important;
   transform: translateZ(0);
 }
 .bunnyWrap .isyouAcc > div{ position:absolute; }
@@ -490,10 +488,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     }
 
     backdrop.onclick = (e) => {
-      if (state.mode === "equip") {
-        e.stopPropagation();
-        return;
-      }
+      if (state.mode === "equip") { e.stopPropagation(); return; }
       if (e.target === backdrop) closeModal();
     };
   }
@@ -746,6 +741,13 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (rmBtn) rmBtn.disabled = !(hasTarget && state.pendingAction === "remove");
   }
 
+  function clearSelection() {
+    try { document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected")); } catch {}
+    state.selectedWrap = null;
+    state.selectedBornAt = null;
+    updateConfirmBar();
+  }
+
   function cancelEquipMode(showToast = true) {
     state.mode = "browse";
     state.selectedItem = null;
@@ -757,17 +759,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (showToast) toast("🛑 装着モードを終了");
   }
 
-  function clearSelection() {
-    try {
-      document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected"));
-    } catch {}
-    state.selectedWrap = null;
-    state.selectedBornAt = null;
-    updateConfirmBar();
-  }
-
   /* =========================
-   * Accessory render（flip完全対策）
+   * Accessory render（ズレ完全修正：座標だけ左右反転補正）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
@@ -795,7 +788,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     return false;
   }
 
-  // ✅ 配置を壊さない：static の時だけ relative を付ける
   function ensureSafePositioning(wrap) {
     try {
       const pos = getComputedStyle(wrap).position;
@@ -805,7 +797,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
   function ensureAccContainer(wrap) {
     if (!wrap) return null;
-
     ensureSafePositioning(wrap);
 
     let box = wrap.querySelector(":scope > .isyouAcc");
@@ -815,10 +806,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       wrap.appendChild(box);
     }
 
-    const flip = isFlipX(wrap);
-    box.style.transform = flip ? "scaleX(-1)" : "none";
-    box.style.transformOrigin = "0 0";
-
+    // ✅ 絶対に box は flip しない（ここが前回のミス）
+    box.style.transform = "none";
     return box;
   }
 
@@ -826,9 +815,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (!wrap) return;
     const box = wrap.querySelector(":scope > .isyouAcc");
     if (!box) return;
-    box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => {
-      try { n.remove(); } catch {}
-    });
+    box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
   }
 
   function placeAcc(wrap, slot, itemKey) {
@@ -836,10 +823,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const bunnyImg = getBunnyImg(wrap);
     const box = ensureAccContainer(wrap);
-    if (!box || !bunnyImg) {
-      console.warn("[isyou] bunnyImg not found for wrap", wrap);
-      return;
-    }
+    if (!box || !bunnyImg) return;
 
     removeAccSlot(wrap, slot);
 
@@ -862,15 +846,29 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
         w: br.width,
         h: br.height,
         left: br.left - wr.left,
-        top: br.top - wr.top
+        top: br.top - wr.top,
+        wrapW: wr.width
       };
+    }
+
+    function applyFlipFixX(x, w, wrapW) {
+      // wrap が左右反転していると「見た目」は左右反転するので、座標を反転補正する
+      // x' = wrapW - (x + w)
+      if (wrapW > 1) return (wrapW - (x + w));
+      return x;
     }
 
     function fitFull() {
       const r = rectInWrap();
       if (r.w <= 1 || r.h <= 1) return;
-      node.style.left = `${r.left}px`;
-      node.style.top  = `${r.top}px`;
+
+      let x = r.left;
+      const y = r.top;
+
+      if (isFlipX(wrap)) x = applyFlipFixX(x, r.w, r.wrapW);
+
+      node.style.left = `${x}px`;
+      node.style.top  = `${y}px`;
       node.style.width  = `${r.w}px`;
       node.style.height = `${r.h}px`;
     }
@@ -881,8 +879,10 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       if (r.w <= 1 || r.h <= 1) return;
 
       const pw = r.w * (a.w || 0.58);
-      const px = r.left + r.w * (a.x || 0.5) - pw / 2;
-      const py = r.top  + r.h * (a.y || 0.06) - pw * 0.40;
+      let px = r.left + r.w * (a.x || 0.5) - pw / 2;
+      const py = r.top + r.h * (a.y || 0.06) - pw * 0.40;
+
+      if (isFlipX(wrap)) px = applyFlipFixX(px, pw, r.wrapW);
 
       node.style.left = `${px}px`;
       node.style.top  = `${py}px`;
@@ -892,26 +892,25 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const fit = (it.fit === "full") ? fitFull : fitAnchor;
 
-    function syncFlip() {
-      const nowFlip = isFlipX(wrap);
-      box.style.transform = nowFlip ? "scaleX(-1)" : "none"; // 座標系を戻す
-      img.style.transform = nowFlip ? "scaleX(-1)" : "none"; // 見た目を戻す
+    function syncVisualFlip() {
+      // 親が flip なら子も反転して見える → 画像だけ逆反転して「見た目」を元に戻す
+      img.style.transform = isFlipX(wrap) ? "scaleX(-1)" : "none";
     }
 
     setSrcWithFallback(img, it.imgs, () => {
-      syncFlip();
+      syncVisualFlip();
       requestAnimationFrame(() => requestAnimationFrame(fit));
     });
 
-    syncFlip();
+    syncVisualFlip();
     requestAnimationFrame(() => requestAnimationFrame(fit));
 
     let n = 0;
     const timer = setInterval(() => {
       n++;
-      syncFlip();
+      syncVisualFlip();
       fit();
-      if (n >= 14) clearInterval(timer);
+      if (n >= 16) clearInterval(timer);
     }, 50);
   }
 
@@ -920,10 +919,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (!bornAt) return;
 
     const eq = state.equipped[String(bornAt)] || {};
-
-    // 複数スロットを適用
-    const slots = ["hat", "face", "pet"];
-    for (const slot of slots) {
+    for (const slot of ["hat", "face", "pet"]) {
       const key = eq[slot];
       if (key && ITEMS[key]) placeAcc(wrap, slot, key);
       else removeAccSlot(wrap, slot);
@@ -1074,10 +1070,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   window.ISYOU = {
     openModal,
     closeModal,
-    enterEquip: (k) => setEquipItem(k),
-    enterRemoveHat: () => setRemoveMode("hat"),
-    enterRemoveFace: () => setRemoveMode("face"),
-    enterRemovePet: () => setRemoveMode("pet"),
     applyEquipsAll,
     _state: state,
     _scriptBase: SCRIPT_BASE,
