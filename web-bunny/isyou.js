@@ -7,6 +7,8 @@
 // ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる：autoズレ対策）
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ FIX：他のうさぎより帽子だけ上に出ない（bunnyWrapをスタッキングコンテキスト化＋zを小さく）
+// ✅ NEW：衣装付け替え（装着）中は「コイン落とし」を止める（captureで止める）
+// ✅ NEW：装着成功時に Onoma-Pop03-1(High).mp3 を鳴らす
 
 (() => {
   "use strict";
@@ -57,7 +59,7 @@
           anchorY: 0.18,
           offsetX: 0,
           offsetY: 0,
-          z: 2, // ← 巨大にしない
+          z: 2,
         },
       };
 
@@ -98,9 +100,7 @@
           z: 2,
           keepUpright: false,
         },
-
         // ✅ aimasuku：うさぎと完全一致（同サイズ・同位置）
-        // ※「完全一致」が最優先なので keepUpright は false 推奨（trueだとズレやすい）
         aimasuku: {
           label: "アイマスク",
           img: "/assets/isyou/aimasuku.png",
@@ -113,7 +113,6 @@
           z: 2,
           keepUpright: false,
         },
-
         ahiru: {
           label: "ぷかアヒル",
           img: "/assets/isyou/ahiru.png",
@@ -127,6 +126,26 @@
           keepUpright: false,
         },
       };
+
+      /* =========================
+       * SE (装着時)
+       * ========================= */
+      // 置き場所が違う場合はここだけパス変更してください
+      const EQUIP_SE_SRC = "/assets/Onoma-Pop03-1(High).mp3";
+
+      const equipSE = new Audio(EQUIP_SE_SRC);
+      equipSE.preload = "auto";
+      equipSE.volume = 1.0;
+
+      function playEquipSE() {
+        try {
+          // iOS等：ユーザー操作後に解放されるので、呼べるだけ呼ぶ
+          if (typeof WB.unlockAudioOnce === "function") WB.unlockAudioOnce();
+          equipSE.currentTime = 0;
+          const p = equipSE.play();
+          if (p && typeof p.catch === "function") p.catch(() => {});
+        } catch {}
+      }
 
       /* =========================
        * CSS
@@ -151,7 +170,7 @@
 }
 #isyouBtn:hover{ filter:brightness(1.03); }
 
-/* ✅ ここが重要：wrap内で重なりを閉じ込める（他のうさぎより帽子が前に出ない） */
+/* ✅ wrap内で重なりを閉じ込める（他のうさぎより帽子が前に出ない） */
 .bunnyWrap{ isolation:isolate; }
 
 /* うさぎ画像を1、アクセを2にする（同じうさぎの上にだけ乗る） */
@@ -166,7 +185,7 @@
   pointer-events:none;
   user-select:none;
   -webkit-user-drag:none;
-  z-index:2; /* ✅ 巨大にしない */
+  z-index:2;
 }
 
 /* 装着モード赤枠 */
@@ -534,26 +553,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       btn.addEventListener("click", () => {
-        const tap = (e) => {
-  // ✅ お洒落（装着）モード中は「コイン落とし」を無効化
-  if (document.body.classList.contains("isyouEquipMode")) return;
-
-  e?.preventDefault?.();
-  unlockAudioOnce();
-  playSE(this.isBaby ? seBaby : sePoyo);
-
-  if (this.isBaby) {
-    spawnClickCoins(this, 1, () => 0);
-    return;
-  }
-
-  const plan = this.getDropPlanFromOwnCharge();
-  spawnClickCoins(this, plan.count, plan.pickTier);
-
-  this.consumeOwnCharge();
-  this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
-};
-
+        // ここで一度だけ audio unlock を試す（以降は装着時に play できる）
         WB.unlockAudioOnce?.();
         openModal();
       });
@@ -642,14 +642,12 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
           const base = (cs.transform && cs.transform !== "none") ? cs.transform : "";
           const extraMove = (ox || oy) ? ` translate(${ox}px, ${oy}px)` : "";
-          // ※ keepUpright はズレ要因になりやすい。必要な時だけ true にする
           const extraFlip = keepUpright ? " scaleX(-1)" : "";
 
           const t = `${base}${extraMove}${extraFlip}`.trim() || "none";
           imgEl.style.setProperty("--isyouT", t);
           imgEl.style.transform = t;
 
-          // ✅ zは固定で小さく（同うさぎの上だけ）
           imgEl.style.zIndex = "2";
           return;
         }
@@ -722,6 +720,9 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         saveAll();
         drawAllForBunny(bunny);
 
+        // ✅ 装着成功SE
+        playEquipSE();
+
         if (itemKey === "partyhat") {
           bunny.wrap.classList.add("isyouPopHat");
           setTimeout(() => bunny.wrap?.classList?.remove("isyouPopHat"), 260);
@@ -745,6 +746,24 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         saveAll();
         drawAllForBunny(bunny);
       }
+
+      /* =========================
+       * ✅ 装着中は「コイン落とし系クリック」を止める（最優先capture）
+       * ========================= */
+      document.addEventListener("pointerdown", (e) => {
+        if (!equipMode) return;
+
+        // モーダル操作は止めない
+        if (e.target?.closest?.(".isyouModal")) return;
+
+        // うさぎ周りを触ったら、その先のクリック処理（コイン落とし等）を止める
+        const wrap = e.target?.closest?.(".bunnyWrap");
+        if (wrap) {
+          try { e.preventDefault?.(); } catch {}
+          try { e.stopPropagation?.(); } catch {}
+          try { e.stopImmediatePropagation?.(); } catch {}
+        }
+      }, { capture: true });
 
       /* =========================
        * Equip mode click
@@ -800,7 +819,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (no cross-bunny z issue)");
+      console.log("[isyou] ready (equip blocks coin drop + equip se)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
