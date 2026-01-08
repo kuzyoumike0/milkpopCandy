@@ -1,10 +1,12 @@
-// tabidati.js（v12.8 app.js対応）
+// tabidati.js（v12.8 app.js対応 / FIX: 旅立ち後に hart.png が残らない）
 // - 旅立ちモードON/OFF
 // - 旅立ち時：コスト支払い / SE / 記録 / メッセージ / うさぎ削除
 // - 旅立ちモード中：うさぎホバーで赤縁取り
 // - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（はみ出し防止）
 // - 「長い空白メッセージ」対策：専用トーストCSSで表示
 // ✅ SYOUGOU.add("tabidachi") を直接呼ぶ（あれば）
+// ✅ FIX: app.js が field 直下に生成する .wbChargeHart（hart.png）を残さない
+// ✅ 正攻法：WB.removeBunnyInstance(bunny) を優先して使う（wrap/hart/配列/保存/emitを一括整理）
 
 (() => {
   if (!window.WB) return;
@@ -16,6 +18,9 @@
   let departMode = false;
   let clampTimer = null;
 
+  /* =========================
+   * Helpers（WB互換）
+   * ========================= */
   function getBunnyList() {
     if (typeof WB.getBunnies === "function") return WB.getBunnies();
     if (Array.isArray(WB.bunnies)) return WB.bunnies;
@@ -40,6 +45,9 @@
     return false;
   }
 
+  /* =========================
+   * Toast
+   * ========================= */
   function ensureToastStyles() {
     if (document.getElementById("tabidatiToastStyleV2")) return;
     const s = document.createElement("style");
@@ -73,12 +81,14 @@
   from { opacity:1; transform:translate(-50%,-50%); }
   to   { opacity:0; transform:translate(-50%,-30%); }
 }
+
 body.departModeOn .bunnyWrap{ outline: none; }
 body.departModeOn .bunnyWrap:hover{
   outline: 4px solid rgba(255, 64, 64, .85);
   outline-offset: 3px;
   border-radius: 18px;
 }
+
 .bunnyWrap.departing{
   pointer-events: none !important;
   filter: saturate(1.05);
@@ -98,9 +108,14 @@ body.departModeOn .bunnyWrap:hover{
     el.className = "tabidatiToast";
     el.textContent = text;
     document.body.appendChild(el);
-    setTimeout(() => { try { el.remove(); } catch {} }, 1800);
+    setTimeout(() => {
+      try { el.remove(); } catch {}
+    }, 1800);
   }
 
+  /* =========================
+   * Mode
+   * ========================= */
   function setDepartMode(on) {
     departMode = !!on;
 
@@ -118,6 +133,9 @@ body.departModeOn .bunnyWrap:hover{
     setDepartMode(!departMode);
   }
 
+  /* =========================
+   * Clamp（旅立ち中はみ出し防止）
+   * ========================= */
   function startClamp() {
     stopClamp();
 
@@ -171,6 +189,9 @@ body.departModeOn .bunnyWrap:hover{
     }
   }
 
+  /* =========================
+   * Depart core（FIX: hart残り）
+   * ========================= */
   async function departBunny(bunny) {
     if (!bunny) return false;
 
@@ -198,24 +219,41 @@ body.departModeOn .bunnyWrap:hover{
     try { WB.recordFarewell?.(bunny.kind || bunny.adultSrc || ""); } catch {}
     try { WB.showFarewellMessage?.(bunny.kind || ""); } catch {}
 
-    const idx = list.indexOf(bunny);
-    if (idx >= 0) list.splice(idx, 1);
+    // ✅ 旅立ちアニメ中に hart が残らないよう、先に消す
+    try { bunny.hideHeart?.(); } catch {}
+    try { bunny.hartEl?.remove?.(); } catch {}
 
+    // アニメ
+    const w = bunny.wrap;
     try {
-      const w = bunny.wrap;
       if (w) {
         w.classList.add("departing");
         await new Promise((r) => setTimeout(r, 520));
-        try { w.remove(); } catch {}
       }
-    } catch {
-      try { bunny.wrap?.remove(); } catch {}
+    } catch {}
+
+    // ✅ 正攻法：WB.removeBunnyInstance を優先（wrap/hart/配列/保存/emitまで）
+    let removed = false;
+    if (typeof WB.removeBunnyInstance === "function") {
+      try {
+        removed = !!WB.removeBunnyInstance(bunny);
+      } catch {
+        removed = false;
+      }
     }
 
-    try { WB.saveBunnyMeta?.(); } catch {}
-    try { WB.checkUnlocks?.(); } catch {}
+    // フォールバック（旧環境）
+    if (!removed) {
+      const idx = list.indexOf(bunny);
+      if (idx >= 0) list.splice(idx, 1);
 
-    try { WB.emit?.("bunnyCountChanged", { count: list.length }); } catch {}
+      try { w?.remove?.(); } catch {}
+      try { WB.saveBunnyMeta?.(); } catch {}
+      try { WB.emit?.("bunnyCountChanged", { count: list.length }); } catch {}
+    }
+
+    // 他モジュール通知
+    try { WB.checkUnlocks?.(); } catch {}
 
     // ✅ 称号カウント
     try { window.SYOUGOU?.add?.("tabidachi", 1); } catch {}
@@ -225,6 +263,9 @@ body.departModeOn .bunnyWrap:hover{
     return true;
   }
 
+  /* =========================
+   * Click to depart（capture）
+   * ========================= */
   function onPointerDownCapture(e) {
     if (!departMode) return;
     if (e.button != null && e.button !== 0) return;
@@ -237,12 +278,15 @@ body.departModeOn .bunnyWrap:hover{
     e.stopImmediatePropagation();
 
     const list = getBunnyList();
-    const bunny = list.find(b => b.wrap === wrap);
+    const bunny = list.find((b) => b && b.wrap === wrap);
     if (!bunny) return;
 
     departBunny(bunny);
   }
 
+  /* =========================
+   * Bind
+   * ========================= */
   if (WB.departBtn) {
     WB.departBtn.addEventListener("click", (e) => {
       e.preventDefault();
@@ -252,6 +296,9 @@ body.departModeOn .bunnyWrap:hover{
 
   document.addEventListener("pointerdown", onPointerDownCapture, true);
 
+  /* =========================
+   * Public
+   * ========================= */
   WB.tabidati = {
     setDepartMode,
     toggleDepartMode,
