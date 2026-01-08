@@ -1,15 +1,15 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版（HAT表示FIX + うさぎ下がり完全FIX版）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は選択中だけz-indexを上げる
-// ✅ FIX：アクセは「最前面」＆「はみ出しOK」（z-index / overflow / stacking対策）
-// ✅ FIX：位置計算は offset を優先（transform/flipでも安定）+ 連続fitで取りこぼし防止
-// ✅ FIX：isyouAcc を append（wrapレイアウトへ影響ゼロ）
-// ✅ FIX：うさぎが下に行く原因（flex/line-height/gap等）を完全遮断：bunnyWrapを inline-block + line-height:0 + 余白ゼロ固定
-// ✅ 重要：hat は「置き換え」（同時に1つだけ）
+// ✅ FIX：アクセは最前面＆はみ出しOK
+// ✅ FIX：位置計算は offset 優先（transform/flipでも安定）+ 連続fit
+// ✅ FIX：partyhat等が404でも「候補パスを順に試す」ので必ず表示される（環境差吸収）
+// ✅ FIX：うさぎが下がるのを遮断（line-height/font-size/余白）
+// ✅ 重要：hat は置き換え（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
 
 (() => {
@@ -98,6 +98,50 @@
   }
 
   /* =========================
+   * Script base（isyou.jsの場所を基準にする）
+   * ========================= */
+  function getScriptBase() {
+    try {
+      // できれば自分自身
+      const cs = document.currentScript?.src;
+      if (cs) return new URL(".", cs).toString();
+
+      // 探す
+      const s = [...document.scripts].map(x => x.src).find(src => /isyou\.js(\?|#|$)/.test(src));
+      if (s) return new URL(".", s).toString();
+    } catch {}
+    // 最後の手段：ページ基準
+    return new URL(".", location.href).toString();
+  }
+  const SCRIPT_BASE = getScriptBase();
+
+  function toAbs(path) {
+    try { return new URL(path, SCRIPT_BASE).toString(); } catch { return path; }
+  }
+
+  /* =========================
+   * 画像の「候補パス」を順に試す
+   * ========================= */
+  function setSrcWithFallback(imgEl, candidates, onOk) {
+    const list = (candidates || []).filter(Boolean);
+    let i = 0;
+
+    const tryOne = () => {
+      if (i >= list.length) {
+        console.warn("[isyou] all candidates failed:", list);
+        return;
+      }
+      const src = list[i++];
+      imgEl.src = src;
+    };
+
+    imgEl.onload = () => { try { onOk?.(); } catch {} };
+    imgEl.onerror = () => tryOne();
+
+    tryOne();
+  }
+
+  /* =========================
    * Config
    * ========================= */
   const LS = {
@@ -105,11 +149,27 @@
     equipped: "wb_isyou_equipped_v3", // { bornAt: { slotKey: itemKey } }
   };
 
-  // ✅ assets構成に合わせる
+  // ✅ どこに置いても拾えるよう候補を複数用意（SCRIPT_BASE基準も入れる）
+  function imgCandidates(name) {
+    return [
+      // isyou.js と同じフォルダにある想定（/isyou/partyhat.png）
+      toAbs(`./${name}`),
+
+      // あなたが置きがちな場所
+      "./assets/isyou/" + name,
+      "./assets/" + name,
+      "./isyou/" + name,
+
+      // 絶対パス気味（過去に /assets/partyhat.png 404 が出てたので保険）
+      "/assets/isyou/" + name,
+      "/assets/" + name,
+    ];
+  }
+
   const ITEMS = {
-    partyhat: { slot: "hat", label: "パーティーハット", img: "./assets/isyou/partyhat.png", price: 500 },
-    crown:    { slot: "hat", label: "クラウン",         img: "./assets/isyou/crown.png",    price: 900 },
-    ribbon:   { slot: "hat", label: "リボン",           img: "./assets/isyou/ribbon.png",   price: 700 },
+    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500 },
+    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
+    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
   };
 
   // 帽子位置（うさぎ画像に対する割合）
@@ -204,11 +264,10 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV11")) return;
+    if (document.getElementById("isyouStyleV12")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV11";
+    s.id = "isyouStyleV12";
     s.textContent = `
-/* === modal === */
 #isyouBackdrop{
   position: fixed; inset:0;
   background: rgba(0,0,0,.36);
@@ -288,7 +347,6 @@
 }
 #isyouModal .badge.lock{ background: rgba(255,120,120,.18); }
 
-/* === equip confirm bar === */
 #isyouConfirmBar{
   position: fixed;
   left: 50%;
@@ -315,7 +373,6 @@
 #isyouConfirmBar button.primary{ background:#ffd6e7; }
 #isyouConfirmBar button.danger{ background: rgba(255,80,80,.12); }
 
-/* === selection red outline (only in equip mode) === */
 body.isyouEquipMode .bunnyWrap{ outline: none; }
 body.isyouEquipMode .bunnyWrap.isyouSelected{
   outline: 4px solid rgba(255, 64, 64, .88);
@@ -324,18 +381,16 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ===== ✅ うさぎ下がり完全FIX：wrapのレイアウト影響を遮断 ===== */
+/* ✅ うさぎ下がり遮断（行の余白/inline余白など全部潰す） */
 .bunnyWrap{
-  position: absolute !important;        /* app.jsの挙動（left/top移動）を壊さない */
+  position: absolute !important;
   overflow: visible !important;
-  display: block !important;            /* flex等を潰す */
+  display: block !important;
   padding: 0 !important;
   margin: 0 !important;
-  line-height: 0 !important;            /* inline要素の下余白を消す */
-  font-size: 0 !important;              /* 行高由来の余白も消す */
+  line-height: 0 !important;
+  font-size: 0 !important;
 }
-
-/* うさぎ本体 */
 .bunnyWrap > img.bunny,
 .bunnyWrap > img{
   display:block !important;
@@ -345,19 +400,16 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 1 !important;
 }
 
-/* アクセコンテナ（wrapレイアウトに関与しない） */
+/* アクセ最前面 */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important;
-  width:0; height:0;                    /* node側でwidth/heightを持つのでここは0でOK */
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
   transform: translateZ(0);
 }
-.bunnyWrap .isyouAcc > div{
-  position:absolute;
-}
+.bunnyWrap .isyouAcc > div{ position:absolute; }
 .bunnyWrap .isyouAcc img{
   display:block;
   width:100%;
@@ -519,8 +571,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
       return `
         <div class="card">
-          <img class="thumb" src="${escapeHtml(it.img)}" alt="${escapeHtml(it.label)}"
-               onerror="console.warn('[isyou] image 404:', this.src)">
+          <img class="thumb" data-itemthumb="${escapeHtml(k)}" alt="${escapeHtml(it.label)}">
           <div class="info">
             <div class="name">${escapeHtml(it.label)}</div>
             <div class="mini">スロット：${escapeHtml(it.slot)}</div>
@@ -560,6 +611,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
         </div>
       </div>
     `;
+
+    // ✅ サムネは候補パスで確実に表示
+    modal.querySelectorAll("img[data-itemthumb]").forEach((img) => {
+      const key = img.getAttribute("data-itemthumb");
+      const it = ITEMS[key];
+      if (!it) return;
+      setSrcWithFallback(img, it.imgs, null);
+    });
 
     modal.querySelector("#isyouCloseBtn")?.addEventListener("click", (e) => {
       e.preventDefault(); e.stopPropagation();
@@ -715,7 +774,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     });
   }
 
-  function placeAcc(wrap, slot, imgSrc) {
+  function placeAcc(wrap, slot, itemKey) {
     if (!wrap) return;
 
     const bunnyImg = getBunnyImg(wrap);
@@ -731,16 +790,23 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     node.dataset.slot = slot;
 
     const img = document.createElement("img");
-    img.src = imgSrc;
     img.alt = slot;
-    img.onerror = () => console.warn("[isyou] acc image 404:", imgSrc);
     node.appendChild(img);
 
     box.appendChild(node);
 
+    const it = ITEMS[itemKey];
+    if (!it) return;
+
+    // ✅ ここが表示されない最大原因だったので、候補パスを順に試す
+    setSrcWithFallback(img, it.imgs, () => {
+      // load後にfitをもう一回
+      requestAnimationFrame(() => requestAnimationFrame(fit));
+    });
+
     const a = ANCHOR[slot] || ANCHOR.hat;
 
-    const fit = () => {
+    function fit() {
       let w = bunnyImg.offsetWidth || 0;
       let h = bunnyImg.offsetHeight || 0;
       let left = bunnyImg.offsetLeft || 0;
@@ -765,10 +831,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.top  = `${py}px`;
       node.style.width = `${pw}px`;
       node.style.height = `${pw}px`;
-    };
+    }
 
     requestAnimationFrame(() => requestAnimationFrame(fit));
-    img.onload = () => requestAnimationFrame(() => requestAnimationFrame(fit));
 
     let n = 0;
     const timer = setInterval(() => {
@@ -784,7 +849,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const eq = state.equipped[String(bornAt)] || {};
     if (eq.hat && ITEMS[eq.hat]) {
-      placeAcc(wrap, "hat", ITEMS[eq.hat].img);
+      placeAcc(wrap, "hat", eq.hat);
     } else {
       removeAccSlot(wrap, "hat");
     }
@@ -925,9 +990,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     injectHudButton();
 
     if (window.WB) attach(window.WB);
-    else {
-      waitFor(() => window.WB).then((wb) => attach(wb)).catch(() => attach(null));
-    }
+    else waitFor(() => window.WB).then((wb) => attach(wb)).catch(() => attach(null));
   });
 
   /* =========================
@@ -940,5 +1003,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     enterRemoveHat: () => setRemoveMode("hat"),
     applyEquipsAll,
     _state: state,
+    _scriptBase: SCRIPT_BASE,
   };
 })();
