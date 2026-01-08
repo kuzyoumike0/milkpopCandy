@@ -1,16 +1,17 @@
-// zisseki.js（実績システム：増設版・互換強化 / ✅WB待機版）
+// zisseki.js（実績システム：増設版・互換強化 / ✅WB待機版 + ✅実績UI）
 // - localStorage 永続化
 // - WB events が無くても、定期チェックで解除できる
 // - SYOUGOU の各種カウント（うんち/旅立ち/花火/スロット当たり/お迎え）を実績に反映
 // - ✅ 新旧WB互換：getCoin/getBunnies/stats など優先して参照
 // ✅ FIX: 読み込み順で window.WB が無いと即returnしてしまい、永遠に実績が動かない問題を修正（WB待機）
 // ✅ FIX: app.js(v16.4)は coinsChanged をemitしていないので、hudUpdated も拾う（+定期チェックで確実に解除）
+// ✅ NEW: 実績UI（HUDに「実績」ボタン、一覧モーダル、解除/未解除、進捗表示）
 
 (() => {
   "use strict";
 
   /* =========================
-   * Wait for WB (and DOM)
+   * Wait for WB
    * ========================= */
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -72,6 +73,8 @@
 
       // イベント通知（他UIと連動したい場合）
       try { WB.emit?.("achievementUnlocked", { id, ...meta }); } catch {}
+      // UIが開いてたら更新
+      refreshUI();
       return true;
     }
 
@@ -125,8 +128,6 @@
     /* =========================
      * Helpers (getters) — 新旧互換
      * ========================= */
-
-    // 所持コイン（新：WB.getCoin / 旧：WB.coins / 最後：HUD表示）
     function getCoins() {
       try {
         if (typeof WB.getCoin === "function") {
@@ -141,7 +142,6 @@
       return el ? (Number(el.textContent) || 0) : 0;
     }
 
-    // 同時うさぎ数（新：WB.getBunnies / 旧：WB.bunnies）
     function getBunnyCount() {
       try {
         if (typeof WB.getBunnies === "function") {
@@ -155,7 +155,6 @@
       return 0;
     }
 
-    // SYOUGOU カウント（あれば）
     function getSyougouCount(key) {
       try {
         return window.SYOUGOU?.getCount?.(key) ?? 0;
@@ -164,7 +163,6 @@
       }
     }
 
-    // WB側で「累計購入数」等がある場合だけ拾う（無ければ 0）
     function getStatMaybe(keys) {
       for (const k of keys) {
         try {
@@ -182,54 +180,46 @@
     /* =========================
      * Achievements Master
      * ========================= */
-
     const ACH_MASTER = [
-      // --- ショップ解放（既存） ---
       {
         id: "unlock_bunny4",
         name: "大家族のはじまり",
         desc: `同時うさぎ数が${UNLOCK_BUNNY4_NEED}匹に到達（bunny4/bunny5解放）`,
         check: () => (getBunnyCount() >= UNLOCK_BUNNY4_NEED),
+        progress: () => ({ now: getBunnyCount(), target: UNLOCK_BUNNY4_NEED, unit: "匹" }),
         onUnlock: () => {
           toast("🐰✨ bunny4 / bunny5 がショップに出現しました！");
           try { WB.emit?.("unlockShop", { id: "unlock_bunny4" }); } catch {}
         },
       },
 
-      // --- 所持コイン ---
-      { id: "coins_10k",   name: "小金持ち",     desc: "所持コイン 10,000 到達",    check: () => getCoins() >= 10_000 },
-      { id: "coins_100k",  name: "資産家",       desc: "所持コイン 100,000 到達",   check: () => getCoins() >= 100_000 },
-      { id: "coins_1m",    name: "伝説の富豪",   desc: "所持コイン 1,000,000 到達", check: () => getCoins() >= 1_000_000 },
+      { id: "coins_10k",  name: "小金持ち",   desc: "所持コイン 10,000 到達",    check: () => getCoins() >= 10_000,  progress: () => ({ now: getCoins(), target: 10_000, unit: "🪙" }) },
+      { id: "coins_100k", name: "資産家",     desc: "所持コイン 100,000 到達",   check: () => getCoins() >= 100_000, progress: () => ({ now: getCoins(), target: 100_000, unit: "🪙" }) },
+      { id: "coins_1m",   name: "伝説の富豪", desc: "所持コイン 1,000,000 到達", check: () => getCoins() >= 1_000_000, progress: () => ({ now: getCoins(), target: 1_000_000, unit: "🪙" }) },
 
-      // --- SYOUGOU連動：ウンチ ---
-      { id: "unchi_10",   name: "ウンチ道・初段",   desc: "ウンチ回数 10",   check: () => getSyougouCount("unchi") >= 10 },
-      { id: "unchi_50",   name: "ウンチ道・五段",   desc: "ウンチ回数 50",   check: () => getSyougouCount("unchi") >= 50 },
-      { id: "unchi_100",  name: "ウンチ道・皆伝",   desc: "ウンチ回数 100",  check: () => getSyougouCount("unchi") >= 100 },
+      { id: "unchi_10",  name: "ウンチ道・初段", desc: "ウンチ回数 10",  check: () => getSyougouCount("unchi") >= 10,  progress: () => ({ now: getSyougouCount("unchi"), target: 10, unit: "回" }) },
+      { id: "unchi_50",  name: "ウンチ道・五段", desc: "ウンチ回数 50",  check: () => getSyougouCount("unchi") >= 50,  progress: () => ({ now: getSyougouCount("unchi"), target: 50, unit: "回" }) },
+      { id: "unchi_100", name: "ウンチ道・皆伝", desc: "ウンチ回数 100", check: () => getSyougouCount("unchi") >= 100, progress: () => ({ now: getSyougouCount("unchi"), target: 100, unit: "回" }) },
 
-      // --- SYOUGOU連動：旅立ち ---
-      { id: "tabidachi_10",  name: "見送り見習い",   desc: "旅立ち回数 10",   check: () => getSyougouCount("tabidachi") >= 10 },
-      { id: "tabidachi_50",  name: "見送り職人",     desc: "旅立ち回数 50",   check: () => getSyougouCount("tabidachi") >= 50 },
-      { id: "tabidachi_100", name: "見送り神",       desc: "旅立ち回数 100",  check: () => getSyougouCount("tabidachi") >= 100 },
+      { id: "tabidachi_10",  name: "見送り見習い", desc: "旅立ち回数 10",  check: () => getSyougouCount("tabidachi") >= 10,  progress: () => ({ now: getSyougouCount("tabidachi"), target: 10, unit: "回" }) },
+      { id: "tabidachi_50",  name: "見送り職人",   desc: "旅立ち回数 50",  check: () => getSyougouCount("tabidachi") >= 50,  progress: () => ({ now: getSyougouCount("tabidachi"), target: 50, unit: "回" }) },
+      { id: "tabidachi_100", name: "見送り神",     desc: "旅立ち回数 100", check: () => getSyougouCount("tabidachi") >= 100, progress: () => ({ now: getSyougouCount("tabidachi"), target: 100, unit: "回" }) },
 
-      // --- SYOUGOU連動：花火 ---
-      { id: "hanabi_10",  name: "一発屋",         desc: "花火回数 10",   check: () => getSyougouCount("hanabi") >= 10 },
-      { id: "hanabi_50",  name: "夜空の演出家",   desc: "花火回数 50",   check: () => getSyougouCount("hanabi") >= 50 },
-      { id: "hanabi_100", name: "天上の花火師",   desc: "花火回数 100",  check: () => getSyougouCount("hanabi") >= 100 },
+      { id: "hanabi_10",  name: "一発屋",       desc: "花火回数 10",  check: () => getSyougouCount("hanabi") >= 10,  progress: () => ({ now: getSyougouCount("hanabi"), target: 10, unit: "回" }) },
+      { id: "hanabi_50",  name: "夜空の演出家", desc: "花火回数 50",  check: () => getSyougouCount("hanabi") >= 50,  progress: () => ({ now: getSyougouCount("hanabi"), target: 50, unit: "回" }) },
+      { id: "hanabi_100", name: "天上の花火師", desc: "花火回数 100", check: () => getSyougouCount("hanabi") >= 100, progress: () => ({ now: getSyougouCount("hanabi"), target: 100, unit: "回" }) },
 
-      // --- SYOUGOU連動：スロット当たり ---
-      { id: "slotwin_10",  name: "当たり癖",         desc: "スロット当たり回数 10",   check: () => getSyougouCount("slot_win") >= 10 },
-      { id: "slotwin_50",  name: "勝ち筋が見える",   desc: "スロット当たり回数 50",   check: () => getSyougouCount("slot_win") >= 50 },
-      { id: "slotwin_100", name: "スロットの申し子", desc: "スロット当たり回数 100",  check: () => getSyougouCount("slot_win") >= 100 },
+      { id: "slotwin_10",  name: "当たり癖",         desc: "スロット当たり回数 10",  check: () => getSyougouCount("slot_win") >= 10,  progress: () => ({ now: getSyougouCount("slot_win"), target: 10, unit: "回" }) },
+      { id: "slotwin_50",  name: "勝ち筋が見える",   desc: "スロット当たり回数 50",  check: () => getSyougouCount("slot_win") >= 50,  progress: () => ({ now: getSyougouCount("slot_win"), target: 50, unit: "回" }) },
+      { id: "slotwin_100", name: "スロットの申し子", desc: "スロット当たり回数 100", check: () => getSyougouCount("slot_win") >= 100, progress: () => ({ now: getSyougouCount("slot_win"), target: 100, unit: "回" }) },
 
-      // --- SYOUGOU連動：お迎え ---
-      { id: "omukae_10",  name: "お迎え係",     desc: "お迎え回数 10",   check: () => getSyougouCount("omukae") >= 10 },
-      { id: "omukae_50",  name: "案内人",       desc: "お迎え回数 50",   check: () => getSyougouCount("omukae") >= 50 },
-      { id: "omukae_100", name: "冥府の執事",   desc: "お迎え回数 100",  check: () => getSyougouCount("omukae") >= 100 },
+      { id: "omukae_10",  name: "お迎え係",   desc: "お迎え回数 10",  check: () => getSyougouCount("omukae") >= 10,  progress: () => ({ now: getSyougouCount("omukae"), target: 10, unit: "回" }) },
+      { id: "omukae_50",  name: "案内人",     desc: "お迎え回数 50",  check: () => getSyougouCount("omukae") >= 50,  progress: () => ({ now: getSyougouCount("omukae"), target: 50, unit: "回" }) },
+      { id: "omukae_100", name: "冥府の執事", desc: "お迎え回数 100", check: () => getSyougouCount("omukae") >= 100, progress: () => ({ now: getSyougouCount("omukae"), target: 100, unit: "回" }) },
 
-      // --- 累計うさぎ購入（WBに数値がある場合だけ機能） ---
-      { id: "buy_10",  name: "多頭飼いデビュー", desc: "累計うさぎ購入 10",  check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 10 },
-      { id: "buy_50",  name: "牧場主",           desc: "累計うさぎ購入 50",  check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 50 },
-      { id: "buy_100", name: "超・牧場主",       desc: "累計うさぎ購入 100", check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 100 },
+      { id: "buy_10",  name: "多頭飼いデビュー", desc: "累計うさぎ購入 10",  check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 10,  progress: () => ({ now: getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]), target: 10, unit: "匹" }) },
+      { id: "buy_50",  name: "牧場主",           desc: "累計うさぎ購入 50",  check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 50,  progress: () => ({ now: getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]), target: 50, unit: "匹" }) },
+      { id: "buy_100", name: "超・牧場主",       desc: "累計うさぎ購入 100", check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 100, progress: () => ({ now: getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]), target: 100, unit: "匹" }) },
     ];
 
     /* =========================
@@ -251,27 +241,316 @@
     }
 
     /* =========================
+     * ✅ Achievements UI
+     * ========================= */
+    const PANEL_ID = "wbAchPanelV1";
+    const BTN_ID   = "wbAchBtnV1";
+
+    let uiEl = null;
+
+    function ensureUiStyle() {
+      if (document.getElementById("wbAchUiStyleV1")) return;
+      const s = document.createElement("style");
+      s.id = "wbAchUiStyleV1";
+      s.textContent = `
+#${PANEL_ID}{
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: none;
+  user-select: none;
+}
+#${PANEL_ID} .bg{
+  position:absolute; inset:0;
+  background: rgba(0,0,0,.38);
+}
+#${PANEL_ID} .card{
+  position:absolute;
+  left:50%; top:50%;
+  transform: translate(-50%, -50%);
+  width: min(760px, 94vw);
+  max-height: min(82vh, 820px);
+  overflow: hidden;
+  background: rgba(255,255,255,.97);
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.24);
+  display:flex;
+  flex-direction: column;
+}
+#${PANEL_ID} .head{
+  display:flex; align-items:center; justify-content: space-between;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(0,0,0,.08);
+}
+#${PANEL_ID} .title{
+  font-weight: 1000;
+  letter-spacing: .02em;
+}
+#${PANEL_ID} .close{
+  border:none; background: rgba(0,0,0,.06);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-weight: 900;
+  cursor:pointer;
+}
+#${PANEL_ID} .body{
+  padding: 12px 14px;
+  overflow:auto;
+}
+#${PANEL_ID} .toolbar{
+  display:flex; gap:8px; flex-wrap:wrap;
+  align-items:center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+#${PANEL_ID} .pill{
+  display:inline-flex; align-items:center; gap:8px;
+  background: rgba(0,0,0,.04);
+  border-radius: 999px;
+  padding: 8px 10px;
+  font-weight: 900;
+}
+#${PANEL_ID} .btn{
+  border:none;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 900;
+  cursor:pointer;
+  background: #fff;
+  box-shadow: 0 10px 22px rgba(0,0,0,.10);
+}
+#${PANEL_ID} .btn.primary{ background:#ffd6e7; }
+#${PANEL_ID} .btn.ghost{ background: rgba(0,0,0,.04); box-shadow:none; }
+#${PANEL_ID} .grid{
+  display:grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+#${PANEL_ID} .item{
+  background: rgba(255,255,255,.92);
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 10px 22px rgba(0,0,0,.08);
+  display:flex;
+  align-items:flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+#${PANEL_ID} .item.locked{ opacity:.72; }
+#${PANEL_ID} .name{ font-weight: 1000; }
+#${PANEL_ID} .desc{ font-size: 12px; opacity:.78; font-weight: 800; margin-top:4px; }
+#${PANEL_ID} .meta{ font-size: 12px; opacity:.75; font-weight: 900; margin-top:6px; }
+#${PANEL_ID} .badge{
+  display:inline-flex; align-items:center; gap:6px;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-weight: 900;
+  font-size: 12px;
+  background: rgba(255, 120, 120, .18);
+}
+#${PANEL_ID} .badge.on{ background: rgba(120, 210, 255, .22); }
+#${PANEL_ID} .bar{
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(0,0,0,.08);
+  overflow:hidden;
+  margin-top: 8px;
+}
+#${PANEL_ID} .bar > i{
+  display:block;
+  height:100%;
+  width:0%;
+  background: rgba(120,210,255,.55);
+}
+#${PANEL_ID} .small{
+  font-size: 12px;
+  opacity: .8;
+  font-weight: 900;
+}
+#${BTN_ID}{
+  margin-left: 8px;
+}
+`;
+      document.head.appendChild(s);
+    }
+
+    function buildUI() {
+      ensureUiStyle();
+      if (uiEl && document.body.contains(uiEl)) return uiEl;
+
+      uiEl = document.createElement("div");
+      uiEl.id = PANEL_ID;
+      uiEl.innerHTML = `
+        <div class="bg"></div>
+        <div class="card" role="dialog" aria-modal="true">
+          <div class="head">
+            <div class="title">🏆 実績</div>
+            <button class="close" type="button">閉じる</button>
+          </div>
+          <div class="body"></div>
+        </div>
+      `;
+      document.body.appendChild(uiEl);
+
+      uiEl.querySelector(".bg")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closePanel(); });
+      uiEl.querySelector(".close")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closePanel(); });
+      uiEl.querySelector(".card")?.addEventListener("click", (e) => e.stopPropagation());
+
+      return uiEl;
+    }
+
+    function esc(s) {
+      return String(s ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    let uiFilter = "all"; // all | unlocked | locked
+
+    function renderUI() {
+      const p = buildUI();
+      const body = p.querySelector(".body");
+      if (!body) return;
+
+      const total = ACH_MASTER.length;
+      const unlockedCount = ACH_MASTER.filter(a => isUnlocked(a.id)).length;
+
+      const coins = getCoins();
+      const bunny = getBunnyCount();
+
+      const pills = `
+        <div class="pill">解除：<b>${unlockedCount}</b> / ${total}</div>
+        <div class="pill">🪙 <b>${coins.toLocaleString()}</b></div>
+        <div class="pill">🐰 <b>${bunny}</b></div>
+        <div class="pill">💩 <b>${getSyougouCount("unchi")}</b></div>
+        <div class="pill">🕊️ <b>${getSyougouCount("tabidachi")}</b></div>
+        <div class="pill">🎆 <b>${getSyougouCount("hanabi")}</b></div>
+        <div class="pill">🎰 <b>${getSyougouCount("slot_win")}</b></div>
+        <div class="pill">🚪 <b>${getSyougouCount("omukae")}</b></div>
+      `;
+
+      const buttons = `
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn ghost" type="button" data-filter="all">全部</button>
+          <button class="btn ghost" type="button" data-filter="unlocked">解除済み</button>
+          <button class="btn ghost" type="button" data-filter="locked">未解除</button>
+          <button class="btn primary" type="button" data-refresh="1">更新</button>
+        </div>
+      `;
+
+      const list = ACH_MASTER
+        .filter(a => {
+          if (uiFilter === "unlocked") return isUnlocked(a.id);
+          if (uiFilter === "locked") return !isUnlocked(a.id);
+          return true;
+        })
+        .map(a => {
+          const on = isUnlocked(a.id);
+          let prog = null;
+          try { prog = a.progress?.(); } catch { prog = null; }
+
+          let now = 0, target = 0, unit = "";
+          if (prog && Number.isFinite(Number(prog.now)) && Number.isFinite(Number(prog.target)) && Number(prog.target) > 0) {
+            now = Number(prog.now);
+            target = Number(prog.target);
+            unit = String(prog.unit || "");
+          }
+          const pct = (target > 0) ? Math.max(0, Math.min(100, (now / target) * 100)) : (on ? 100 : 0);
+
+          const right = on
+            ? `<span class="badge on">解除済</span>`
+            : `<span class="badge">未解除</span>`;
+
+          const barHtml = (target > 0)
+            ? `
+              <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+              <div class="meta">${esc(now.toLocaleString())}${esc(unit)} / ${esc(target.toLocaleString())}${esc(unit)}（${pct.toFixed(1)}%）</div>
+            `
+            : `<div class="meta">進捗：—</div>`;
+
+          return `
+            <div class="item ${on ? "" : "locked"}">
+              <div style="flex:1; min-width: 0;">
+                <div class="name">${on ? "✅" : "⬜"} ${esc(a.name)} <span class="small">(${esc(a.id)})</span></div>
+                <div class="desc">${esc(a.desc || "")}</div>
+                ${barHtml}
+              </div>
+              <div>${right}</div>
+            </div>
+          `;
+        })
+        .join("");
+
+      body.innerHTML = `
+        <div class="toolbar">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">${pills}</div>
+          ${buttons}
+        </div>
+        <div class="grid">${list || "<div class='pill'>表示する実績がありません</div>"}</div>
+      `;
+
+      body.querySelectorAll("[data-filter]").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault(); e.stopPropagation();
+          uiFilter = btn.getAttribute("data-filter") || "all";
+          renderUI();
+        });
+      });
+      body.querySelectorAll("[data-refresh]").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault(); e.stopPropagation();
+          checkUnlocks();
+          renderUI();
+        });
+      });
+    }
+
+    function openPanel() {
+      const p = buildUI();
+      checkUnlocks();
+      renderUI();
+      p.style.display = "block";
+    }
+    function closePanel() {
+      const p = uiEl || document.getElementById(PANEL_ID);
+      if (!p) return;
+      p.style.display = "none";
+    }
+    function refreshUI() {
+      if (uiEl && uiEl.style.display !== "none") renderUI();
+    }
+
+    function injectHudButton() {
+      const hud = document.getElementById("hud");
+      if (!hud) return;
+      if (document.getElementById(BTN_ID)) return;
+
+      const btn = document.createElement("button");
+      btn.id = BTN_ID;
+      btn.textContent = "実績";
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        openPanel();
+      });
+      hud.appendChild(btn);
+    }
+
+    /* =========================
      * Hooks
      * ========================= */
-
-    // うさぎ数が変わるたびにチェック
     try { WB.on?.("bunnyCountChanged", checkUnlocks); } catch {}
-
-    // ✅ app.js(v16.4)は updateHud()で hudUpdated をemitしてるのでここを拾う
     try { WB.on?.("hudUpdated", checkUnlocks); } catch {}
-
-    // コイン変化（もし将来emitされても拾う）
     try { WB.on?.("coinsChanged", checkUnlocks); } catch {}
     try { WB.on?.("coinChanged", checkUnlocks); } catch {}
 
-    // SYOUGOU連動が増えるイベント（あれば拾う）
     try { WB.on?.("goldenUnchiCollected", checkUnlocks); } catch {}
     try { WB.on?.("tabidachi", checkUnlocks); } catch {}
     try { WB.on?.("hanabiFired", checkUnlocks); } catch {}
     try { WB.on?.("slotWin", checkUnlocks); } catch {}
     try { WB.on?.("omukae", checkUnlocks); } catch {}
 
-    // リセット時は実績も消したい場合
     try {
       WB.on?.("resetRequested", () => {
         try { localStorage.removeItem(LS_ACH); } catch {}
@@ -280,9 +559,21 @@
 
     // eventsが無くても解除できるように「定期チェック」
     const TIMER_MS = 900;
-    const timer = setInterval(checkUnlocks, TIMER_MS);
+    const timer = setInterval(() => {
+      checkUnlocks();
+      refreshUI();
+    }, TIMER_MS);
 
-    // 外部公開
+    // HUDにボタン
+    window.addEventListener("load", () => {
+      injectHudButton();
+      // 保険（HUDが後から変わる場合）
+      setTimeout(injectHudButton, 400);
+    });
+
+    /* =========================
+     * External
+     * ========================= */
     WB.zisseki = {
       ach,
       isUnlocked,
@@ -291,11 +582,14 @@
       LS_ACH,
       UNLOCK_BUNNY4_NEED,
       ACH_MASTER,
+      openPanel,
+      closePanel,
       stop: () => { try { clearInterval(timer); } catch {} },
     };
 
     // 初回チェック
     checkUnlocks();
+    injectHudButton();
 
     console.log("[zisseki] ready", { unlocked: Object.keys(ach).length });
   }).catch((e) => {
