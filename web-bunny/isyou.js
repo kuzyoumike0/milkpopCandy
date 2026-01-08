@@ -79,13 +79,39 @@
   // slot: "hat" は置き換え
   // ★追加：aimasuku / ahiru も hat に入れる（assets/isyou/ にある前提）
   const ITEMS = {
-    partyhat: { slot: "hat", label: "パーティーハット", img: "./assets/isyou/partyhat.png", price: 500 },
-    crown:    { slot: "hat", label: "クラウン",         img: "./assets/isyou/crown.png",    price: 900 },
-    ribbon:   { slot: "hat", label: "リボン",           img: "./assets/isyou/ribbon.png",   price: 700 },
+  partyhat: {
+    slot: "hat",
+    label: "パーティーハット",
+    img: "./assets/isyou/partyhat.png",
+    price: 500,
+  },
+  crown: {
+    slot: "hat",
+    label: "クラウン",
+    img: "./assets/isyou/crown.png",
+    price: 900,
+  },
+  ribbon: {
+    slot: "hat",
+    label: "リボン",
+    img: "./assets/isyou/ribbon.png",
+    price: 700,
+  },
 
-    aimasuku: { slot: "hat", label: "アイマスク",       img: "./assets/isyou/aimasuku.png", price: 650 },
-    ahiru:    { slot: "hat", label: "あひる",           img: "./assets/isyou/ahiru.png",    price: 750 },
-  };
+  // ★追加（hat）
+  aimasuku: {
+    slot: "hat",
+    label: "アイマスク",
+    img: "./assets/isyou/aimasuku.png",
+    price: 400,
+  },
+  ahiru: {
+    slot: "hat",
+    label: "あひる",
+    img: "./assets/isyou/ahiru.png",
+    price: 450,
+  },
+};
 
   // 帽子位置（うさぎ画像に対する割合）
   // 「うさぎ画像と完全一致」＝基準矩形(うさぎimg)と座標が一致するように計算（offset系）
