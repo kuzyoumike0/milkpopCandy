@@ -1,4 +1,4 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（partyhat表示FIX）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
@@ -9,6 +9,7 @@
 // ✅ FIX：位置計算は offset 優先（transform/flipでも安定）+ 連続fit
 // ✅ FIX：partyhat等が404でも「候補パスを順に試す」ので必ず表示される（環境差吸収）
 // ✅ FIX：うさぎが下がるのを遮断（line-height/font-size/余白）
+// ✅ FIX：bornAt の取得を強化（WBのwrap参照差異でも必ず拾う → “装着したのに出ない”の主要原因を潰す）
 // ✅ 重要：hat は置き換え（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
 
@@ -102,15 +103,14 @@
    * ========================= */
   function getScriptBase() {
     try {
-      // できれば自分自身
       const cs = document.currentScript?.src;
       if (cs) return new URL(".", cs).toString();
 
-      // 探す
-      const s = [...document.scripts].map(x => x.src).find(src => /isyou\.js(\?|#|$)/.test(src));
+      const s = [...document.scripts]
+        .map(x => x.src)
+        .find(src => /isyou\.js(\?|#|$)/.test(src));
       if (s) return new URL(".", s).toString();
     } catch {}
-    // 最後の手段：ページ基準
     return new URL(".", location.href).toString();
   }
   const SCRIPT_BASE = getScriptBase();
@@ -149,18 +149,17 @@
     equipped: "wb_isyou_equipped_v3", // { bornAt: { slotKey: itemKey } }
   };
 
-  // ✅ どこに置いても拾えるよう候補を複数用意（SCRIPT_BASE基準も入れる）
   function imgCandidates(name) {
     return [
-      // isyou.js と同じフォルダにある想定（/isyou/partyhat.png）
+      // isyou.js と同じフォルダ基準
       toAbs(`./${name}`),
 
-      // あなたが置きがちな場所
+      // 相対パス（ページ基準）
       "./assets/isyou/" + name,
       "./assets/" + name,
       "./isyou/" + name,
 
-      // 絶対パス気味（過去に /assets/partyhat.png 404 が出てたので保険）
+      // ルート基準（/assets/...）
       "/assets/isyou/" + name,
       "/assets/" + name,
     ];
@@ -172,7 +171,6 @@
     ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
   };
 
-  // 帽子位置（うさぎ画像に対する割合）
   const ANCHOR = {
     hat: { x: 0.50, y: 0.06, w: 0.58 },
   };
@@ -254,19 +252,48 @@
     return [];
   }
 
+  // ✅ bornAt 取得を強化（ここがズレると “装着したのに表示されない” になる）
   function getBornAtFromWrap(wrap) {
+    if (!wrap) return null;
+
+    // dataset/attribute に入ってる環境もある
+    const ds = wrap.dataset || {};
+    const d1 = ds.bornAt || ds.bornat || ds.born_at;
+    if (d1) return d1;
+
+    const a1 = wrap.getAttribute("data-bornAt") || wrap.getAttribute("data-bornat") || wrap.getAttribute("data-born_at");
+    if (a1) return a1;
+
     const list = getBunnies();
-    const b = list.find((x) => x?.wrap === wrap);
-    return b?.bornAt ?? null;
+
+    // 参照が完全一致
+    let b = list.find((x) => x?.wrap === wrap || x?.el === wrap || x?.root === wrap);
+    if (b?.bornAt != null) return b.bornAt;
+
+    // “wrapが別要素” な実装（子孫一致で拾う）
+    b = list.find((x) => {
+      const w = x?.wrap || x?.el || x?.root;
+      return w && (w === wrap || w.contains?.(wrap) || wrap.contains?.(w));
+    });
+    if (b?.bornAt != null) return b.bornAt;
+
+    // “画像一致” で拾う（最後の保険）
+    const img = wrap.querySelector(":scope > img.bunny, :scope > img") || wrap.querySelector("img.bunny, img");
+    if (img) {
+      b = list.find((x) => x?.img === img || x?.bunnyImg === img || x?.node === img);
+      if (b?.bornAt != null) return b.bornAt;
+    }
+
+    return null;
   }
 
   /* =========================
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV12")) return;
+    if (document.getElementById("isyouStyleV13")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV12";
+    s.id = "isyouStyleV13";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -381,9 +408,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ✅ うさぎ下がり遮断（行の余白/inline余白など全部潰す） */
+/* ✅ うさぎ下がり遮断（位置はアプリ側を尊重して上書きしない） */
 .bunnyWrap{
-  position: absolute !important;
   overflow: visible !important;
   display: block !important;
   padding: 0 !important;
@@ -612,7 +638,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       </div>
     `;
 
-    // ✅ サムネは候補パスで確実に表示
+    // サムネは候補パスで確実に表示
     modal.querySelectorAll("img[data-itemthumb]").forEach((img) => {
       const key = img.getAttribute("data-itemthumb");
       const it = ITEMS[key];
@@ -767,7 +793,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
   function removeAccSlot(wrap, slot) {
     if (!wrap) return;
-    const box = ensureAccContainer(wrap);
+    const box = wrap.querySelector(":scope > .isyouAcc");
     if (!box) return;
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => {
       try { n.remove(); } catch {}
@@ -798,12 +824,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ ここが表示されない最大原因だったので、候補パスを順に試す
-    setSrcWithFallback(img, it.imgs, () => {
-      // load後にfitをもう一回
-      requestAnimationFrame(() => requestAnimationFrame(fit));
-    });
-
     const a = ANCHOR[slot] || ANCHOR.hat;
 
     function fit() {
@@ -832,6 +852,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.width = `${pw}px`;
       node.style.height = `${pw}px`;
     }
+
+    // ✅ 候補パスを順に試す（表示されない最大原因を潰す）
+    setSrcWithFallback(img, it.imgs, () => {
+      requestAnimationFrame(() => requestAnimationFrame(fit));
+    });
 
     requestAnimationFrame(() => requestAnimationFrame(fit));
 
@@ -915,7 +940,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected"));
     wrap.classList.add("isyouSelected");
     state.selectedWrap = wrap;
-    state.selectedBornAt = getBornAtFromWrap(wrap);
+    state.selectedBornAt = getBornAtFromWrap(wrap); // ✅ 強化版
     updateConfirmBar();
   }
 
@@ -974,8 +999,10 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     document.addEventListener("pointerdown", onPointerDownCapture, true);
 
-    setTimeout(applyEquipsAll, 400);
-    setTimeout(applyEquipsAll, 1400);
+    // 初期＆遅延で2回（画像ロード遅れ対策）
+    setTimeout(applyEquipsAll, 200);
+    setTimeout(applyEquipsAll, 900);
+    setTimeout(applyEquipsAll, 1600);
 
     try {
       WB?.on?.("bunnyCountChanged", () => setTimeout(applyEquipsAll, 50));
