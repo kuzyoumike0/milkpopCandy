@@ -1,13 +1,14 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V31.1）
-// ✅ 要望対応：hat を「うさぎ画像と同じ位置・同じサイズ」で重ねる（完全一致）
-// - hatDiv の left/top/width/height を bunnyImg.getBoundingClientRect と完全一致させる
-// - 反転（flip）も bunnyImg の transform から判定して hat に scaleX(-1) を同期
-// - 赤枠は body 直下の position:fixed（必ず見える）
-// - 重さ対策：hat DOM は Map で再利用 / 同期ループは必要時だけ 12fps
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V31.2）
+// ✅ 改善：hat の「びくびく」を解消（自然に追従）
+// - left/top を毎フレーム書き換えない（レイアウト揺れの原因）
+// - hat は (0,0) に固定して、transform: translate3d(x,y,0) で移動（滑らか）
+// - サイズは差がある時だけ更新（しきい値）
+// - 1フレームで「計測→反映」をまとめてレイアウト負荷を削減
+// - 赤枠も fixed で滑らか追従（必要時だけ更新）
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V31.1", Date.now());
+  console.log("[isyou.js] LOADED V31.2", Date.now());
 
   /* =========================
    * Wait
@@ -302,10 +303,10 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV311")) return;
+    if (document.getElementById("isyouStyleV312")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV311";
+    s.id = "isyouStyleV312";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -412,7 +413,7 @@
 #isyouConfirmBar button.primary{ background:#ffd6e7; }
 #isyouConfirmBar button.danger{ background: rgba(255,80,80,.12); }
 
-/* ✅ hat overlay（DOM/overflowに負けない） */
+/* ✅ hat overlay */
 #isyouOverlay{
   position:absolute;
   left:0; top:0;
@@ -423,10 +424,11 @@
 }
 .isyouHat{
   position:absolute;
-  left:-9999px; top:-9999px;
+  left:0; top:0;
   width:10px; height:10px;
   pointer-events:none;
-  transform-origin: 50% 50%;
+  transform-origin: 0 0;
+  will-change: transform, width, height;
 }
 .isyouHat img{
   width:100%;
@@ -515,9 +517,10 @@
   }
 
   /* =========================
-   * ✅ 赤枠（fixed / body直下）＝必ず見える
+   * ✅ 赤枠（fixed / body直下）
    * ========================= */
   let selectBoxFixed = null;
+  const SELECT_EPS = 0.25;
 
   function ensureSelectBoxFixed() {
     if (selectBoxFixed && selectBoxFixed.isConnected) return selectBoxFixed;
@@ -537,6 +540,7 @@
         box-shadow:
           0 0 0 3px rgba(255,255,255,.95),
           0 14px 34px rgba(0,0,0,.22);
+        will-change: transform, width, height;
       `;
       document.body.appendChild(selectBoxFixed);
     }
@@ -545,39 +549,51 @@
 
   function hideSelectBox() {
     const box = ensureSelectBoxFixed();
-    box.style.left = "-9999px";
-    box.style.top = "-9999px";
+    box.style.transform = "translate3d(-9999px,-9999px,0)";
     box.style.width = "0px";
     box.style.height = "0px";
   }
 
-  function syncSelectBoxToImg(img) {
+  // left/topは書き換えず transform で動かす（滑らか）
+  let __selLast = { x: -9999, y: -9999, w: 0, h: 0 };
+
+  function syncSelectBoxToImg(img, ovRectOverride) {
     const box = ensureSelectBoxFixed();
     if (!img || !img.isConnected) { hideSelectBox(); return; }
     const r = img.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) return;
-    box.style.left = `${r.left}px`;
-    box.style.top  = `${r.top}px`;
-    box.style.width  = `${r.width}px`;
-    box.style.height = `${r.height}px`;
+
+    const x = r.left;
+    const y = r.top;
+    const w = r.width;
+    const h = r.height;
+
+    if (Math.abs(__selLast.x - x) > SELECT_EPS || Math.abs(__selLast.y - y) > SELECT_EPS) {
+      box.style.transform = `translate3d(${x}px,${y}px,0)`;
+      __selLast.x = x; __selLast.y = y;
+    }
+    if (Math.abs(__selLast.w - w) > SELECT_EPS) { box.style.width = `${w}px`; __selLast.w = w; }
+    if (Math.abs(__selLast.h - h) > SELECT_EPS) { box.style.height = `${h}px`; __selLast.h = h; }
   }
 
   /* =========================
-   * Hat DOM 再利用（重さ解消）
-   * - ✅ 要望：うさぎと「同じ位置・同じサイズ」(100%一致)
+   * Hat DOM（滑らか追従）
    * ========================= */
-  const liveHats = new Map(); // key -> { hatDiv, hatImg, itemKey, targetImg }
+  const liveHats = new Map(); // key -> ent
+  const SIZE_EPS = 0.25;
+  const POS_EPS = 0.15;
 
   function removeHatByKey(key, slot = "hat") {
     if (!key) return;
     const k = String(key);
+
     const ent = liveHats.get(k);
     if (ent?.hatDiv?.isConnected) {
       try { ent.hatDiv.remove(); } catch {}
     }
     liveHats.delete(k);
 
-    // 念のためDOM直検索も（古い残骸対策）
+    // 念のため残骸掃除
     try {
       ensureOverlay();
       overlay.querySelectorAll(`.isyouHat[data-key="${CSS.escape(k)}"][data-slot="${CSS.escape(slot)}"]`)
@@ -602,22 +618,27 @@
       hat.className = "isyouHat";
       hat.dataset.key = k;
       hat.dataset.slot = "hat";
+      hat.style.transform = "translate3d(-9999px,-9999px,0)";
 
       const hatImg = document.createElement("img");
       hatImg.alt = "hat";
       hat.appendChild(hatImg);
       overlay.appendChild(hat);
 
-      ent = { hatDiv: hat, hatImg, itemKey: null, targetImg: null };
+      ent = {
+        hatDiv: hat,
+        hatImg,
+        itemKey: null,
+        targetImg: null,
+        last: { x: -9999, y: -9999, w: 0, h: 0, mir: 0 }
+      };
       liveHats.set(k, ent);
     } else {
-      // overlay内で前面に保つ
       try { overlay.appendChild(ent.hatDiv); } catch {}
     }
 
     ent.targetImg = img;
 
-    // src は itemKey 変更時だけ差し替え
     if (ent.itemKey !== itemKey) {
       ent.itemKey = itemKey;
       setSrcWithFallback(ent.hatImg, it.imgs, () => scheduleSyncLoop());
@@ -626,31 +647,44 @@
     scheduleSyncLoop();
   }
 
-  // ✅ ここが「完全一致」本体：bunnyRect と hatRect を同一にする
-  function syncHatEnt(ent) {
+  // ✅ left/top は触らない：transform で位置同期
+  function syncHatEnt(ent, ovRect) {
     const img = ent.targetImg;
     const hat = ent.hatDiv;
     if (!hat || !hat.isConnected) return false;
     if (!img || !img.isConnected) return false;
 
-    const ovRect = overlay.getBoundingClientRect();
     const ir = img.getBoundingClientRect();
     if (ir.width <= 0 || ir.height <= 0) return true;
 
-    // うさぎと同じ位置・同じサイズ
-    hat.style.left   = `${ir.left - ovRect.left}px`;
-    hat.style.top    = `${ir.top  - ovRect.top }px`;
-    hat.style.width  = `${ir.width}px`;
-    hat.style.height = `${ir.height}px`;
+    const x = ir.left - ovRect.left;
+    const y = ir.top  - ovRect.top;
+    const w = ir.width;
+    const h = ir.height;
+    const mir = isMirrored(img) ? 1 : 0;
 
-    // 反転同期（bunnyが左右反転ならhatも反転）
-    hat.style.transform = isMirrored(img) ? "scaleX(-1)" : "none";
+    const L = ent.last;
+
+    if (Math.abs(L.w - w) > SIZE_EPS) { hat.style.width = `${w}px`; L.w = w; }
+    if (Math.abs(L.h - h) > SIZE_EPS) { hat.style.height = `${h}px`; L.h = h; }
+
+    // 位置と反転は transform で一括（GPU）
+    if (Math.abs(L.x - x) > POS_EPS || Math.abs(L.y - y) > POS_EPS || L.mir !== mir) {
+      if (mir) {
+        // translate してから scaleX(-1)
+        // ※ transform-origin:0 0 なので、左右反転でも座標が暴れない
+        hat.style.transform = `translate3d(${x}px,${y}px,0) scaleX(-1)`;
+      } else {
+        hat.style.transform = `translate3d(${x}px,${y}px,0)`;
+      }
+      L.x = x; L.y = y; L.mir = mir;
+    }
 
     return true;
   }
 
   /* =========================
-   * うさぎ画像検出（必要時だけ）
+   * うさぎ画像検出
    * ========================= */
   function getAllBunnyImgs() {
     const out = [];
@@ -696,19 +730,15 @@
       if (!seen.has(k)) removeHatByKey(k, "hat");
     }
 
-    if (state.mode === "equip" && state.selectedImg) {
-      syncSelectBoxToImg(state.selectedImg);
-      scheduleSyncLoop();
-    }
-
     scheduleSyncLoop();
   }
 
   /* =========================
-   * ✅ 軽量同期ループ（必要時だけ / 12fps）
+   * ✅ 同期ループ（60fps / ただし軽い）
+   * - 1フレームで「ovRect 1回だけ計測」
+   * - 全hatの rect を読み→まとめて反映（実質 1回の流れ）
    * ========================= */
   let __syncRaf = 0;
-  let __syncLast = 0;
 
   function needSync() {
     if (liveHats.size > 0) return true;
@@ -722,29 +752,31 @@
     __syncRaf = requestAnimationFrame(syncTick);
   }
 
-  function syncTick(ts) {
+  function syncTick() {
     __syncRaf = 0;
+    if (!needSync()) return;
 
-    if (ts - __syncLast < 80) {
-      scheduleSyncLoop();
-      return;
-    }
-    __syncLast = ts;
+    // overlay rect は 1回だけ
+    const ov = ensureOverlay();
+    const ovRect = ov.getBoundingClientRect();
 
+    // 赤枠
     if (state.mode === "equip" && state.selectedImg) {
       syncSelectBoxToImg(state.selectedImg);
     } else {
       hideSelectBox();
     }
 
+    // hat
     if (liveHats.size > 0) {
       for (const [k, ent] of liveHats) {
-        const ok = syncHatEnt(ent);
+        const ok = syncHatEnt(ent, ovRect);
         if (!ok) removeHatByKey(k, "hat");
       }
     }
 
-    if (needSync()) scheduleSyncLoop();
+    // 次へ
+    scheduleSyncLoop();
   }
 
   /* =========================
@@ -1053,10 +1085,7 @@
     state.equipped[id][it.slot] = itemKey;
 
     saveAll();
-
-    // 差分で即反映
     upsertHat(img, itemKey);
-    scheduleSyncLoop();
 
     playEquipSe();
     toast(`✨ 装着：${it.label}`);
@@ -1082,7 +1111,7 @@
   }
 
   /* =========================
-   * Selection（クリックでimg選択 → 赤枠を出す）
+   * Selection（クリックでimg選択 → 赤枠）
    * ========================= */
   function selectImg(img) {
     if (!img) return;
@@ -1093,12 +1122,8 @@
     state.selectedImg = img;
     state.selectedKey = key;
 
-    syncSelectBoxToImg(img);
-    requestAnimationFrame(() => syncSelectBoxToImg(state.selectedImg || img));
-    setTimeout(() => syncSelectBoxToImg(state.selectedImg || img), 60);
-
-    updateConfirmBar();
     scheduleSyncLoop();
+    updateConfirmBar();
   }
 
   /* =========================
@@ -1115,7 +1140,6 @@
     if (!e?.target) return;
     if (!isInsideBunnyLayer(e.target)) return;
 
-    // モーダル内は除外
     if (backdrop && backdrop.style.display !== "none") {
       const inModal = e.target?.closest?.("#isyouModal");
       if (inModal) return;
@@ -1167,7 +1191,7 @@
   }
 
   /* =========================
-   * MutationObserver debounce（重さ解消）
+   * MutationObserver debounce（重さ対策）
    * ========================= */
   let __moTimer = 0;
   function requestRefresh() {
@@ -1212,10 +1236,6 @@
         mo.observe(layer, { childList: true, subtree: true, attributes: true });
       }
     } catch {}
-
-    setInterval(() => {
-      if (state.mode !== "equip") hideSelectBox();
-    }, 2000);
   }
 
   window.addEventListener("load", () => {
