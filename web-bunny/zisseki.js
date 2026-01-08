@@ -1,7 +1,7 @@
-// zisseki.js（実績システム：増設版・互換強化 / ✅WB待機版 + ✅実績UI）V4.1
-// ✅ FIX：WBが object になった瞬間では早すぎる問題 → “実用状態”まで待つ（coins/bunnies参照できるまで）
-// ✅ FIX：SYOUGOU.getCount が無い環境でも動くように多重フォールバック（counts/data/localStorage走査）
-// ✅ FIX：解除できない時のための debug ログ（必要なら window.WB.zisseki.debug=true）
+// zisseki.js（実績システム：互換強化 / ✅WB待機版 + ✅実績UI）V4.2
+// ✅ FIX：SYOUGOUが無い/取れない環境でも解除できるように、WB.emit("sy:add") を拾って自前でカウント永続化
+// ✅ FIX：WBが object になった瞬間では早すぎる問題 → “実用状態”まで待つ
+// ✅ debug: WB.zisseki.debug=true で tick の値を出す
 
 (() => {
   "use strict";
@@ -19,7 +19,6 @@
         try {
           const WB = window.WB;
           if (WB && typeof WB === "object") {
-            // “実用状態”の最低条件：coinValue or WB.coins/getCoin と bunnies/getBunnies のどれかが触れる
             const coinOk =
               typeof WB.getCoin === "function" ||
               typeof WB.coins === "number" ||
@@ -46,47 +45,122 @@
     });
   }
 
-  /* =========================
-   * Main
-   * ========================= */
   waitForWBUsable().then((WB) => {
-    const LS_ACH = "wb_ach_v4";
+    /* =========================
+     * Keys
+     * ========================= */
+    const LS_ACH = "wb_ach_v4";               // 実績
+    const LS_SYCOUNTS = "wb_sy_counts_v1";    // ✅ SYOUGOU互換カウント（自前）
     const UNLOCK_BUNNY4_NEED = 10;
 
     /* =========================
      * debug toggle
      * ========================= */
     const dbg = (...args) => {
-      try {
-        if (WB?.zisseki?.debug) console.log("[zisseki]", ...args);
-      } catch {}
+      try { if (WB?.zisseki?.debug) console.log("[zisseki]", ...args); } catch {}
     };
 
     /* =========================
-     * Storage
+     * Storage helpers
      * ========================= */
-    function loadAch() {
+    function loadJson(key, def) {
       try {
-        const a = JSON.parse(localStorage.getItem(LS_ACH) || "{}");
-        return a && typeof a === "object" ? a : {};
+        const v = JSON.parse(localStorage.getItem(key) || "null");
+        return (v && typeof v === "object") ? v : def;
       } catch {
-        return {};
+        return def;
       }
     }
-    const ach = loadAch();
-    function saveAch() {
-      try { localStorage.setItem(LS_ACH, JSON.stringify(ach)); } catch {}
+    function saveJson(key, v) {
+      try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
     }
+
+    /* =========================
+     * Ach storage
+     * ========================= */
+    const ach = loadJson(LS_ACH, {});
+    function saveAch() { saveJson(LS_ACH, ach); }
     function isUnlocked(id) { return !!ach[id]; }
 
     function unlock(id, meta = {}) {
       if (ach[id]) return false;
-      ach[id] = { at: Date.now(), ...meta }; // ✅ booleanじゃなく情報保存（後でUIに使える）
+      ach[id] = { at: Date.now(), ...meta };
       saveAch();
       toast(`🏆 実績解除：${meta?.name || id}`);
       try { WB.emit?.("achievementUnlocked", { id, ...meta }); } catch {}
       refreshUI();
       return true;
+    }
+
+    /* =========================
+     * ✅ SYOUGOU互換カウント（ここが本体）
+     * - SYOUGOUが無くても WB.emit("sy:add") で必ず増える
+     * ========================= */
+    const syCounts = loadJson(LS_SYCOUNTS, {}); // { key:number }
+
+    function saveSyCounts() { saveJson(LS_SYCOUNTS, syCounts); }
+
+    function syInc(key, n = 1) {
+      const k = String(key || "");
+      const add = Math.max(0, Math.floor(Number(n) || 0));
+      if (!k || add <= 0) return;
+      syCounts[k] = (Number(syCounts[k]) || 0) + add;
+      saveSyCounts();
+    }
+
+    // ① WBイベント「sy:add」を拾う（あなたの app.js が emit してる）
+    try {
+      WB.on?.("sy:add", (p) => {
+        const key = p?.key;
+        const n = p?.n ?? 1;
+        syInc(key, n);
+      });
+    } catch {}
+
+    // ② 念のため WB.syAdd をラップ（他JSが emit しない実装でも拾える）
+    try {
+      if (typeof WB.syAdd === "function" && !WB.syAdd.__zissekiWrapped) {
+        const orig = WB.syAdd.bind(WB);
+        const wrapped = (key, n = 1) => {
+          syInc(key, n);
+          try { return orig(key, n); } catch { return; }
+        };
+        wrapped.__zissekiWrapped = true;
+        WB.syAdd = wrapped;
+      }
+    } catch {}
+
+    function getSyougouCount(key) {
+      const k = String(key);
+
+      // A) 公式SYOUGOUがあるなら最優先
+      try {
+        const S = window.SYOUGOU;
+        if (S && typeof S.getCount === "function") {
+          const v = Number(S.getCount(k));
+          if (Number.isFinite(v)) return v;
+        }
+      } catch {}
+
+      // B) よくある保持場所
+      try {
+        const S = window.SYOUGOU;
+        const candidates = [
+          S?.counts?.[k],
+          S?.data?.counts?.[k],
+          S?.data?.[k],
+          S?.state?.counts?.[k],
+          S?.state?.[k],
+        ];
+        for (const v of candidates) {
+          const n = Number(v);
+          if (Number.isFinite(n)) return n;
+        }
+      } catch {}
+
+      // C) ✅ 自前カウント（確実）
+      const n2 = Number(syCounts[k]);
+      return Number.isFinite(n2) ? n2 : 0;
     }
 
     /* =========================
@@ -137,7 +211,7 @@
     }
 
     /* =========================
-     * Helpers (getters) — 新旧互換
+     * WB getters
      * ========================= */
     function getCoins() {
       try {
@@ -163,76 +237,10 @@
       try {
         if (Array.isArray(WB.bunnies)) return WB.bunnies.length;
       } catch {}
-      // さらに保険：DOMから推定（bunnyLayerのimg数）
       try {
         const layer = document.getElementById("bunnyLayer");
-        if (layer) {
-          const imgs = layer.querySelectorAll("img");
-          return imgs ? imgs.length : 0;
-        }
+        if (layer) return layer.querySelectorAll("img").length || 0;
       } catch {}
-      return 0;
-    }
-
-    // ✅ SYOUGOU 互換強化（ここが「解除できない」最大原因になりがち）
-    function getSyougouCount(key) {
-      const k = String(key);
-
-      // 1) API
-      try {
-        const S = window.SYOUGOU;
-        if (S && typeof S.getCount === "function") {
-          const v = Number(S.getCount(k));
-          return Number.isFinite(v) ? v : 0;
-        }
-      } catch {}
-
-      // 2) よくある保持場所
-      try {
-        const S = window.SYOUGOU;
-        const candidates = [
-          S?.counts?.[k],
-          S?.data?.counts?.[k],
-          S?.data?.[k],
-          S?.state?.counts?.[k],
-          S?.state?.[k],
-        ];
-        for (const v of candidates) {
-          const n = Number(v);
-          if (Number.isFinite(n)) return n;
-        }
-      } catch {}
-
-      // 3) localStorage 走査（wb_syougou 系のどれかに入ってることが多い）
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const lk = localStorage.key(i);
-          if (!lk) continue;
-          if (!/^wb_.*syougou/i.test(lk)) continue;
-
-          const raw = localStorage.getItem(lk);
-          if (!raw) continue;
-          let obj = null;
-          try { obj = JSON.parse(raw); } catch { obj = null; }
-          if (!obj || typeof obj !== "object") continue;
-
-          // パターンA: { counts:{ unchi:123 } }
-          if (obj.counts && typeof obj.counts === "object") {
-            const n = Number(obj.counts[k]);
-            if (Number.isFinite(n)) return n;
-          }
-          // パターンB: { unchi:123, tabidachi:... }
-          const n2 = Number(obj[k]);
-          if (Number.isFinite(n2)) return n2;
-
-          // パターンC: { data:{...} }
-          if (obj.data && typeof obj.data === "object") {
-            const n3 = Number(obj.data?.counts?.[k] ?? obj.data?.[k]);
-            if (Number.isFinite(n3)) return n3;
-          }
-        }
-      } catch {}
-
       return 0;
     }
 
@@ -247,26 +255,6 @@
           if (typeof v2 === "number" && Number.isFinite(v2)) return v2;
         } catch {}
       }
-
-      // 保険：localStorage の wb_stats 系を拾う
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const lk = localStorage.key(i);
-          if (!lk) continue;
-          if (!/^wb_.*stats/i.test(lk)) continue;
-          const raw = localStorage.getItem(lk);
-          if (!raw) continue;
-          let obj = null;
-          try { obj = JSON.parse(raw); } catch { obj = null; }
-          if (!obj || typeof obj !== "object") continue;
-
-          for (const kk of keys) {
-            const n = Number(obj?.[kk] ?? obj?.stats?.[kk]);
-            if (Number.isFinite(n)) return n;
-          }
-        }
-      } catch {}
-
       return 0;
     }
 
@@ -280,10 +268,6 @@
         desc: `同時うさぎ数が${UNLOCK_BUNNY4_NEED}匹に到達（bunny4/bunny5解放）`,
         check: () => (getBunnyCount() >= UNLOCK_BUNNY4_NEED),
         progress: () => ({ now: getBunnyCount(), target: UNLOCK_BUNNY4_NEED, unit: "匹" }),
-        onUnlock: () => {
-          toast("🐰✨ bunny4 / bunny5 がショップに出現しました！");
-          try { WB.emit?.("unlockShop", { id: "unlock_bunny4" }); } catch {}
-        },
       },
 
       { id: "coins_10k",  name: "小金持ち",   desc: "所持コイン 10,000 到達",    check: () => getCoins() >= 10_000,  progress: () => ({ now: getCoins(), target: 10_000, unit: "🪙" }) },
@@ -334,20 +318,17 @@
         let ok = false;
         try { ok = !!a.check?.(); } catch { ok = false; }
         if (!ok) continue;
-
-        const newly = unlock(a.id, { name: a.name, desc: a.desc });
-        if (newly) {
-          try { a.onUnlock?.(); } catch {}
-        }
+        unlock(a.id, { name: a.name, desc: a.desc });
       }
     }
 
     /* =========================
-     * ✅ Achievements UI
+     * ✅ UI
      * ========================= */
     const PANEL_ID = "wbAchPanelV1";
     const BTN_ID   = "wbAchBtnV1";
     let uiEl = null;
+    let uiFilter = "all"; // all | unlocked | locked
 
     function ensureUiStyle() {
       if (document.getElementById("wbAchUiStyleV1")) return;
@@ -382,6 +363,15 @@
       document.head.appendChild(s);
     }
 
+    function esc(s) {
+      return String(s ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
     function buildUI() {
       ensureUiStyle();
       if (uiEl && document.body.contains(uiEl)) return uiEl;
@@ -406,17 +396,6 @@
 
       return uiEl;
     }
-
-    function esc(s) {
-      return String(s ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    let uiFilter = "all"; // all | unlocked | locked
 
     function renderUI() {
       const p = buildUI();
@@ -532,16 +511,12 @@
       const hud = document.getElementById("hud");
       if (!hud) return;
       if (document.getElementById(BTN_ID)) return;
-
       const mount = document.getElementById("hudButtons") || hud;
 
       const btn = document.createElement("button");
       btn.id = BTN_ID;
       btn.textContent = "実績";
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        openPanel();
-      });
+      btn.addEventListener("click", (e) => { e.preventDefault(); openPanel(); });
       mount.appendChild(btn);
     }
 
@@ -550,22 +525,9 @@
      * ========================= */
     try { WB.on?.("bunnyCountChanged", checkUnlocks); } catch {}
     try { WB.on?.("hudUpdated", checkUnlocks); } catch {}
-    try { WB.on?.("coinsChanged", checkUnlocks); } catch {}
-    try { WB.on?.("coinChanged", checkUnlocks); } catch {}
+    try { WB.on?.("sy:add", checkUnlocks); } catch {}
 
-    try { WB.on?.("goldenUnchiCollected", checkUnlocks); } catch {}
-    try { WB.on?.("tabidachi", checkUnlocks); } catch {}
-    try { WB.on?.("hanabiFired", checkUnlocks); } catch {}
-    try { WB.on?.("slotWin", checkUnlocks); } catch {}
-    try { WB.on?.("omukae", checkUnlocks); } catch {}
-
-    try {
-      WB.on?.("resetRequested", () => {
-        try { localStorage.removeItem(LS_ACH); } catch {}
-      });
-    } catch {}
-
-    // ✅ eventsが無くても解除できるように「定期チェック」
+    // eventsが無くても解除できるように定期チェック
     const TIMER_MS = 900;
     const timer = setInterval(() => {
       checkUnlocks();
@@ -592,13 +554,15 @@
       openPanel,
       closePanel,
       stop: () => { try { clearInterval(timer); } catch {} },
-      debug: false, // ✅ 解除できない時は true にして console 見て
+      debug: false,
+      // おまけ：今のカウント確認
+      getSyCount: (k) => getSyougouCount(k),
+      _syCounts: syCounts,
     };
 
-    // 初回チェック
+    // 初回
     checkUnlocks();
     injectHudButton();
-
     console.log("[zisseki] ready", { unlocked: Object.keys(ach).length });
 
   }).catch((e) => {
