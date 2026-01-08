@@ -1,13 +1,11 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋fit＋SE）完全版（V28）
-// ✅ 最重要（最小バグ方式）:
-//    - hat は「座標計算を一切しない」= 常に wrap の 0,0 / 100%,100% に重ねる（inset:0）
-//    - 反転（.flip / transform）しても hat も一緒に反転し、位置ズレが原理的に起きない
-// ✅ assets/isyou/*.png を最優先で必ず試す（partyhat/ahiru/aimasuku等）
-// ✅ 装着決定時にSE
-// ✅ 装着モード中：うさぎクリックで赤枠 → 決定
-// ✅ 外す：外すモード → うさぎ選択 → 外す決定
-// ✅ モーダル内クリックは装着判定しない
-// ✅ うさぎ側の transform/flip を壊さない（打ち消し処理ゼロ）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋fit＋SE）完全版（V29）
+// ✅ 最重要（いちばんバグらない方式）
+// 1) 位置ズレ対策：hatは座標計算ゼロ → wrapのinset:0で常に100%重ね（ズレの原因を消す）
+// 2) 反転ズレ対策：ゲーム側の反転が「wrapではなくimgにだけ掛かる」ケースがある
+//    → bunny画像の“実際の反転”を検出して、hatにも同じ反転を適用（ダブル反転は回避）
+// ✅ assets/isyou/*.png を最優先で必ず試す
+// ✅ 装着決定時SE
+// ✅ 装着モード中：うさぎクリック→赤枠→決定 / 外すも同様
 
 (() => {
   "use strict";
@@ -189,7 +187,6 @@
     equipped: "wb_isyou_equipped_v7",
   };
 
-  // ✅ assets/isyou を先頭固定（表示ミスを避ける）
   function imgCandidates(name) {
     return [
       `assets/isyou/${name}`,
@@ -320,9 +317,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV28")) return;
+    if (document.getElementById("isyouStyleV29")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV28";
+    s.id = "isyouStyleV29";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -439,7 +436,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
 .bunnyWrap{ overflow: visible !important; }
 
-/* ✅ 最小バグ方式：アクセは「絶対に座標計算しない」で100%重ね */
+/* ✅ 位置ズレの原因を絶つ：inset:0 で100%重ね（座標計算ゼロ） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important; right:0 !important; bottom:0 !important;
@@ -447,7 +444,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
-  transform:none !important; /* 親のflipをそのまま受ける */
+  transform:none !important; /* 親がflipなら親のまま受ける */
 }
 .bunnyWrap .isyouAcc > div{
   position:absolute;
@@ -460,7 +457,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   height:100%;
   object-fit: contain;
   pointer-events:none;
-  transform:none !important; /* 打ち消し処理ゼロ */
   transform-origin: 50% 50%;
 }
 `;
@@ -786,8 +782,17 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（V28：座標計算ゼロ）
+   * Accessory render（V29：inset:0 + 反転追従）
    * ========================= */
+  function getBunnyImg(wrap) {
+    if (!wrap) return null;
+    return (
+      wrap.querySelector(":scope > img.bunny, :scope > img") ||
+      wrap.querySelector("img.bunny, img") ||
+      null
+    );
+  }
+
   function ensureSafePositioning(wrap) {
     try {
       const pos = getComputedStyle(wrap).position;
@@ -805,10 +810,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       box.className = "isyouAcc";
       wrap.appendChild(box);
     }
-    // ✅ 最前面に固定（最後尾へ）
+    // 最前面に（最後に付け直す）
     try { if (box.parentNode === wrap) wrap.appendChild(box); } catch {}
 
-    // ✅ 親のflipをそのまま受けるため transform を触らない
     box.style.transform = "none";
     return box;
   }
@@ -820,10 +824,25 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
   }
 
+  // ✅ 実際に「反転しているか」をtransform行列で判定（a<0ならX反転）
+  function isMirrored(el) {
+    if (!el) return false;
+    try {
+      const t = getComputedStyle(el).transform;
+      if (!t || t === "none") return false;
+      const m = new DOMMatrixReadOnly(t);
+      return (m.a || 0) < 0;
+    } catch {
+      return false;
+    }
+  }
+
   function placeAcc(wrap, slot, itemKey) {
     if (!wrap) return;
+
+    const bunnyImg = getBunnyImg(wrap);
     const box = ensureAccContainer(wrap);
-    if (!box) return;
+    if (!box || !bunnyImg) return;
 
     removeAccSlot(wrap, slot);
 
@@ -839,15 +858,22 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ 最小バグ方式：常に100%重ね（inset:0）
-    //    → flip(transform)しても親と一緒に反転するだけでズレない
+    // ✅ 位置は常に100%重ね（inset:0）
     node.style.left = "0px";
     node.style.top = "0px";
     node.style.width = "100%";
     node.style.height = "100%";
+    node.style.transformOrigin = "50% 50%";
 
-    // ✅ 反転打ち消ししない（親と一緒に反転する仕様）
-    img.style.transform = "none";
+    // ✅ 反転は「ダブル反転回避」しながら追従
+    // - wrap自体が反転しているなら、子も勝手に反転するので追加反転しない
+    // - wrapは反転していないが bunnyImg が反転しているなら、hatも同じ反転をかける
+    const wrapMir = isMirrored(wrap);
+    const imgMir  = isMirrored(bunnyImg);
+    const needMirror = (!wrapMir && imgMir);
+
+    node.style.transform = needMirror ? "scaleX(-1)" : "none";
+    img.style.transform = "none"; // img個別は触らない（nodeで一括反転）
 
     setSrcWithFallback(img, it.imgs, () => {});
   }
