@@ -1,10 +1,14 @@
-// ✅ V30.0 PATCH：赤枠が「必ず出る」修正版（hat overlay方式は維持）
-// 変更点：#isyouSelectBox を overlay内ではなく body 直下に置いて position:fixed 追従に変更
+// ✅ V30.0 PATCH：赤枠が「必ず出る」完全版（軽量）
+// - 赤枠は body 直下 fixed（overlay依存を完全排除）
+// - 装着モード中だけ追従ループ（常時rAFしない）
+// - クリック直後に即同期して「出ない」を根絶
 
 (() => {
   "use strict";
 
-  // ====== ここだけ追加/差し替え ======
+  /* =========================
+   * SelectBox (fixed)
+   * ========================= */
   function ensureSelectBoxFixed() {
     let box = document.getElementById("isyouSelectBoxFixed");
     if (!box) {
@@ -44,45 +48,115 @@
     if (r.width <= 0 || r.height <= 0) return;
 
     box.style.left = `${r.left}px`;
-    box.style.top = `${r.top}px`;
-    box.style.width = `${r.width}px`;
+    box.style.top  = `${r.top}px`;
+    box.style.width  = `${r.width}px`;
     box.style.height = `${r.height}px`;
   }
 
-  // ====== ここから：あなたのV30.0コードに「上書きフック」するだけ ======
-  // 1) 既存の isyouSelectBox を使わない（見えない原因）
-  // 2) selectImg() と applyEquipsAll() 内の sync を fixed版に差し替え
+  /* =========================
+   * Patch runner (light)
+   * ========================= */
+  let __raf = 0;
+  let __running = false;
+  let __last = 0;
 
-  // 既にV30.0が読み込まれてる前提でパッチ当て
-  // （差し替え運用なら、V30.0の中にこの fixed 実装を直接コピペしてOK）
+  function startLoop(state) {
+    if (__running) return;
+    __running = true;
+
+    const tick = (ts) => {
+      __raf = 0;
+      if (!__running) return;
+
+      // 12fpsくらいに制限（重さ対策）
+      if (ts - __last < 80) {
+        __raf = requestAnimationFrame(tick);
+        return;
+      }
+      __last = ts;
+
+      if (state.mode === "equip" && state.selectedImg) {
+        syncSelectBoxFixedToImg(state.selectedImg);
+        __raf = requestAnimationFrame(tick);
+      } else {
+        // 装着モードじゃないなら止める
+        hideSelectBoxFixed();
+        stopLoop();
+      }
+    };
+
+    __raf = requestAnimationFrame(tick);
+  }
+
+  function stopLoop() {
+    __running = false;
+    if (__raf) cancelAnimationFrame(__raf);
+    __raf = 0;
+  }
+
+  /* =========================
+   * Try patch
+   * ========================= */
   const tryPatch = () => {
     const ISYOU = window.ISYOU;
     if (!ISYOU || !ISYOU._state) return false;
 
-    // state参照
     const state = ISYOU._state;
 
-    // 公開されてない関数には触れられないので、
-    // クリック時に「常に追従」させる保険を入れる（最強で確実）
-    const tick = () => {
+    // 既存の赤枠（overlay版）があれば隠しておく（干渉防止）
+    try {
+      const old = document.getElementById("isyouSelectBox");
+      if (old) old.style.display = "none";
+    } catch {}
+
+    // ✅ 「装着モードに入ったら」開始、「抜けたら」停止 を確実にする
+    // 1) クリック直後に即同期（最重要）
+    // 2) 装着モード中のみ追従（軽量）
+    document.addEventListener("pointerdown", (e) => {
+      // isyou側が capture で止めるので bubble でも拾える
+      // ただし確実性を上げるため capture で拾う
+    }, true);
+
+    // 装着モード中のクリックで選択された img を即同期
+    const onDown = (e) => {
+      if (state.mode !== "equip") return;
+      const img =
+        e.target?.closest?.("#bunnyLayer img") ||
+        (e.target?.tagName === "IMG" ? e.target : null);
+
+      if (img && img.tagName === "IMG") {
+        // state.selectedImg は isyou 側で更新されるが、
+        // “その瞬間”にまだ入ってない場合があるので両対応
+        syncSelectBoxFixedToImg(img);
+        // 次フレームでも追いかけて確実に位置確定
+        requestAnimationFrame(() => syncSelectBoxFixedToImg(state.selectedImg || img));
+        startLoop(state);
+      }
+    };
+    document.addEventListener("pointerdown", onDown, true);
+
+    // 装着モードの間だけ resize/scroll で即同期（保険）
+    const onRS = () => {
       if (state.mode === "equip" && state.selectedImg) {
         syncSelectBoxFixedToImg(state.selectedImg);
+        startLoop(state);
       } else {
         hideSelectBoxFixed();
+        stopLoop();
       }
-      requestAnimationFrame(tick);
     };
-    requestAnimationFrame(tick);
+    window.addEventListener("resize", onRS, { passive: true });
+    window.addEventListener("scroll", onRS, { passive: true });
 
-    // resize/scrollでも追従
-    window.addEventListener("resize", () => {
-      if (state.mode === "equip" && state.selectedImg) syncSelectBoxFixedToImg(state.selectedImg);
-    }, { passive: true });
-    window.addEventListener("scroll", () => {
-      if (state.mode === "equip" && state.selectedImg) syncSelectBoxFixedToImg(state.selectedImg);
-    }, { passive: true });
+    // 初期状態：もし既に装着モードなら開始
+    if (state.mode === "equip" && state.selectedImg) {
+      syncSelectBoxFixedToImg(state.selectedImg);
+      startLoop(state);
+    } else {
+      hideSelectBoxFixed();
+    }
 
-    console.log("[isyou] patched: select box fixed");
+    console.log("[isyou] patched: select box fixed (light)");
     return true;
   };
 
@@ -91,7 +165,7 @@
     let t = 0;
     const id = setInterval(() => {
       t++;
-      if (tryPatch() || t > 100) clearInterval(id);
+      if (tryPatch() || t > 200) clearInterval(id);
     }, 50);
   }
 })();
