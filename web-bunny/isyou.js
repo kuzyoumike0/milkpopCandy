@@ -1,9 +1,9 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit＋SE）完全版（V24）
-// ✅ FIX: 反転してもズレない → getBoundingClientRect の“見た目矩形差分”で wrap 内座標に変換して一致
-// ✅ FIX: hat は全部「うさぎ同サイズ同位置」（full）
-// ✅ FIX: aimasuku / ahiru のズレ → アンカー計算の “謎の -0.40” を廃止し、slotごとに lift を明示（face/pet は lift=0）
-// ✅ NEW: かぶせた（装着決定）時にSEを鳴らす（複数候補を順に試す）
-// ✅ assets/isyou/*.png を最優先で必ず試す（表示ミスを二度としない）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit＋SE）完全版（V25）
+// ✅ FIX(最重要): 反転時にズレる原因＝「wrap の getBoundingClientRect 基準」と「absolute の基準（padding box）」が一致してない
+//    → isyouAcc(絶対配置の親) の getBoundingClientRect を基準にして、完全一致させる（これで flip/transform/境界/枠でもズレない）
+// ✅ hat は全部「うさぎ同サイズ同位置」（full）
+// ✅ assets/isyou/*.png を最優先で必ず試す（表示ミス対策）
+// ✅ 装着決定時にSE
 
 (() => {
   "use strict";
@@ -115,7 +115,7 @@
   }
 
   /* =========================
-   * 画像候補を順に試す（assets/isyou を最優先）
+   * 画像候補を順に試す（assets/isyou 最優先）
    * ========================= */
   function setSrcWithFallback(imgEl, candidates, onOk) {
     const list = (candidates || []).filter(Boolean);
@@ -150,24 +150,21 @@
   ];
 
   let __equipSeAudio = null;
-  let __equipSeReady = false;
 
   function preloadEquipSe() {
     if (__equipSeAudio) return;
     __equipSeAudio = new Audio();
     __equipSeAudio.preload = "auto";
 
-    // 最初に成功したやつを固定
     let idx = 0;
     const tryNext = () => {
       if (!__equipSeAudio) return;
       if (idx >= EQUIP_SE_CANDIDATES.length) return;
-      __equipSeReady = false;
       __equipSeAudio.src = EQUIP_SE_CANDIDATES[idx++];
       __equipSeAudio.load();
     };
 
-    __equipSeAudio.oncanplaythrough = () => { __equipSeReady = true; };
+    __equipSeAudio.oncanplaythrough = () => {};
     __equipSeAudio.onerror = () => tryNext();
 
     tryNext();
@@ -177,7 +174,6 @@
     try {
       preloadEquipSe();
       if (!__equipSeAudio) return;
-      // ユーザー操作（決定ボタン）内で鳴るので通常OK
       __equipSeAudio.currentTime = 0;
       __equipSeAudio.play().catch(() => {});
     } catch {}
@@ -191,7 +187,6 @@
     equipped: "wb_isyou_equipped_v7",
   };
 
-  // ✅ assets/isyou を先頭固定（表示ミスを二度としない）
   function imgCandidates(name) {
     return [
       `assets/isyou/${name}`,
@@ -206,21 +201,13 @@
   }
 
   const ITEMS = {
-    // ✅ hat は全部 full（= うさぎ同サイズ同位置）
-    partyhat: { slot: "hat",  label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
-    crown:    { slot: "hat",  label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900, fit: "full" },
-    ribbon:   { slot: "hat",  label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700, fit: "full" },
-    ahiru:    { slot: "hat",  label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450, fit: "full" },
-    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650, fit: "full" },
-    
-  };
+    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
+    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900, fit: "full" },
+    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700, fit: "full" },
 
-  // ✅ “謎の -0.40” を廃止：slotごとに lift を明示（face/pet は lift=0）
-  const SLOT_ANCHOR = {
-    // face: 目のあたりに「かぶせる」想定（上に持ち上げない）
-    face: { x: 0.50, y: 0.42, w: 0.55, lift: 0.00 },
-    // pet: 足元寄り（上に持ち上げない）
-    pet:  { x: 0.78, y: 0.80, w: 0.40, lift: 0.00 },
+    // 追加（全部 hat / full：うさぎ同サイズ同位置）
+    ahiru:    { slot: "hat", label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450, fit: "full" },
+    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650, fit: "full" },
   };
 
   /* =========================
@@ -332,9 +319,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV24")) return;
+    if (document.getElementById("isyouStyleV25")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV24";
+    s.id = "isyouStyleV25";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -452,14 +439,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 /* ✅ うさぎを壊さない */
 .bunnyWrap{ overflow: visible !important; }
 
-/* ✅ アクセ最前面 */
+/* ✅ アクセの基準を「padding box」に固定（inset:0） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
-  left:0 !important; top:0 !important;
-  width:100% !important; height:100% !important;
+  left:0 !important; top:0 !important; right:0 !important; bottom:0 !important;
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
+  transform:none !important;
 }
 .bunnyWrap .isyouAcc > div{ position:absolute; }
 .bunnyWrap .isyouAcc img{
@@ -646,8 +633,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
           <div class="pill">所持コイン：<b>${have}</b> 🪙</div>
           <div class="row" style="gap:8px;">
             <button class="btn danger" type="button" id="isyouRemoveHat">帽子を外す</button>
-            <button class="btn danger" type="button" id="isyouRemoveFace">顔を外す</button>
-            <button class="btn danger" type="button" id="isyouRemovePet">小物を外す</button>
             <button class="btn" type="button" id="isyouRefresh">更新</button>
           </div>
         </div>
@@ -680,14 +665,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     modal.querySelector("#isyouRemoveHat")?.addEventListener("click", (e) => {
       e.preventDefault(); e.stopPropagation();
       setRemoveMode("hat");
-    });
-    modal.querySelector("#isyouRemoveFace")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      setRemoveMode("face");
-    });
-    modal.querySelector("#isyouRemovePet")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      setRemoveMode("pet");
     });
 
     modal.querySelectorAll("[data-buy]").forEach((btn) => {
@@ -802,7 +779,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（反転でもズレない：見た目矩形差分方式）
+   * Accessory render（V25: isyouAcc基準で rect を取る＝flipでも絶対ズレない）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
@@ -826,8 +803,13 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       box.className = "isyouAcc";
       wrap.appendChild(box);
     }
-    // ✅ transform で座標系を壊さない
+    // ここが重要：基準を固定
     box.style.transform = "none";
+    box.style.left = "0";
+    box.style.top = "0";
+    box.style.right = "0";
+    box.style.bottom = "0";
+    box.style.position = "absolute";
     return box;
   }
 
@@ -838,13 +820,13 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
   }
 
-  // ✅ 見た目矩形（transform/flip含む）を wrap 内座標に変換 → 一致
-  function rectInWrapByClientRect(wrap, imgEl) {
+  // ✅ “見た目矩形差分”の基準を wrap ではなく isyouAcc(box) にする（padding/border/flipでも一致）
+  function rectInBoxByClientRect(box, imgEl) {
     const br = imgEl.getBoundingClientRect();
-    const wr = wrap.getBoundingClientRect();
+    const xr = box.getBoundingClientRect();
     return {
-      left: br.left - wr.left,
-      top: br.top - wr.top,
+      left: br.left - xr.left,
+      top: br.top - xr.top,
       w: br.width,
       h: br.height,
     };
@@ -872,7 +854,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (!it) return;
 
     function fitFullSameAsBunny() {
-      const r = rectInWrapByClientRect(wrap, bunnyImg);
+      const r = rectInBoxByClientRect(box, bunnyImg);
       if (r.w <= 1 || r.h <= 1) return;
 
       node.style.left = `${r.left}px`;
@@ -881,31 +863,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.height = `${r.h}px`;
     }
 
-    function fitSlotAnchor(slotKey) {
-      const r = rectInWrapByClientRect(wrap, bunnyImg);
-      if (r.w <= 1 || r.h <= 1) return;
-
-      const a = SLOT_ANCHOR[slotKey];
-      if (!a) return;
-
-      const pw = r.w * (a.w ?? 0.55);
-      const px = r.left + r.w * (a.x ?? 0.5) - pw / 2;
-
-      // ✅ lift を明示（face/pet は 0）
-      const lift = (a.lift ?? 0); // 0..1（pw基準）
-      const py = r.top + r.h * (a.y ?? 0.5) - pw * lift;
-
-      node.style.left = `${px}px`;
-      node.style.top  = `${py}px`;
-      node.style.width  = `${pw}px`;
-      node.style.height = `${pw}px`;
-    }
-
     // ✅ hat は全て full（同サイズ同位置）
-    const fit =
-      (slot === "hat" || it.fit === "full")
-        ? fitFullSameAsBunny
-        : () => fitSlotAnchor(slot);
+    const fit = fitFullSameAsBunny;
 
     setSrcWithFallback(img, it.imgs, () => {
       requestAnimationFrame(() => requestAnimationFrame(fit));
@@ -926,11 +885,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (!bornAt) return;
 
     const eq = state.equipped[String(bornAt)] || {};
-    for (const slot of ["hat", "face", "pet"]) {
-      const key = eq[slot];
-      if (key && ITEMS[key]) placeAcc(wrap, slot, key);
-      else removeAccSlot(wrap, slot);
-    }
+    const key = eq.hat;
+    if (key && ITEMS[key]) placeAcc(wrap, "hat", key);
+    else removeAccSlot(wrap, "hat");
   }
 
   function applyEquipsAll() {
@@ -961,7 +918,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     saveAll();
     applyEquipsForWrap(wrap);
 
-    // ✅ かぶせた時のSE
     playEquipSe();
 
     toast(`✨ 装着：${it.label}`);
@@ -1054,7 +1010,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     document.addEventListener("pointerdown", onPointerDownCapture, true);
 
-    // SE を先読み（ユーザー操作で再生されるので安全）
     preloadEquipSe();
 
     setTimeout(applyEquipsAll, 200);
