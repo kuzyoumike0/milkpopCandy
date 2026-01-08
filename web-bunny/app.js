@@ -336,6 +336,9 @@
       this.syncSprite();
 
       const tap = (e) => {
+        // ✅ 装着モード中はコイン落としをしない（お洒落の付け替え優先）
+        if (document.body.classList.contains("isyouEquipMode")) return;
+
         e?.preventDefault?.();
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
