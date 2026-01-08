@@ -2,8 +2,11 @@
 // 称号システム（各種カウント・称号解放・装備・永続化・付け替えUI）
 // - 未解放は「？？？」表示（解放条件は表示）
 // - HUDの「名前の横」に現在称号を常時表示（見つからなければHUD左側に表示）
+// ✅ FIX: 解除が効かない（v1/v2キー不一致）を完全修正：装備/解除は v1/v2 両方同期、起動時も互換読み込み
 
 (() => {
+  "use strict";
+
   /* =========================
    * Config
    * ========================= */
@@ -42,6 +45,7 @@
     },
   ];
 
+  // ✅ v2 をメインに保存しつつ、互換で v1 も同期する
   const LS = {
     counts: "wb_counts_v2",          // { unchi: 0, tabidachi: 0, ... }
     currentTitle: "wb_title_v2",     // string（HUDに出す文字列）
@@ -82,18 +86,36 @@
     localStorage.setItem(key, String(v ?? ""));
   }
 
+  // ✅ v1キー（app.js / WB互換）を確実に取得
+  function getV1TitleKey() {
+    return (window.WB?.LS?.title) ? window.WB.LS.title : "wb_title_v1";
+  }
+
   function saveAll() {
     saveJson(LS.counts, state.counts);
     saveJson(LS.ownedTitles, state.owned);
+
+    // v2
     saveStr(LS.currentTitle, state.current || "");
+
+    // ✅ v1にも同期（他JS互換：ここが「解除が効かない」の主原因）
+    saveStr(getV1TitleKey(), state.current || "");
   }
 
   function initFromStorage() {
     const counts = loadJson(LS.counts, {});
     state.counts = (counts && typeof counts === "object") ? counts : {};
+
     state.owned = loadJson(LS.ownedTitles, []);
     if (!Array.isArray(state.owned)) state.owned = [];
+
+    // まず v2
     state.current = loadStr(LS.currentTitle, "");
+
+    // ✅ v2が空なら v1から復元（互換）
+    if (!state.current) {
+      state.current = loadStr(getV1TitleKey(), "");
+    }
 
     for (const c of CATEGORIES) {
       if (!Number.isFinite(state.counts[c.key])) state.counts[c.key] = 0;
@@ -223,7 +245,6 @@
 
   function findNameAnchorInHud(hud) {
     if (!hud) return null;
-    // “名前っぽい”要素を優先して探す
     const selectors = [
       "#playerName", ".playerName",
       "#userName", ".userName",
@@ -251,10 +272,8 @@
 
     const anchor = findNameAnchorInHud(hud);
     if (anchor && anchor.parentElement) {
-      // 名前の“横”に付ける
       anchor.insertAdjacentElement("afterend", badge);
     } else {
-      // 名前が取れなければ、HUDの coin の横（確実に表示）
       const coin = hud.querySelector("#coin") || hud.firstElementChild;
       if (coin && coin.parentElement) coin.insertAdjacentElement("afterend", badge);
       else hud.appendChild(badge);
@@ -272,7 +291,6 @@
 
     const cur = getCurrentTitle();
     v.textContent = cur ? cur : "（なし）";
-
     badge.classList.toggle("empty", !cur);
   }
 
@@ -282,9 +300,13 @@
   function equipTitle(titleText) {
     state.current = String(titleText || "");
     saveAll();
-    WB?.updateHud?.();
+
+    // ✅ 即反映（解除もここで確実に消える）
     updateHudTitleBadge();
     refreshUI();
+
+    // HUD更新は最後（他JSの更新トリガ）
+    WB?.updateHud?.();
   }
 
   function unequipTitle() {
@@ -352,9 +374,9 @@
 
     saveAll();
     maybeUnlockByCount(key);
-    WB?.updateHud?.();
     updateHudTitleBadge();
     refreshUI();
+    WB?.updateHud?.();
   }
 
   function getOwnedTitleIds() {
@@ -570,7 +592,6 @@
     const master = getTitlesMaster();
     const ownedSet = new Set(getOwnedTitleIds());
 
-    // カテゴリごと
     const byCat = {};
     for (const c of CATEGORIES) byCat[c.key] = [];
     for (const t of master) byCat[t.key].push(t);
@@ -589,7 +610,6 @@
         const owned = ownedSet.has(m.id);
         const isOn = current && current === m.title;
 
-        // ★未解放は ??? 表示（条件だけ見える）
         const displayName = owned ? escapeHtml(m.title) : "？？？";
 
         const badge = owned
@@ -642,7 +662,6 @@
       ${sectionsHtml}
     `;
 
-    // bind
     body.querySelectorAll("[data-equip]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
@@ -701,11 +720,16 @@
    * ========================= */
   function attach(wb) {
     WB = wb || null;
-    WB?.updateHud?.();
+
+    // ✅ WBが来たタイミングで v1キーを確定できるので、互換同期しておく
+    if (state.current) {
+      saveStr(getV1TitleKey(), state.current);
+    }
 
     injectHudButton();
     ensureHudBadge();
     updateHudTitleBadge();
+    WB?.updateHud?.();
   }
 
   /* =========================
@@ -728,7 +752,6 @@
     ensureHudBadge();
     updateHudTitleBadge();
 
-    // 既存の「称号」ボタンが別にある場合も拾う
     const btn =
       document.getElementById("syougouBtn") ||
       [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("称号"));
@@ -745,6 +768,9 @@
       ensureHudBadge();
       updateHudTitleBadge();
     }, 400);
+
+    // ✅ WBが既にあるなら attach（保険）
+    if (window.WB) attach(window.WB);
   });
 
   /* =========================
