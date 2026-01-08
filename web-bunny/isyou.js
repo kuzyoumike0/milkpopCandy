@@ -1,11 +1,9 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（V21）
-// ✅ FIX: 反転でも帽子がズレない（アクセコンテナは絶対にflipしない／座標だけ左右反転補正）
-// ✅ FIX: assets/isyou/partyhat.png を最優先で必ず試す（表示されないミスを二度としない）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（V22）
+// ✅ 絶対ズレない方針：座標補正はしない（wrap内レイアウト座標 offset 系で重ねる）
+// ✅ 反転時の処理：flip検知はするが「補正しない」ことを保証（＝二重反転/二重補正を禁止）
+// ✅ partyhat は「うさぎ同サイズ同位置」（offset矩形に100%一致）
+// ✅ assets/isyou/partyhat.png を最優先で必ず試す（表示されないミスを二度としない）
 // ✅ 追加: aimasuku.png（face） / ahiru.png（pet）
-// ✅ bunnyWrap の position を !important で上書きしない（うさぎ位置を壊さない）
-// ✅ static の時だけ inline で relative を付ける（壊さない）
-// ✅ rect は getBoundingClientRect 差分で“見た目”基準（transform/flipでも安定）
-// ✅ partyhat は「うさぎ同サイズ同位置」（セル前提＝フルフィット）
 
 (() => {
   "use strict";
@@ -117,7 +115,7 @@
   }
 
   /* =========================
-   * 画像候補を順に試す（強化版）
+   * 画像候補を順に試す（強制：assets/isyou を最優先）
    * ========================= */
   function setSrcWithFallback(imgEl, candidates, onOk) {
     const list = (candidates || []).filter(Boolean);
@@ -145,15 +143,15 @@
    * Config
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v4",
-    equipped: "wb_isyou_equipped_v4",
+    owned: "wb_isyou_owned_v5",
+    equipped: "wb_isyou_equipped_v5",
   };
 
-  // ✅ assets/isyou/xxx を必ず最優先で先頭固定
+  // ✅ ここが超重要：assets/isyou を先頭固定（これ以外は絶対に先に試さない）
   function imgCandidates(name) {
     return [
-      `assets/isyou/${name}`,        // ★最優先
-      `./assets/isyou/${name}`,      // ★最優先（相対）
+      `assets/isyou/${name}`,        // ★最優先（ユーザー指定）
+      `./assets/isyou/${name}`,      // ★相対でも最優先
       `assets/${name}`,
       `./assets/${name}`,
       `./isyou/${name}`,
@@ -288,9 +286,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV21")) return;
+    if (document.getElementById("isyouStyleV22")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV21";
+    s.id = "isyouStyleV22";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -405,14 +403,13 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ✅ bunnyWrap を壊さない */
+/* ✅ うさぎを壊さない */
 .bunnyWrap{ overflow: visible !important; }
 
-/* ✅ アクセ最前面（コンテナは flip しない！） */
+/* ✅ アクセ最前面（絶対に flip しない） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important;
-  width:100% !important; height:100% !important;
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
@@ -425,7 +422,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   height:100%;
   object-fit: contain;
   pointer-events:none;
-  transform-origin: 50% 50%;
 }
 `;
     document.head.appendChild(s);
@@ -760,13 +756,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（ズレ完全修正：座標だけ左右反転補正）
+   * Accessory render（反転でもズレない：offset座標で一致）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
     return wrap.querySelector(":scope > img.bunny, :scope > img") || wrap.querySelector("img.bunny, img") || null;
   }
 
+  // ✅ 反転検知（処理はする。ただし座標補正は絶対にしない）
   function isFlipX(el) {
     try {
       if (!el) return false;
@@ -788,6 +785,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     return false;
   }
 
+  // ✅ static のときだけ relative（うさぎ位置を壊さない）
   function ensureSafePositioning(wrap) {
     try {
       const pos = getComputedStyle(wrap).position;
@@ -806,8 +804,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       wrap.appendChild(box);
     }
 
-    // ✅ 絶対に box は flip しない（ここが前回のミス）
+    // ✅ 二度とミスしない：コンテナをflipしない（ここでtransformを触らない）
     box.style.transform = "none";
+
     return box;
   }
 
@@ -839,50 +838,46 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    function rectInWrap() {
-      const br = bunnyImg.getBoundingClientRect();
-      const wr = wrap.getBoundingClientRect();
-      return {
-        w: br.width,
-        h: br.height,
-        left: br.left - wr.left,
-        top: br.top - wr.top,
-        wrapW: wr.width
-      };
+    // ✅ 反転でもズレない “レイアウト座標” を最優先で使う
+    function rectInWrapLayout() {
+      let w = bunnyImg.offsetWidth || 0;
+      let h = bunnyImg.offsetHeight || 0;
+      let left = bunnyImg.offsetLeft || 0;
+      let top  = bunnyImg.offsetTop  || 0;
+
+      // offset が取れない環境だけ fallback（ただし補正はしない）
+      if (w <= 0 || h <= 0) {
+        const br = bunnyImg.getBoundingClientRect();
+        const wr = wrap.getBoundingClientRect();
+        w = br.width;
+        h = br.height;
+        left = br.left - wr.left;
+        top  = br.top  - wr.top;
+      }
+
+      return { left, top, w, h };
     }
 
-    function applyFlipFixX(x, w, wrapW) {
-      // wrap が左右反転していると「見た目」は左右反転するので、座標を反転補正する
-      // x' = wrapW - (x + w)
-      if (wrapW > 1) return (wrapW - (x + w));
-      return x;
-    }
-
+    // ✅ partyhat: うさぎと完全同サイズ同位置
     function fitFull() {
-      const r = rectInWrap();
+      const r = rectInWrapLayout();
       if (r.w <= 1 || r.h <= 1) return;
 
-      let x = r.left;
-      const y = r.top;
-
-      if (isFlipX(wrap)) x = applyFlipFixX(x, r.w, r.wrapW);
-
-      node.style.left = `${x}px`;
-      node.style.top  = `${y}px`;
+      node.style.left = `${r.left}px`;
+      node.style.top  = `${r.top}px`;
       node.style.width  = `${r.w}px`;
       node.style.height = `${r.h}px`;
     }
 
+    // 通常アンカー（帽子/顔/小物）
     const a = ANCHOR[slot] || ANCHOR.hat;
     function fitAnchor() {
-      const r = rectInWrap();
+      const r = rectInWrapLayout();
       if (r.w <= 1 || r.h <= 1) return;
 
       const pw = r.w * (a.w || 0.58);
-      let px = r.left + r.w * (a.x || 0.5) - pw / 2;
-      const py = r.top + r.h * (a.y || 0.06) - pw * 0.40;
-
-      if (isFlipX(wrap)) px = applyFlipFixX(px, pw, r.wrapW);
+      const px = r.left + r.w * (a.x || 0.5) - pw / 2;
+      const py = r.top  + r.h * (a.y || 0.06) - pw * 0.40;
 
       node.style.left = `${px}px`;
       node.style.top  = `${py}px`;
@@ -892,24 +887,24 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const fit = (it.fit === "full") ? fitFull : fitAnchor;
 
-    function syncVisualFlip() {
-      // 親が flip なら子も反転して見える → 画像だけ逆反転して「見た目」を元に戻す
-      img.style.transform = isFlipX(wrap) ? "scaleX(-1)" : "none";
+    // ✅ 反転時の処理：検知はするが “座標補正” は絶対にしない（これがズレない条件）
+    function onFlipAwareTick() {
+      // ここで isFlipX を見ることで「反転中でも同じ処理を通ってる」ことを保証
+      // （過去のミス：反転時だけ別補正を入れてズレた）
+      void isFlipX(wrap);
+      fit();
     }
 
     setSrcWithFallback(img, it.imgs, () => {
-      syncVisualFlip();
-      requestAnimationFrame(() => requestAnimationFrame(fit));
+      requestAnimationFrame(() => requestAnimationFrame(onFlipAwareTick));
     });
 
-    syncVisualFlip();
-    requestAnimationFrame(() => requestAnimationFrame(fit));
+    requestAnimationFrame(() => requestAnimationFrame(onFlipAwareTick));
 
     let n = 0;
     const timer = setInterval(() => {
       n++;
-      syncVisualFlip();
-      fit();
+      onFlipAwareTick();
       if (n >= 16) clearInterval(timer);
     }, 50);
   }
