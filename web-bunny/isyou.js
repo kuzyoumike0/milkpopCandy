@@ -1,13 +1,12 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny=完全一致）完全版
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は選択中だけz-indexを上げる
-// ✅ FIX：アンカーはoffset系（transform/flipでもズレにくい）
-// ✅ NEW：fitToBunny（うさぎ画像と同じrectに重ね、autoズレ対策）
-// ✅ NEW：outfit は「うさぎ画像と完全一致」（位置・サイズ100%一致）
+// ✅ FIX：outfit(衣装)は「うさぎ画像と完全一致」(offset系で一致、ダメならrectフォールバック)
+// ✅ hat はアンカー配置（耳の間）
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
 
@@ -15,7 +14,7 @@
   "use strict";
 
   /* =========================
-   * Wait for HUD / WB
+   * Wait helpers
    * ========================= */
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -61,7 +60,7 @@
           }
           return;
         }
-        if (tries >= 40) {
+        if (tries >= 40) { // 約8秒で諦め
           clearInterval(__syRetryTimer);
           __syRetryTimer = null;
         }
@@ -77,24 +76,24 @@
     equipped: "wb_isyou_equipped_v3", // { bornAt: { slotKey: itemKey } }
   };
 
-  // slot:
-  // - "hat"    : 置き換え（1つだけ）
-  // - "outfit" : うさぎ画像と完全一致（全身衣装向け）
+  // slot: hat は置き換え / outfit は完全一致
   const ITEMS = {
+    // --- hat ---
     partyhat: { slot: "hat",    label: "パーティーハット", img: "./assets/isyou/partyhat.png", price: 500 },
     crown:    { slot: "hat",    label: "クラウン",         img: "./assets/isyou/crown.png",    price: 900 },
     ribbon:   { slot: "hat",    label: "リボン",           img: "./assets/isyou/ribbon.png",   price: 700 },
 
-    // ✅ 例：衣装（必要なら増やしてOK）
-    // outfit1: { slot: "outfit", label: "ドレス", img: "./assets/isyou/outfit_dress.png", price: 1200 },
+    // --- outfit（例：必要なら増やしてOK）---
+    // outfit1:   { slot: "outfit", label: "お洋服A", img: "./assets/isyou/outfit1.png", price: 1200 },
   };
 
   // 帽子位置（うさぎ画像に対する割合）
   const ANCHOR = {
     hat: {
-      x: 0.50,
-      y: 0.06,
-      w: 0.58,
+      x: 0.50,   // 中央
+      y: 0.06,   // 上寄り（耳と耳の間）
+      w: 0.58,   // 幅（うさぎ幅に対する割合）
+      lift: 0.40 // 上に持ち上げ量（pw*lift）
     },
   };
 
@@ -102,12 +101,13 @@
    * State
    * ========================= */
   const state = {
-    owned: {},
-    equipped: {},
-    mode: "browse",
-    selectedItem: null,
-    pendingAction: "equip",
-    selectedWrap: null,
+    owned: {},                 // itemKey -> count
+    equipped: {},              // bornAt -> { hat: itemKey, outfit: itemKey }
+    mode: "browse",            // "browse" | "equip"
+    selectedItem: null,        // itemKey
+    pendingAction: "equip",    // "equip" | "remove"
+    removeSlot: null,          // "hat" | "outfit"
+    selectedWrap: null,        // .bunnyWrap
     selectedBornAt: null,
   };
 
@@ -265,6 +265,7 @@
   background: rgba(0,0,0,.06);
   font-weight: 1000; font-size:12px;
 }
+#isyouModal .badge.on{ background: rgba(120,210,255,.22); }
 #isyouModal .badge.lock{ background: rgba(255,120,120,.18); }
 
 /* === equip confirm bar === */
@@ -308,9 +309,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 .bunnyWrap .isyouAcc{
   position:absolute;
   left:0; top:0;
+  width:100%;
+  height:100%;
   pointer-events:none;
   z-index: 6;
-  will-change: transform, left, top, width, height;
+  will-change: transform;
 }
 .bunnyWrap .isyouAcc img{
   display:block;
@@ -318,14 +321,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   height:100%;
   object-fit: contain;
   pointer-events:none;
-}
-
-/* ✅ outfit は「うさぎ画像と完全一致」を最優先にするので、描画順を少し下へ */
-.bunnyWrap .isyouAcc [data-slot="outfit"]{
-  z-index: 1;
-}
-.bunnyWrap .isyouAcc [data-slot="hat"]{
-  z-index: 3;
 }
 `;
     document.head.appendChild(s);
@@ -653,15 +648,15 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render (fitToBunny)
+   * Accessory render
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
-    // 一番「うさぎ本体っぽい」imgを優先
+    // それっぽいのを広めに拾う
     return (
       wrap.querySelector("img.bunny, img.bunnyImg") ||
-      wrap.querySelector(":scope > img") ||
-      wrap.querySelector("img")
+      wrap.querySelector("img") ||
+      wrap.querySelector(".bunny img")
     );
   }
 
@@ -684,6 +679,19 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     });
   }
 
+  // ✅ offsetParent で ancestor(wrap)まで辿って「レイアウト座標」を取る
+  function offsetToAncestor(el, ancestor) {
+    let x = 0, y = 0;
+    let cur = el;
+    while (cur && cur !== ancestor) {
+      x += cur.offsetLeft || 0;
+      y += cur.offsetTop || 0;
+      cur = cur.offsetParent;
+    }
+    if (cur !== ancestor) return null;
+    return { x, y };
+  }
+
   function placeAcc(wrap, slot, imgSrc) {
     if (!wrap) return;
 
@@ -691,7 +699,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const box = ensureAccContainer(wrap);
     if (!box || !bunnyImg) return;
 
-    // まず同スロットは置き換え
     removeAccSlot(wrap, slot);
 
     const node = document.createElement("div");
@@ -701,36 +708,43 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const img = document.createElement("img");
     img.src = imgSrc;
     img.alt = slot;
-    node.appendChild(img);
 
+    node.appendChild(img);
     box.appendChild(node);
 
-    // ✅ fitToBunny
-    // - outfit : うさぎ画像と「完全一致」（left/top/width/height 全一致）
-    // - hat    : アンカー比率で配置
     const fit = () => {
-      const br = bunnyImg.getBoundingClientRect();
-      const wr = wrap.getBoundingClientRect();
-
-      const left = (br.left - wr.left);
-      const top  = (br.top  - wr.top);
-      const w = br.width;
-      const h = br.height;
-
+      // ✅ outfit は「うさぎ画像と完全一致」
       if (slot === "outfit") {
-        // ★完全一致（サイズも位置も同じ）
-        node.style.left = `${left}px`;
-        node.style.top = `${top}px`;
-        node.style.width = `${w}px`;
-        node.style.height = `${h}px`;
+        const off = offsetToAncestor(bunnyImg, wrap);
+        if (off) {
+          node.style.left = `${off.x}px`;
+          node.style.top = `${off.y}px`;
+          node.style.width = `${bunnyImg.offsetWidth}px`;
+          node.style.height = `${bunnyImg.offsetHeight}px`;
+          return;
+        }
+        // フォールバック（構造によっては ancestor まで辿れない）
+        const br = bunnyImg.getBoundingClientRect();
+        const wr = wrap.getBoundingClientRect();
+        node.style.left = `${br.left - wr.left}px`;
+        node.style.top = `${br.top - wr.top}px`;
+        node.style.width = `${br.width}px`;
+        node.style.height = `${br.height}px`;
         return;
       }
 
-      // hat はアンカー
+      // ✅ hat はアンカー配置
+      const br = bunnyImg.getBoundingClientRect();
+      const wr = wrap.getBoundingClientRect();
+      const left = (br.left - wr.left);
+      const top = (br.top - wr.top);
+      const w = br.width;
+      const h = br.height;
+
       const a = ANCHOR[slot] || ANCHOR.hat;
       const pw = w * (a.w || 0.58);
       const px = left + w * (a.x || 0.5) - pw / 2;
-      const py = top + h * (a.y || 0.06) - pw * 0.40;
+      const py = top + h * (a.y || 0.06) - pw * (a.lift ?? 0.40);
 
       node.style.left = `${px}px`;
       node.style.top = `${py}px`;
@@ -748,19 +762,13 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const eq = state.equipped[String(bornAt)] || {};
 
-    // ✅ outfit（完全一致）
-    if (eq.outfit && ITEMS[eq.outfit]) {
-      placeAcc(wrap, "outfit", ITEMS[eq.outfit].img);
-    } else {
-      removeAccSlot(wrap, "outfit");
-    }
-
     // hat
-    if (eq.hat && ITEMS[eq.hat]) {
-      placeAcc(wrap, "hat", ITEMS[eq.hat].img);
-    } else {
-      removeAccSlot(wrap, "hat");
-    }
+    if (eq.hat && ITEMS[eq.hat]) placeAcc(wrap, "hat", ITEMS[eq.hat].img);
+    else removeAccSlot(wrap, "hat");
+
+    // outfit
+    if (eq.outfit && ITEMS[eq.outfit]) placeAcc(wrap, "outfit", ITEMS[eq.outfit].img);
+    else removeAccSlot(wrap, "outfit");
   }
 
   function applyEquipsAll() {
@@ -786,9 +794,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const id = String(bornAt);
     state.equipped[id] = state.equipped[id] || {};
-
-    // slot 置き換え（hat/outfitどちらも1つ）
-    state.equipped[id][it.slot] = itemKey;
+    state.equipped[id][it.slot] = itemKey; // slot 置き換え（hat/outfit）
 
     saveAll();
     applyEquipsForWrap(wrap);
@@ -818,7 +824,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Selection
+   * Selection (red outline)
    * ========================= */
   function selectWrap(wrap) {
     if (!wrap) return;
@@ -833,10 +839,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (state.mode !== "equip") return;
     if (e.button != null && e.button !== 0) return;
 
-    if (backdrop && backdrop.style.display !== "none") {
-      const inModal = e.target?.closest?.("#isyouModal");
-      if (inModal) return;
-    }
+    // モーダル内クリックは無視
+    const inModal = e.target?.closest?.("#isyouModal");
+    if (inModal) return;
 
     const wrap = e.target?.closest?.(".bunnyWrap");
     if (!wrap) return;
@@ -896,7 +901,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   window.addEventListener("load", () => {
     injectStyles();
     loadAll();
-    injectHudButton();
+
+    // ✅ HUDが遅いとボタンが出ない対策：hud待ち
+    waitFor(() => document.getElementById("hud")).then(() => {
+      injectHudButton();
+    }).catch(() => {
+      // 失敗しても一応試す
+      injectHudButton();
+    });
 
     if (window.WB) attach(window.WB);
     else {
