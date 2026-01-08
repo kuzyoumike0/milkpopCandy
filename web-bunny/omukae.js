@@ -9,6 +9,14 @@
 
   let shopBackdrop = null;
   let shopModal = null;
+function syAdd(key, n = 1) {
+  try {
+    if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
+  } catch {}
+  // syougou.js がまだ来てない時の保険
+  window.__syougouQueue = window.__syougouQueue || [];
+  window.__syougouQueue.push([key, n]);
+}
 
   /* =========================
    * CSS（サムネ化：小さく見やすく）
