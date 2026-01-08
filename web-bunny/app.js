@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.3 (idle drop OFF + baby size stable via wrap-scale)", Date.now());
+  console.log("[app.js] LOADED v16.4 (tier coins + ougon 10% + ougon=10000)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -23,12 +23,13 @@
     ],
   };
 
+  // ✅ tier 追加（bunny1 → bunny3 → bunny4 → bunny5 → reabunny）
   const BUNNY_DEFS = {
-    bunny1:   { label: "通常みるぽ",     img: "./assets/bunny1.png",   price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3:   { label: "毒タイプみるぽ", img: "./assets/bunny3.png",   price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4:   { label: "水タイプみるぽ", img: "./assets/bunny4.png",   price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5:   { label: "お正月みるぽ",   img: "./assets/bunny5.png",   price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+    bunny1:   { label: "通常みるぽ",     img: "./assets/bunny1.png",   price: 300,   coinMul: 0.55, tier: 1, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:   { label: "毒タイプみるぽ", img: "./assets/bunny3.png",   price: 1800,  coinMul: 1.0,  tier: 2, desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:   { label: "水タイプみるぽ", img: "./assets/bunny4.png",   price: 6000,  coinMul: 1.8,  tier: 3, desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:   { label: "お正月みるぽ",   img: "./assets/bunny5.png",   price: 20000, coinMul: 2.8,  tier: 4, desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  tier: 5, desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
   /* =========================
@@ -39,6 +40,10 @@
   const REA_EVOLVE_RATE  = 0.01;
 
   const DEPART_COST = 10;
+
+  // ✅ ougonunchi 設定
+  const OUGON_VALUE  = 10000; // +10000コイン
+  const OUGON_CHANCE = 0.10;  // 10%で出る
 
   /* =========================
    * Charge（個体ごと / UIなし）
@@ -139,11 +144,12 @@
    * - コイン小さく
    * - ハート小さめ＆ゆらゆら
    * - ✅ babyは img ではなく wrap を縮める（transform競合対策）
+   * - ✅ ougonunchi サイズ
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbPerBunnyChargeCss_v2")) return;
+    if (document.getElementById("wbPerBunnyChargeCss_v3")) return;
     const st = document.createElement("style");
-    st.id = "wbPerBunnyChargeCss_v2";
+    st.id = "wbPerBunnyChargeCss_v3";
     st.textContent = `
       .coin{
         width:26px !important;
@@ -154,6 +160,17 @@
       .bunnyWrap.babyWrap{
         transform: scale(0.78);
         transform-origin: bottom center;
+      }
+
+      /* ✅ ougonunchi */
+      .ougonunchi{
+        width:44px;
+        height:44px;
+        position:absolute;
+        user-select:none;
+        -webkit-user-drag:none;
+        cursor:pointer;
+        filter: drop-shadow(0 10px 14px rgba(0,0,0,.22));
       }
 
       /* ✅ hart.png を小さく */
@@ -205,6 +222,8 @@
       }));
     } catch { return null; }
   }
+
+  const bunnies = [];
 
   function saveBunnyMeta() {
     localStorage.setItem(
@@ -281,6 +300,67 @@
     }
   }
 
+  // ✅ 黄金うんちドロップ（+10000）
+  class OugonUnchiDrop {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() * 2 - 1) * 90;
+      this.vy = -(520 + Math.random() * 220);
+      this.gravity = 2200;
+      this.bounce  = 0.25 + Math.random() * 0.10;
+      this.floor   = groundY();
+
+      const el = document.createElement("img");
+      el.className = "ougonunchi";
+      el.src = ASSETS.ougonUnchi;
+      el.draggable = false;
+      this.el = el;
+
+      dropByEl.set(el, this);
+      el.addEventListener("pointerenter", () => this.collect());
+      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
+      el.addEventListener("click", () => this.collect());
+
+      coinLayer.appendChild(el);
+      this.render();
+    }
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+    update(dt) {
+      this.floor = groundY();
+      this.vy += this.gravity * dt;
+      this.x  += this.vx * dt;
+      this.y  += this.vy * dt;
+
+      if (this.y >= this.floor) {
+        this.y = this.floor;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+          this.vx *= 0.72;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
+      }
+      this.render();
+    }
+    collect() {
+      if (!this.el || !this.el.isConnected) return;
+
+      coins += OUGON_VALUE; // ✅ +10000
+      saveCoins();
+      updateHud();
+      playSE(seCoin);
+
+      try { this.el.remove(); } catch {}
+      const idx = dropsOnField.indexOf(this);
+      if (idx >= 0) dropsOnField.splice(idx, 1);
+    }
+  }
+
   function spawnClickCoins(bunny, count = 1, tierPicker = () => 0) {
     const r  = bunny.wrap.getBoundingClientRect();
     const fr = field.getBoundingClientRect();
@@ -290,8 +370,15 @@
     for (let i = 0; i < count; i++) {
       const x = baseX + rand(-14, 14);
       const y = baseY + rand(-6, 6);
-      const tier = tierPicker();
-      const c = new CoinDrop(x, y, tier);
+
+      const pick = tierPicker();
+      if (pick === "ougon") {
+        const d = new OugonUnchiDrop(x, y);
+        dropsOnField.push(d);
+        continue;
+      }
+
+      const c = new CoinDrop(x, y, pick);
       dropsOnField.push(c);
     }
   }
@@ -299,8 +386,6 @@
   /* =========================
    * Bunny
    * ========================= */
-  const bunnies = [];
-
   class Bunny {
     constructor(bornAt, kind = "bunny1") {
       this.bornAt = Number(bornAt) || Date.now();
@@ -440,38 +525,53 @@
       return clamp(this.charge / CHARGE_MAX, 0, 1);
     }
 
+    // ✅ ティアが高いほど「枚数も」「上位コイン率も」増える + 黄金うんち10%
     getDropPlanFromOwnCharge() {
       const r0 = this.getChargeRatio();
-      const mul = (BUNNY_DEFS[this.kind]?.coinMul ?? 1.0);
-      const r = Math.min(1, r0 * (1.15 + mul * 0.15));
+      const def = BUNNY_DEFS[this.kind] || BUNNY_DEFS.bunny1;
+
+      const tier = def.tier ?? 1;
+      const mul  = def.coinMul ?? 1.0;
+
+      // 枚数：tierの影響を強める（体感差が出る）
+      const baseCount =
+        2 +          // 最低保証
+        r0 * 12 +    // チャージ影響
+        tier * 6;    // tier差の本体
 
       const count = clamp(
-        Math.floor((2 + r * 24) * mul),
+        Math.floor(baseCount * mul),
         2,
-        60
+        80
       );
 
+      // 最大コインティア：tierが高いほど coin3/coin4 が開放されやすい
       const maxTier = clamp(
-        Math.floor(r * 3 + mul * 0.35),
+        Math.floor(r0 * 2 + tier * 0.9),
         0,
         ASSETS.coins.length - 1
       );
 
+      // tierが高いほど上のティアが出やすい
       const pickTier = () => {
+        if (Math.random() < OUGON_CHANCE) return "ougon";
+
         if (maxTier <= 0) return 0;
 
-        const p = 2.2 + mul * 0.35;
+        const power = 1.6 + tier * 0.45;
+
         let sum = 0;
-        const w = [];
+        const weights = [];
         for (let t = 0; t <= maxTier; t++) {
-          const wt = Math.pow(t + 1, p);
-          w.push(wt);
-          sum += wt;
+          const w = Math.pow(t + 1, power);
+          weights.push(w);
+          sum += w;
         }
-        let x = Math.random() * sum;
+
+        let r = Math.random() * sum;
         for (let t = 0; t <= maxTier; t++) {
-          x -= w[t];
-          if (x <= 0) return t;
+          r -= weights[t];
+          if (r <= 0) return t;
         }
         return maxTier;
       };
@@ -527,9 +627,6 @@
       // ✅ 保険：baby中は常にwrapクラス維持（他JSが触っても戻す）
       if (this.isBaby) this.wrap.classList.add("babyWrap");
       else this.wrap.classList.remove("babyWrap");
-
-      // ✅ 放置排出しない
-      // this.idleDrop(dt);
 
       this.addOwnCharge(CHARGE_PER_SEC * dt);
 
