@@ -1,13 +1,13 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策“根本修正”＋fitToBunny強化）完全版
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策“反転でズレない最終”＋fitToBunny強化）完全版
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
-// ✅ 赤枠は選択中だけ z-index を上げる（※帽子だけ上がらない）
-// ✅ FIX：fitToBunnyを offset 系で計算（transform/flipでもズレにくい）
+// ✅ 赤枠は選択中だけz-indexを上げる（※帽子だけが他うさぎより前に出ない）
+// ✅ FIX：本体うさぎimgを“帽子imgと誤認しない”
+// ✅ FIX：matchBunny時、うさぎimgの transform / transform-origin をアクセ側にもコピー（flip/scaleでズレない）
 // ✅ NEW：ResizeObserver / MutationObserver で追従
-// ✅ ★flipでズレる根本原因を潰す：getBunnyImg が “帽子img” を誤認しない（これがズレ/非表示の最大原因）
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
 
@@ -179,9 +179,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV11FlipFix")) return;
+    if (document.getElementById("isyouStyleV12FlipExact")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV11FlipFix";
+    s.id = "isyouStyleV12FlipExact";
     s.textContent = `
 /* === modal === */
 #isyouBackdrop{
@@ -297,11 +297,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   outline: 4px solid rgba(255, 64, 64, .88);
   outline-offset: 3px;
   border-radius: 18px;
-  z-index: 10;      /* ★上げるのはwrap */
+  z-index: 10; /* ★上げるのはwrap */
 }
 
 /* === accessory layer ===
-   ★帽子だけ他うさぎより前に出ない：wrap内で完結
+   ★帽子だけ他うさぎより上に来ない：wrap内で完結
 */
 .bunnyWrap{
   position: relative;
@@ -591,22 +591,19 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * fitToBunny (flipズレ根本修正)
+   * fitToBunny (flipでズレない)
    * ========================= */
 
-  // ★最大の罠：
-  // wrap.querySelector("img") すると「帽子img」を拾ってしまい、反転/重なり/再計算でズレたり消えたりする。
-  // → “isyouAcc の中は除外” + “bunnyっぽいsrcを優先” で必ず本体うさぎを取る。
+  // ★本体うさぎimgを確実に取る（アクセのimgを絶対に拾わない）
   function getBunnyImg(wrap) {
     if (!wrap) return null;
 
     const imgs = Array.from(wrap.querySelectorAll("img"))
-      .filter((img) => !img.closest(".isyouAcc")) // ★アクセ内は除外
+      .filter((img) => !img.closest(".isyouAcc"))
       .filter((img) => !img.classList.contains("isyouAccImg"));
 
     if (!imgs.length) return null;
 
-    // srcヒント（環境差あっても当たりやすい）
     const pick = (kw) => imgs.find((img) => (img.currentSrc || img.src || "").toLowerCase().includes(kw));
     return (
       pick("babybunny") ||
@@ -634,7 +631,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
   }
 
-  // ancestor(wrap)基準の offsetLeft/Top を積み上げる（transform/flipの影響を受けにくい）
+  // wrap基準の offsetLeft/Top を積み上げる
   function relOffsetTo(el, ancestor) {
     let x = 0, y = 0;
     let cur = el;
@@ -645,6 +642,25 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     }
     if (cur !== ancestor) return null;
     return { x, y };
+  }
+
+  // ★matchBunny時：位置/サイズだけでなく「transform」も本体からコピー
+  // （flipが img にだけ掛かる構造でも一致する）
+  function copyTransformFromBunny(bunnyImg, node) {
+    try {
+      const cs = getComputedStyle(bunnyImg);
+      const t = cs.transform;
+      if (t && t !== "none") {
+        node.style.transform = t;
+        node.style.transformOrigin = cs.transformOrigin || "50% 50%";
+      } else {
+        node.style.transform = "";
+        node.style.transformOrigin = "";
+      }
+    } catch {
+      node.style.transform = "";
+      node.style.transformOrigin = "";
+    }
   }
 
   function fitNodeToBunny(wrap, bunnyImg, node, slot) {
@@ -659,7 +675,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       w = bunnyImg.offsetWidth || bunnyImg.clientWidth || 0;
       h = bunnyImg.offsetHeight || bunnyImg.clientHeight || 0;
     } else {
-      // 最後の手段（flipだと揺れやすいのでfallback）
+      // fallback（最終手段）
       const br = bunnyImg.getBoundingClientRect();
       const wr = wrap.getBoundingClientRect();
       left = br.left - wr.left;
@@ -676,6 +692,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.top = `${top}px`;
       node.style.width = `${w}px`;
       node.style.height = `${h}px`;
+
+      // ★ここが今回の“反転ズレ”修正の本丸
+      copyTransformFromBunny(bunnyImg, node);
       return;
     }
   }
