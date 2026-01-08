@@ -1,19 +1,13 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V31.0）
-// ✅ 修正（あなたの要望）
-// 1) 選択中に赤枠が「必ず」出る：赤枠は body 直下の position:fixed（overlay依存を完全排除）
-// 2) ブラウザの重さを解消：
-//    - hat DOMを「毎回作り直さない」(Mapで再利用)
-//    - 常時rAFしない：帽子/赤枠が必要な時だけ 12fps程度で同期ループ
-//    - MutationObserverは debounce でまとめる
-// 3) hat は「頭の上（耳の間）」にフィット：bunnyRect基準の割合配置（アイマスクのみ顔位置に別設定）
-// 4) 装着モード中のクリックでコインが出る問題：pointerdown/pointerup/click を capture で完全遮断（bunnyLayer内）
-// 5) bornAt が取れない環境でも動く：bornAt優先 + fallback key(data-isyou-key)
-
-// ★そのまま isyou.js をこれに差し替え★
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V31.1）
+// ✅ 要望対応：hat を「うさぎ画像と同じ位置・同じサイズ」で重ねる（完全一致）
+// - hatDiv の left/top/width/height を bunnyImg.getBoundingClientRect と完全一致させる
+// - 反転（flip）も bunnyImg の transform から判定して hat に scaleX(-1) を同期
+// - 赤枠は body 直下の position:fixed（必ず見える）
+// - 重さ対策：hat DOM は Map で再利用 / 同期ループは必要時だけ 12fps
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V31.0", Date.now());
+  console.log("[isyou.js] LOADED V31.1", Date.now());
 
   /* =========================
    * Wait
@@ -183,26 +177,6 @@
     aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
   };
 
-  // ✅ フィット（割合）: bunny画像rect基準
-  // - hat：耳と耳の間の「頭の上」に置く
-  // - aimasuku：顔（目）に置く
-  const FIT = {
-    hat: {
-      cx: 0.50,      // 中心X
-      cy: 0.07,      // 中心Y（上寄り＝頭の上）
-      w:  0.62,      // 幅（bunny幅に対する割合）
-      h:  0.50,      // 高さ
-      rot: 0,        // 回転（必要なら）
-    },
-    aimasuku: {
-      cx: 0.50,
-      cy: 0.40,
-      w:  0.78,
-      h:  0.34,
-      rot: 0,
-    },
-  };
-
   /* =========================
    * State
    * ========================= */
@@ -328,10 +302,10 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV310")) return;
+    if (document.getElementById("isyouStyleV311")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV310";
+    s.id = "isyouStyleV311";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -590,13 +564,9 @@
 
   /* =========================
    * Hat DOM 再利用（重さ解消）
+   * - ✅ 要望：うさぎと「同じ位置・同じサイズ」(100%一致)
    * ========================= */
   const liveHats = new Map(); // key -> { hatDiv, hatImg, itemKey, targetImg }
-
-  function getFitForItem(itemKey) {
-    if (itemKey === "aimasuku") return FIT.aimasuku;
-    return FIT.hat;
-  }
 
   function removeHatByKey(key, slot = "hat") {
     if (!key) return;
@@ -641,13 +611,13 @@
       ent = { hatDiv: hat, hatImg, itemKey: null, targetImg: null };
       liveHats.set(k, ent);
     } else {
-      // なるべく前面（overlay内で後ろに回らないように）
+      // overlay内で前面に保つ
       try { overlay.appendChild(ent.hatDiv); } catch {}
     }
 
     ent.targetImg = img;
 
-    // src は itemKey が変わった時だけ差し替え（軽い）
+    // src は itemKey 変更時だけ差し替え
     if (ent.itemKey !== itemKey) {
       ent.itemKey = itemKey;
       setSrcWithFallback(ent.hatImg, it.imgs, () => scheduleSyncLoop());
@@ -656,6 +626,7 @@
     scheduleSyncLoop();
   }
 
+  // ✅ ここが「完全一致」本体：bunnyRect と hatRect を同一にする
   function syncHatEnt(ent) {
     const img = ent.targetImg;
     const hat = ent.hatDiv;
@@ -666,24 +637,14 @@
     const ir = img.getBoundingClientRect();
     if (ir.width <= 0 || ir.height <= 0) return true;
 
-    const fit = getFitForItem(ent.itemKey);
+    // うさぎと同じ位置・同じサイズ
+    hat.style.left   = `${ir.left - ovRect.left}px`;
+    hat.style.top    = `${ir.top  - ovRect.top }px`;
+    hat.style.width  = `${ir.width}px`;
+    hat.style.height = `${ir.height}px`;
 
-    const w = ir.width * fit.w;
-    const h = ir.height * fit.h;
-
-    const left = (ir.left - ovRect.left) + (ir.width * fit.cx) - (w / 2);
-    const top  = (ir.top  - ovRect.top ) + (ir.height * fit.cy) - (h / 2);
-
-    hat.style.left = `${left}px`;
-    hat.style.top  = `${top }px`;
-    hat.style.width  = `${w}px`;
-    hat.style.height = `${h}px`;
-
-    const mir = isMirrored(img);
-    const rot = Number(fit.rot || 0);
-    hat.style.transform = mir
-      ? `scaleX(-1) rotate(${rot}deg)`
-      : `rotate(${rot}deg)`;
+    // 反転同期（bunnyが左右反転ならhatも反転）
+    hat.style.transform = isMirrored(img) ? "scaleX(-1)" : "none";
 
     return true;
   }
@@ -709,9 +670,7 @@
   }
 
   /* =========================
-   * applyEquipsAll（重くしない）
-   * - 今いるうさぎに対して「必要なhatだけ」upsert
-   * - 外したものは remove
+   * applyEquipsAll（軽量）
    * ========================= */
   function applyEquipsAll() {
     ensureOverlay();
@@ -733,12 +692,10 @@
       else removeHatByKey(k, "hat");
     }
 
-    // 画面から消えたキーの掃除
     for (const k of Array.from(liveHats.keys())) {
       if (!seen.has(k)) removeHatByKey(k, "hat");
     }
 
-    // 選択中は赤枠も更新
     if (state.mode === "equip" && state.selectedImg) {
       syncSelectBoxToImg(state.selectedImg);
       scheduleSyncLoop();
@@ -768,21 +725,18 @@
   function syncTick(ts) {
     __syncRaf = 0;
 
-    // 12fps程度（重さ解消）
     if (ts - __syncLast < 80) {
       scheduleSyncLoop();
       return;
     }
     __syncLast = ts;
 
-    // 赤枠追従（選択中のみ）
     if (state.mode === "equip" && state.selectedImg) {
       syncSelectBoxToImg(state.selectedImg);
     } else {
       hideSelectBox();
     }
 
-    // 帽子追従（存在するもののみ）
     if (liveHats.size > 0) {
       for (const [k, ent] of liveHats) {
         const ok = syncHatEnt(ent);
@@ -1100,7 +1054,7 @@
 
     saveAll();
 
-    // ✅ 差分で即反映（軽い）
+    // 差分で即反映
     upsertHat(img, itemKey);
     scheduleSyncLoop();
 
@@ -1139,7 +1093,6 @@
     state.selectedImg = img;
     state.selectedKey = key;
 
-    // ✅ クリック直後に必ず出す（fixed）
     syncSelectBoxToImg(img);
     requestAnimationFrame(() => syncSelectBoxToImg(state.selectedImg || img));
     setTimeout(() => syncSelectBoxToImg(state.selectedImg || img), 60);
@@ -1238,24 +1191,20 @@
     ensureModal();
     ensureConfirmBar();
 
-    // ✅ 3種をcaptureで遮断（コイン根絶）
     document.addEventListener("pointerdown", onPointerDownCapture, true);
     document.addEventListener("pointerup", onPointerUpCapture, true);
     document.addEventListener("click", onClickCapture, true);
 
     preloadEquipSe();
 
-    // 初回＆遅延（画像確定待ち）
     setTimeout(applyEquipsAll, 120);
     setTimeout(applyEquipsAll, 420);
     setTimeout(applyEquipsAll, 900);
     setTimeout(applyEquipsAll, 1600);
 
-    // レイアウト変化追従（軽く）
     window.addEventListener("resize", () => scheduleSyncLoop(), { passive: true });
     window.addEventListener("scroll",  () => scheduleSyncLoop(), { passive: true });
 
-    // DOM追加にも追従（debounce）
     try {
       const layer = document.getElementById("bunnyLayer");
       if (layer) {
@@ -1264,7 +1213,6 @@
       }
     } catch {}
 
-    // 安全：赤枠が残り続けない
     setInterval(() => {
       if (state.mode !== "equip") hideSelectBox();
     }, 2000);
