@@ -1,18 +1,12 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V31.2）
-// ✅ 改善：hat の「びくびく」を解消（自然に追従）
-// - left/top を毎フレーム書き換えない（レイアウト揺れの原因）
-// - hat は (0,0) に固定して、transform: translate3d(x,y,0) で移動（滑らか）
-// - サイズは差がある時だけ更新（しきい値）
-// - 1フレームで「計測→反映」をまとめてレイアウト負荷を削減
-// - 赤枠も fixed で滑らか追従（必要時だけ更新）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V31.3）
+// ✅ FIX：反転(scaleX(-1))時の「位置ズレ」を補正（x + width してから反転）
+// ✅ hat は bunny と同じ位置＆サイズ（getBoundingClientRect一致）
+// ✅ びくびく防止：left/top更新しない、transform translate3d で追従
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V31.2", Date.now());
+  console.log("[isyou.js] LOADED V31.3", Date.now());
 
-  /* =========================
-   * Wait
-   * ========================= */
   const WAIT_MS = 12000;
   const TICK_MS = 50;
 
@@ -31,9 +25,6 @@
     });
   }
 
-  /* =========================
-   * URL helper（サブパス対応）
-   * ========================= */
   function absUrl(p) {
     try { return new URL(p, document.baseURI).toString(); } catch { return p; }
   }
@@ -92,9 +83,6 @@
     return false;
   }
 
-  /* =========================
-   * 画像候補を順に試す（abs化）
-   * ========================= */
   function setSrcWithFallback(imgEl, candidates, onOk) {
     const list = (candidates || []).filter(Boolean).map(absUrl);
     let i = 0;
@@ -178,27 +166,19 @@
     aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
   };
 
-  /* =========================
-   * State
-   * ========================= */
   const state = {
     owned: {},
     equipped: {},
-
-    mode: "browse",          // "browse" | "equip"
+    mode: "browse",
     selectedItem: null,
-    pendingAction: "equip",  // "equip" | "remove"
+    pendingAction: "equip",
     removeSlot: null,
-
     selectedImg: null,
-    selectedKey: null,       // bornAt or fallback persistent key
+    selectedKey: null,
   };
 
   let WB = null;
 
-  /* =========================
-   * Storage
-   * ========================= */
   function loadJson(key, def) {
     try { const v = JSON.parse(localStorage.getItem(key) || "null"); return v ?? def; }
     catch { return def; }
@@ -216,9 +196,6 @@
     saveJson(LS.equipped, state.equipped);
   }
 
-  /* =========================
-   * WB helpers
-   * ========================= */
   function getCoins() {
     try {
       if (WB?.getCoin) return WB.getCoin();
@@ -258,7 +235,7 @@
   }
 
   /* =========================
-   * Key（bornAt優先 / fallbackはdata-isyou-key）
+   * Key
    * ========================= */
   const imgToBornAt = new WeakMap();
 
@@ -303,182 +280,50 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV312")) return;
+    if (document.getElementById("isyouStyleV313")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV312";
+    s.id = "isyouStyleV313";
     s.textContent = `
-#isyouBackdrop{
-  position: fixed; inset:0;
-  background: rgba(0,0,0,.36);
-  z-index: 2147483000;
-  display:none;
-}
-#isyouModal{
-  position:absolute; left:50%; top:50%;
-  transform: translate(-50%, -50%);
-  width: min(860px, 94vw);
-  max-height: min(84vh, 820px);
-  overflow:hidden;
-  border-radius: 18px;
-  background: rgba(255,255,255,.97);
-  box-shadow: 0 24px 70px rgba(0,0,0,.28);
-  display:flex; flex-direction: column;
-}
-#isyouModal .head{
-  display:flex; align-items:center; justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid rgba(0,0,0,.08);
-}
-#isyouModal .ttl{ font-weight: 1000; letter-spacing: .02em; }
-#isyouModal .close{
-  border:none; background: rgba(0,0,0,.06);
-  border-radius: 12px; padding: 8px 12px;
-  font-weight: 900; cursor:pointer;
-}
-#isyouModal .body{ padding: 12px 14px; overflow:auto; }
-#isyouModal .row{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; justify-content: space-between; }
-#isyouModal .pill{
-  display:inline-flex; align-items:center; gap:8px;
-  background: rgba(255,255,255,.92);
-  border-radius: 999px; padding: 8px 10px;
-  box-shadow: 0 10px 22px rgba(0,0,0,.08);
-  font-weight: 900;
-}
-#isyouModal .mini{ font-size: 12px; opacity: .78; font-weight: 900; }
-#isyouModal .grid{
-  margin-top: 12px;
-  display:grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 10px;
-}
-#isyouModal .card{
-  display:flex; gap:10px; align-items:flex-start;
-  padding: 10px;
-  border-radius: 14px;
-  background: rgba(0,0,0,.03);
-  border: 1px solid rgba(0,0,0,.06);
-}
-#isyouModal .thumb{
-  width:64px; height:64px; object-fit:contain;
-  background: rgba(255,255,255,.85);
-  border: 1px solid rgba(0,0,0,.08);
-  border-radius: 12px;
-  padding: 6px;
-  flex: 0 0 64px;
-}
-#isyouModal .info{ flex:1; min-width:0; display:flex; flex-direction: column; gap:4px; }
-#isyouModal .name{ font-weight:1000; line-height:1.2; }
-#isyouModal .price{ font-weight:1000; }
-#isyouModal .price.bad{ color: #b00020; }
-#isyouModal .btn{
-  border:none; border-radius: 12px;
-  padding: 9px 12px; font-weight: 1000; cursor:pointer;
-  background:#fff; box-shadow: 0 10px 22px rgba(0,0,0,.10);
-}
-#isyouModal .btn.primary{ background:#ffd6e7; }
-#isyouModal .btn.danger{ background: rgba(255,80,80,.12); }
-#isyouModal .btn[disabled]{ opacity:.55; cursor:not-allowed; box-shadow:none; }
-#isyouModal .badge{
-  display:inline-flex; align-items:center; gap:6px;
-  border-radius:999px; padding: 6px 10px;
-  background: rgba(0,0,0,.06);
-  font-weight: 1000; font-size:12px;
-}
-#isyouModal .badge.lock{ background: rgba(255,120,120,.18); }
+#isyouBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.36);z-index:2147483000;display:none;}
+#isyouModal{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(860px,94vw);max-height:min(84vh,820px);overflow:hidden;border-radius:18px;background:rgba(255,255,255,.97);box-shadow:0 24px 70px rgba(0,0,0,.28);display:flex;flex-direction:column;}
+#isyouModal .head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,.08);}
+#isyouModal .ttl{font-weight:1000;letter-spacing:.02em;}
+#isyouModal .close{border:none;background:rgba(0,0,0,.06);border-radius:12px;padding:8px 12px;font-weight:900;cursor:pointer;}
+#isyouModal .body{padding:12px 14px;overflow:auto;}
+#isyouModal .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;}
+#isyouModal .pill{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,.92);border-radius:999px;padding:8px 10px;box-shadow:0 10px 22px rgba(0,0,0,.08);font-weight:900;}
+#isyouModal .mini{font-size:12px;opacity:.78;font-weight:900;}
+#isyouModal .grid{margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;}
+#isyouModal .card{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:14px;background:rgba(0,0,0,.03);border:1px solid rgba(0,0,0,.06);}
+#isyouModal .thumb{width:64px;height:64px;object-fit:contain;background:rgba(255,255,255,.85);border:1px solid rgba(0,0,0,.08);border-radius:12px;padding:6px;flex:0 0 64px;}
+#isyouModal .info{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
+#isyouModal .name{font-weight:1000;line-height:1.2;}
+#isyouModal .price{font-weight:1000;}
+#isyouModal .price.bad{color:#b00020;}
+#isyouModal .btn{border:none;border-radius:12px;padding:9px 12px;font-weight:1000;cursor:pointer;background:#fff;box-shadow:0 10px 22px rgba(0,0,0,.10);}
+#isyouModal .btn.primary{background:#ffd6e7;}
+#isyouModal .btn.danger{background:rgba(255,80,80,.12);}
+#isyouModal .btn[disabled]{opacity:.55;cursor:not-allowed;box-shadow:none;}
+#isyouModal .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 10px;background:rgba(0,0,0,.06);font-weight:1000;font-size:12px;}
+#isyouModal .badge.lock{background:rgba(255,120,120,.18);}
 
-#isyouConfirmBar{
-  position: fixed;
-  left: 50%;
-  top: 12%;
-  transform: translate(-50%, -50%);
-  z-index: 2147483600;
-  display:none;
-  background: rgba(255,255,255,.96);
-  border-radius: 16px;
-  padding: 10px 12px;
-  box-shadow: 0 18px 55px rgba(0,0,0,.22);
-  font-weight: 1000;
-}
-#isyouConfirmBar .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; }
-#isyouConfirmBar .t{ opacity:.82; font-weight: 1000; }
-#isyouConfirmBar button{
-  border:none; border-radius: 12px;
-  padding: 8px 12px;
-  font-weight: 1000;
-  cursor:pointer;
-  background:#fff;
-  box-shadow: 0 10px 22px rgba(0,0,0,.10);
-}
-#isyouConfirmBar button.primary{ background:#ffd6e7; }
-#isyouConfirmBar button.danger{ background: rgba(255,80,80,.12); }
+#isyouConfirmBar{position:fixed;left:50%;top:12%;transform:translate(-50%,-50%);z-index:2147483600;display:none;background:rgba(255,255,255,.96);border-radius:16px;padding:10px 12px;box-shadow:0 18px 55px rgba(0,0,0,.22);font-weight:1000;}
+#isyouConfirmBar .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;}
+#isyouConfirmBar .t{opacity:.82;font-weight:1000;}
+#isyouConfirmBar button{border:none;border-radius:12px;padding:8px 12px;font-weight:1000;cursor:pointer;background:#fff;box-shadow:0 10px 22px rgba(0,0,0,.10);}
+#isyouConfirmBar button.primary{background:#ffd6e7;}
+#isyouConfirmBar button.danger{background:rgba(255,80,80,.12);}
 
-/* ✅ hat overlay */
-#isyouOverlay{
-  position:absolute;
-  left:0; top:0;
-  width:100%; height:100%;
-  pointer-events:none;
-  z-index: 2147482000;
-  overflow: visible;
-}
-.isyouHat{
-  position:absolute;
-  left:0; top:0;
-  width:10px; height:10px;
-  pointer-events:none;
-  transform-origin: 0 0;
-  will-change: transform, width, height;
-}
-.isyouHat img{
-  width:100%;
-  height:100%;
-  object-fit: contain;
-  display:block;
-}
+#isyouOverlay{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:2147482000;overflow:visible;}
+.isyouHat{position:absolute;left:0;top:0;width:10px;height:10px;pointer-events:none;transform-origin:0 0;will-change:transform,width,height;}
+.isyouHat img{width:100%;height:100%;object-fit:contain;display:block;}
 `;
     document.head.appendChild(s);
   }
 
   /* =========================
-   * Toast
-   * ========================= */
-  function toast(text) {
-    const t = String(text ?? "").trim();
-    if (!t) return;
-
-    const el = document.createElement("div");
-    el.style.cssText = `
-      position:fixed; left:50%; top:14%;
-      transform:translate(-50%,-50%);
-      z-index:2147483647;
-      background: rgba(255,255,255,.96);
-      border-radius: 16px;
-      padding: 12px 16px;
-      font-weight: 1000;
-      box-shadow: 0 16px 40px rgba(0,0,0,.18);
-      opacity: 0;
-      animation: isyouIn .22s ease-out forwards, isyouOut .36s ease-in forwards;
-      animation-delay: 0ms, 2.3s;
-      white-space: nowrap;
-    `;
-    const stId = "isyouToastKeyframes";
-    if (!document.getElementById(stId)) {
-      const s = document.createElement("style");
-      s.id = stId;
-      s.textContent = `
-@keyframes isyouIn{ from{opacity:0; transform:translate(-50%,-70%);} to{opacity:1; transform:translate(-50%,-50%);} }
-@keyframes isyouOut{ from{opacity:1; transform:translate(-50%,-50%);} to{opacity:0; transform:translate(-50%,-35%);} }
-`;
-      document.head.appendChild(s);
-    }
-    el.textContent = t;
-    document.body.appendChild(el);
-    setTimeout(() => { try { el.remove(); } catch {} }, 3200);
-  }
-
-  /* =========================
-   * Overlay（hat描画先）
+   * Overlay
    * ========================= */
   let overlay = null;
 
@@ -517,10 +362,11 @@
   }
 
   /* =========================
-   * ✅ 赤枠（fixed / body直下）
+   * 赤枠（fixed）
    * ========================= */
   let selectBoxFixed = null;
   const SELECT_EPS = 0.25;
+  let __selLast = { x: -9999, y: -9999, w: 0, h: 0 };
 
   function ensureSelectBoxFixed() {
     if (selectBoxFixed && selectBoxFixed.isConnected) return selectBoxFixed;
@@ -530,16 +376,15 @@
       selectBoxFixed.id = "isyouSelectBoxFixed";
       selectBoxFixed.style.cssText = `
         position: fixed;
-        left: -9999px; top: -9999px;
+        left: 0; top: 0;
+        transform: translate3d(-9999px,-9999px,0);
         width: 0px; height: 0px;
         pointer-events: none;
         z-index: 2147483650;
         border-radius: 18px;
         box-sizing: border-box;
         border: 4px solid rgba(255, 64, 64, .95);
-        box-shadow:
-          0 0 0 3px rgba(255,255,255,.95),
-          0 14px 34px rgba(0,0,0,.22);
+        box-shadow: 0 0 0 3px rgba(255,255,255,.95), 0 14px 34px rgba(0,0,0,.22);
         will-change: transform, width, height;
       `;
       document.body.appendChild(selectBoxFixed);
@@ -552,12 +397,10 @@
     box.style.transform = "translate3d(-9999px,-9999px,0)";
     box.style.width = "0px";
     box.style.height = "0px";
+    __selLast = { x: -9999, y: -9999, w: 0, h: 0 };
   }
 
-  // left/topは書き換えず transform で動かす（滑らか）
-  let __selLast = { x: -9999, y: -9999, w: 0, h: 0 };
-
-  function syncSelectBoxToImg(img, ovRectOverride) {
+  function syncSelectBoxToImg(img) {
     const box = ensureSelectBoxFixed();
     if (!img || !img.isConnected) { hideSelectBox(); return; }
     const r = img.getBoundingClientRect();
@@ -577,9 +420,9 @@
   }
 
   /* =========================
-   * Hat DOM（滑らか追従）
+   * Hat（滑らか追従）
    * ========================= */
-  const liveHats = new Map(); // key -> ent
+  const liveHats = new Map();
   const SIZE_EPS = 0.25;
   const POS_EPS = 0.15;
 
@@ -593,7 +436,6 @@
     }
     liveHats.delete(k);
 
-    // 念のため残骸掃除
     try {
       ensureOverlay();
       overlay.querySelectorAll(`.isyouHat[data-key="${CSS.escape(k)}"][data-slot="${CSS.escape(slot)}"]`)
@@ -630,7 +472,7 @@
         hatImg,
         itemKey: null,
         targetImg: null,
-        last: { x: -9999, y: -9999, w: 0, h: 0, mir: 0 }
+        last: { tx: -9999, y: -9999, w: 0, h: 0, mir: 0 }
       };
       liveHats.set(k, ent);
     } else {
@@ -647,7 +489,7 @@
     scheduleSyncLoop();
   }
 
-  // ✅ left/top は触らない：transform で位置同期
+  // ✅ FIX：反転時は tx = x + w にしてから scaleX(-1)
   function syncHatEnt(ent, ovRect) {
     const img = ent.targetImg;
     const hat = ent.hatDiv;
@@ -668,44 +510,32 @@
     if (Math.abs(L.w - w) > SIZE_EPS) { hat.style.width = `${w}px`; L.w = w; }
     if (Math.abs(L.h - h) > SIZE_EPS) { hat.style.height = `${h}px`; L.h = h; }
 
-    // 位置と反転は transform で一括（GPU）
-    if (Math.abs(L.x - x) > POS_EPS || Math.abs(L.y - y) > POS_EPS || L.mir !== mir) {
-      if (mir) {
-        // translate してから scaleX(-1)
-        // ※ transform-origin:0 0 なので、左右反転でも座標が暴れない
-        hat.style.transform = `translate3d(${x}px,${y}px,0) scaleX(-1)`;
-      } else {
-        hat.style.transform = `translate3d(${x}px,${y}px,0)`;
-      }
-      L.x = x; L.y = y; L.mir = mir;
+    const tx = mir ? (x + w) : x; // ★ここがズレ修正の本体
+
+    if (Math.abs(L.tx - tx) > POS_EPS || Math.abs(L.y - y) > POS_EPS || L.mir !== mir) {
+      hat.style.transform = mir
+        ? `translate3d(${tx}px,${y}px,0) scaleX(-1)`
+        : `translate3d(${tx}px,${y}px,0)`;
+      L.tx = tx; L.y = y; L.mir = mir;
     }
 
     return true;
   }
 
-  /* =========================
-   * うさぎ画像検出
-   * ========================= */
   function getAllBunnyImgs() {
     const out = [];
-
     const list = getBunnies();
     for (const b of list) {
       const img = b?.img || b?.bunnyImg || b?.node;
       if (img && img.tagName === "IMG") out.push(img);
     }
-
     const layer = document.getElementById("bunnyLayer") || document.body;
     layer.querySelectorAll("img").forEach((img) => {
       if (img && img.tagName === "IMG") out.push(img);
     });
-
     return Array.from(new Set(out));
   }
 
-  /* =========================
-   * applyEquipsAll（軽量）
-   * ========================= */
   function applyEquipsAll() {
     ensureOverlay();
     rebuildImgBornAtMap();
@@ -734,9 +564,7 @@
   }
 
   /* =========================
-   * ✅ 同期ループ（60fps / ただし軽い）
-   * - 1フレームで「ovRect 1回だけ計測」
-   * - 全hatの rect を読み→まとめて反映（実質 1回の流れ）
+   * Sync loop
    * ========================= */
   let __syncRaf = 0;
 
@@ -756,32 +584,56 @@
     __syncRaf = 0;
     if (!needSync()) return;
 
-    // overlay rect は 1回だけ
     const ov = ensureOverlay();
     const ovRect = ov.getBoundingClientRect();
 
-    // 赤枠
-    if (state.mode === "equip" && state.selectedImg) {
-      syncSelectBoxToImg(state.selectedImg);
-    } else {
-      hideSelectBox();
+    if (state.mode === "equip" && state.selectedImg) syncSelectBoxToImg(state.selectedImg);
+    else hideSelectBox();
+
+    for (const [k, ent] of liveHats) {
+      const ok = syncHatEnt(ent, ovRect);
+      if (!ok) removeHatByKey(k, "hat");
     }
 
-    // hat
-    if (liveHats.size > 0) {
-      for (const [k, ent] of liveHats) {
-        const ok = syncHatEnt(ent, ovRect);
-        if (!ok) removeHatByKey(k, "hat");
-      }
-    }
-
-    // 次へ
     scheduleSyncLoop();
   }
 
   /* =========================
-   * Modal
+   * Modal / Confirm / Select
    * ========================= */
+  function toast(text) {
+    const t = String(text ?? "").trim();
+    if (!t) return;
+    const el = document.createElement("div");
+    el.style.cssText = `
+      position:fixed; left:50%; top:14%;
+      transform:translate(-50%,-50%);
+      z-index:2147483647;
+      background: rgba(255,255,255,.96);
+      border-radius: 16px;
+      padding: 12px 16px;
+      font-weight: 1000;
+      box-shadow: 0 16px 40px rgba(0,0,0,.18);
+      opacity: 0;
+      animation: isyouIn .22s ease-out forwards, isyouOut .36s ease-in forwards;
+      animation-delay: 0ms, 2.3s;
+      white-space: nowrap;
+    `;
+    const stId = "isyouToastKeyframes";
+    if (!document.getElementById(stId)) {
+      const s = document.createElement("style");
+      s.id = stId;
+      s.textContent = `
+@keyframes isyouIn{ from{opacity:0; transform:translate(-50%,-70%);} to{opacity:1; transform:translate(-50%,-50%);} }
+@keyframes isyouOut{ from{opacity:1; transform:translate(-50%,-50%);} to{opacity:0; transform:translate(-50%,-35%);} }
+`;
+      document.head.appendChild(s);
+    }
+    el.textContent = t;
+    document.body.appendChild(el);
+    setTimeout(() => { try { el.remove(); } catch {} }, 3200);
+  }
+
   let backdrop = null;
   let modal = null;
 
@@ -823,17 +675,11 @@
   function buy(itemKey) {
     const it = ITEMS[itemKey];
     if (!it) return false;
-
-    if (!spendCoins(it.price)) {
-      toast("コインが足りない…！");
-      return false;
-    }
+    if (!spendCoins(it.price)) { toast("コインが足りない…！"); return false; }
 
     state.owned[itemKey] = ownedCount(itemKey) + 1;
     saveAll();
-
     syAdd("omukae", 1);
-
     toast(`🛍️ 購入：${it.label}`);
     renderModal();
     return true;
@@ -919,9 +765,7 @@
             <button class="btn" type="button" id="isyouRefresh">更新</button>
           </div>
         </div>
-
         <div class="grid">${cards}</div>
-
         <div style="height:8px"></div>
         <div class="mini">
           ※「装着モード」を押したらモーダルが閉じます。うさぎをクリックして赤枠選択→上のバーで「決定」。<br>
@@ -968,9 +812,6 @@
     });
   }
 
-  /* =========================
-   * Confirm bar
-   * ========================= */
   let confirmBar = null;
 
   function ensureConfirmBar() {
@@ -1063,9 +904,6 @@
     if (showToast) toast("🛑 装着モードを終了");
   }
 
-  /* =========================
-   * Confirm actions
-   * ========================= */
   function confirmEquip() {
     const img = state.selectedImg;
     const key = state.selectedKey;
@@ -1110,25 +948,15 @@
     cancelEquipMode(false);
   }
 
-  /* =========================
-   * Selection（クリックでimg選択 → 赤枠）
-   * ========================= */
   function selectImg(img) {
     if (!img) return;
-
     rebuildImgBornAtMap();
-    const key = getKeyFromImg(img);
-
     state.selectedImg = img;
-    state.selectedKey = key;
-
+    state.selectedKey = getKeyFromImg(img);
     scheduleSyncLoop();
     updateConfirmBar();
   }
 
-  /* =========================
-   * ✅ コインが出ないようにする（装着モード中）
-   * ========================= */
   function isInsideBunnyLayer(target) {
     const layer = document.getElementById("bunnyLayer");
     if (!layer) return true;
@@ -1152,7 +980,6 @@
 
   function onPointerDownCapture(e) {
     if (state.mode !== "equip") return;
-
     blockGameClickIfEquipMode(e);
 
     const img =
@@ -1167,9 +994,6 @@
   function onPointerUpCapture(e) { blockGameClickIfEquipMode(e); }
   function onClickCapture(e) { blockGameClickIfEquipMode(e); }
 
-  /* =========================
-   * HUD button
-   * ========================= */
   function injectHudButton() {
     const hud = document.getElementById("hud");
     if (!hud) return;
@@ -1190,20 +1014,12 @@
     mount.appendChild(btn);
   }
 
-  /* =========================
-   * MutationObserver debounce（重さ対策）
-   * ========================= */
   let __moTimer = 0;
   function requestRefresh() {
     clearTimeout(__moTimer);
-    __moTimer = setTimeout(() => {
-      applyEquipsAll();
-    }, 80);
+    __moTimer = setTimeout(() => applyEquipsAll(), 80);
   }
 
-  /* =========================
-   * Boot
-   * ========================= */
   function attach(wb) {
     WB = wb || null;
     loadAll();
@@ -1249,9 +1065,6 @@
     else waitFor(() => window.WB).then((wb) => attach(wb)).catch(() => attach(null));
   });
 
-  /* =========================
-   * Public debug
-   * ========================= */
   window.ISYOU = {
     openModal,
     closeModal,
