@@ -1,13 +1,16 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋fit＋SE）完全版（V29.1）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋fit＋SE）完全版（V29.2）
 // ✅ 最重要（いちばんバグらない方式）
 // 1) 位置ズレ対策：hatは「wrap100%」ではなく「bunny画像の枠」に追従（offset系でtransform/flipでも安定）
 // 2) 反転ズレ対策：wrapではなくimgにだけ反転が掛かるケースを検出 → hatも同じ反転を適用（ダブル反転回避）
-// ✅ assets/isyou/*.png を最優先で必ず試す
-// ✅ 装着決定時SE
+// 3) パス事故対策：/assets の“絶対パス”を捨てて相対パスに統一（/web-bunny/配信でも死なない）
+// ✅ assets/isyou/*.png を最優先で必ず試す（あなたの構成に完全一致）
+// ✅ 装着決定時SE（assets/isyou/Onoma-Pop03-1(High).mp3 最優先）
 // ✅ 装着モード中：うさぎクリック→赤枠→決定 / 外すも同様
 
 (() => {
   "use strict";
+
+  console.log("[isyou.js] LOADED V29.2", Date.now());
 
   /* =========================
    * Wait for HUD / WB
@@ -95,7 +98,7 @@
   }
 
   /* =========================
-   * Script base
+   * Script base (kept for debug; V29.2 uses relative paths only)
    * ========================= */
   function getScriptBase() {
     try {
@@ -111,12 +114,8 @@
   }
   const SCRIPT_BASE = getScriptBase();
 
-  function toAbs(path) {
-    try { return new URL(path, SCRIPT_BASE).toString(); } catch { return path; }
-  }
-
   /* =========================
-   * 画像候補を順に試す（assets/isyou 最優先）
+   * 画像候補を順に試す（相対パスに統一）
    * ========================= */
   function setSrcWithFallback(imgEl, candidates, onOk) {
     const list = (candidates || []).filter(Boolean);
@@ -141,11 +140,11 @@
   }
 
   /* =========================
-   * SE（装着時）
+   * SE（装着時）— あなたの assets/isyou/ にある音を最優先
    * ========================= */
   const EQUIP_SE_CANDIDATES = [
-    "./assets/isyou_se.mp3",
-    "./assets/equip.mp3",
+    // ✅ assets/isyou フォルダに存在（スクショ確認済）
+    encodeURI("./assets/isyou/Onoma-Pop03-1(High).mp3"),
     "./assets/poyo.mp3",
     "./assets/coin.mp3",
   ];
@@ -179,23 +178,20 @@
   }
 
   /* =========================
-   * Config
+   * Config / Items
    * ========================= */
   const LS = {
     owned: "wb_isyou_owned_v7",
     equipped: "wb_isyou_equipped_v7",
   };
 
+  // ✅ 相対パスだけ（サブパス配信でも死なない）
   function imgCandidates(name) {
     return [
-      `assets/isyou/${name}`,
       `./assets/isyou/${name}`,
-      `assets/${name}`,
+      `assets/isyou/${name}`,
       `./assets/${name}`,
-      `./isyou/${name}`,
-      toAbs(`./${name}`),
-      `/assets/isyou/${name}`,
-      `/assets/${name}`,
+      `assets/${name}`,
     ];
   }
 
@@ -316,10 +312,10 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV29")) return;
+    if (document.getElementById("isyouStyleV292")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV29";
+    s.id = "isyouStyleV292";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -469,6 +465,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   function toast(text) {
     const t = String(text ?? "").trim();
     if (!t) return;
+
     const el = document.createElement("div");
     el.style.cssText = `
       position:fixed; left:50%; top:14%;
@@ -484,6 +481,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       animation-delay: 0ms, 2.3s;
       white-space: nowrap;
     `;
+
     const stId = "isyouToastKeyframes";
     if (!document.getElementById(stId)) {
       const s = document.createElement("style");
@@ -494,6 +492,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 `;
       document.head.appendChild(s);
     }
+
     el.textContent = t;
     document.body.appendChild(el);
     setTimeout(() => { try { el.remove(); } catch {} }, 3200);
@@ -694,6 +693,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
   function ensureConfirmBar() {
     if (confirmBar && confirmBar.isConnected) return confirmBar;
+
     confirmBar = document.createElement("div");
     confirmBar.id = "isyouConfirmBar";
     confirmBar.innerHTML = `
@@ -782,7 +782,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（V29.1：bunny画像枠へ追従 + 反転追従）
+   * Accessory render（V29.2：bunny画像枠へ追従 + 反転追従）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
@@ -1055,7 +1055,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       WB?.on?.("resize", () => setTimeout(applyEquipsAll, 50));
     } catch {}
 
-    // ✅ CSS/レイアウト変化でも追従し続ける（軽量）
+    // ✅ レイアウト変化でも追従（軽量）
     try {
       const ro = new ResizeObserver(() => {
         if (state.mode !== "equip") setTimeout(applyEquipsAll, 0);
