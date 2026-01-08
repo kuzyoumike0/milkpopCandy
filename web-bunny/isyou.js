@@ -1,9 +1,9 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（V22）
-// ✅ 絶対ズレない方針：座標補正はしない（wrap内レイアウト座標 offset 系で重ねる）
-// ✅ 反転時の処理：flip検知はするが「補正しない」ことを保証（＝二重反転/二重補正を禁止）
-// ✅ partyhat は「うさぎ同サイズ同位置」（offset矩形に100%一致）
-// ✅ assets/isyou/partyhat.png を最優先で必ず試す（表示されないミスを二度としない）
-// ✅ 追加: aimasuku.png（face） / ahiru.png（pet）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（V23）
+// ✅ FIX: 反転してもズレない → getBoundingClientRect の“見た目矩形”を wrap 内座標に変換して完全一致
+// ✅ FIX: partyhat 以外の hat も「うさぎ同サイズ同位置」に強制（hatスロットは全て full-fit）
+// ✅ FIX: assets/isyou/*.png を最優先で必ず試す（表示されないミスを二度としない）
+// ✅ 追加: aimasuku.png（face）/ ahiru.png（pet）
+// ✅ bunnyWrap の既存レイアウトを壊さない（positionは static の場合だけ relative を付与）
 
 (() => {
   "use strict";
@@ -115,7 +115,7 @@
   }
 
   /* =========================
-   * 画像候補を順に試す（強制：assets/isyou を最優先）
+   * 画像候補を順に試す（assets/isyou を最優先）
    * ========================= */
   function setSrcWithFallback(imgEl, candidates, onOk) {
     const list = (candidates || []).filter(Boolean);
@@ -143,15 +143,15 @@
    * Config
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v5",
-    equipped: "wb_isyou_equipped_v5",
+    owned: "wb_isyou_owned_v6",
+    equipped: "wb_isyou_equipped_v6",
   };
 
-  // ✅ ここが超重要：assets/isyou を先頭固定（これ以外は絶対に先に試さない）
+  // ✅ assets/isyou を先頭固定（表示ミスを二度としない）
   function imgCandidates(name) {
     return [
-      `assets/isyou/${name}`,        // ★最優先（ユーザー指定）
-      `./assets/isyou/${name}`,      // ★相対でも最優先
+      `assets/isyou/${name}`,
+      `./assets/isyou/${name}`,
       `assets/${name}`,
       `./assets/${name}`,
       `./isyou/${name}`,
@@ -162,9 +162,10 @@
   }
 
   const ITEMS = {
+    // ✅ hatは全部 “full” に強制（= うさぎ同サイズ同位置）
     partyhat: { slot: "hat",  label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
-    crown:    { slot: "hat",  label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
-    ribbon:   { slot: "hat",  label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
+    crown:    { slot: "hat",  label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900, fit: "full" },
+    ribbon:   { slot: "hat",  label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700, fit: "full" },
 
     // 追加
     aimasuku: { slot: "face", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
@@ -172,7 +173,6 @@
   };
 
   const ANCHOR = {
-    hat:  { x: 0.50, y: 0.06, w: 0.58 },
     face: { x: 0.50, y: 0.34, w: 0.55 },
     pet:  { x: 0.78, y: 0.74, w: 0.38 },
   };
@@ -182,7 +182,7 @@
    * ========================= */
   const state = {
     owned: {},
-    equipped: {}, // { bornAt: { slot: itemKey } }
+    equipped: {},
     mode: "browse",
     selectedItem: null,
     pendingAction: "equip",
@@ -286,9 +286,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV22")) return;
+    if (document.getElementById("isyouStyleV23")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV22";
+    s.id = "isyouStyleV23";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -406,14 +406,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 /* ✅ うさぎを壊さない */
 .bunnyWrap{ overflow: visible !important; }
 
-/* ✅ アクセ最前面（絶対に flip しない） */
+/* ✅ アクセ最前面 */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important;
+  width:100% !important; height:100% !important;
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
-  transform: translateZ(0);
 }
 .bunnyWrap .isyouAcc > div{ position:absolute; }
 .bunnyWrap .isyouAcc img{
@@ -756,36 +756,13 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（反転でもズレない：offset座標で一致）
+   * Accessory render（反転でもズレない：見た目矩形差分方式）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
     return wrap.querySelector(":scope > img.bunny, :scope > img") || wrap.querySelector("img.bunny, img") || null;
   }
 
-  // ✅ 反転検知（処理はする。ただし座標補正は絶対にしない）
-  function isFlipX(el) {
-    try {
-      if (!el) return false;
-      if (el.classList?.contains("flip")) return true;
-      const tr = getComputedStyle(el).transform;
-      if (!tr || tr === "none") return false;
-
-      const m = tr.match(/matrix\(([^)]+)\)/);
-      if (m) {
-        const a = parseFloat(m[1].split(",")[0]);
-        return a < 0;
-      }
-      const m3 = tr.match(/matrix3d\(([^)]+)\)/);
-      if (m3) {
-        const a = parseFloat(m3[1].split(",")[0]);
-        return a < 0;
-      }
-    } catch {}
-    return false;
-  }
-
-  // ✅ static のときだけ relative（うさぎ位置を壊さない）
   function ensureSafePositioning(wrap) {
     try {
       const pos = getComputedStyle(wrap).position;
@@ -803,10 +780,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       box.className = "isyouAcc";
       wrap.appendChild(box);
     }
-
-    // ✅ 二度とミスしない：コンテナをflipしない（ここでtransformを触らない）
+    // ✅ transform で座標系を壊さない
     box.style.transform = "none";
-
     return box;
   }
 
@@ -815,6 +790,18 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const box = wrap.querySelector(":scope > .isyouAcc");
     if (!box) return;
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
+  }
+
+  // ✅ 見た目矩形（transform/flip含む）を wrap 内座標に変換 → 100%一致
+  function rectInWrapByClientRect(wrap, imgEl) {
+    const br = imgEl.getBoundingClientRect();
+    const wr = wrap.getBoundingClientRect();
+    return {
+      left: br.left - wr.left,
+      top: br.top - wr.top,
+      w: br.width,
+      h: br.height
+    };
   }
 
   function placeAcc(wrap, slot, itemKey) {
@@ -838,29 +825,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ 反転でもズレない “レイアウト座標” を最優先で使う
-    function rectInWrapLayout() {
-      let w = bunnyImg.offsetWidth || 0;
-      let h = bunnyImg.offsetHeight || 0;
-      let left = bunnyImg.offsetLeft || 0;
-      let top  = bunnyImg.offsetTop  || 0;
-
-      // offset が取れない環境だけ fallback（ただし補正はしない）
-      if (w <= 0 || h <= 0) {
-        const br = bunnyImg.getBoundingClientRect();
-        const wr = wrap.getBoundingClientRect();
-        w = br.width;
-        h = br.height;
-        left = br.left - wr.left;
-        top  = br.top  - wr.top;
-      }
-
-      return { left, top, w, h };
-    }
-
-    // ✅ partyhat: うさぎと完全同サイズ同位置
-    function fitFull() {
-      const r = rectInWrapLayout();
+    function fitFullSameAsBunny() {
+      const r = rectInWrapByClientRect(wrap, bunnyImg);
       if (r.w <= 1 || r.h <= 1) return;
 
       node.style.left = `${r.left}px`;
@@ -869,15 +835,14 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.height = `${r.h}px`;
     }
 
-    // 通常アンカー（帽子/顔/小物）
-    const a = ANCHOR[slot] || ANCHOR.hat;
-    function fitAnchor() {
-      const r = rectInWrapLayout();
+    function fitAnchor(slotKey) {
+      const r = rectInWrapByClientRect(wrap, bunnyImg);
       if (r.w <= 1 || r.h <= 1) return;
 
-      const pw = r.w * (a.w || 0.58);
+      const a = ANCHOR[slotKey];
+      const pw = r.w * (a.w || 0.55);
       const px = r.left + r.w * (a.x || 0.5) - pw / 2;
-      const py = r.top  + r.h * (a.y || 0.06) - pw * 0.40;
+      const py = r.top  + r.h * (a.y || 0.34) - pw * 0.40;
 
       node.style.left = `${px}px`;
       node.style.top  = `${py}px`;
@@ -885,27 +850,23 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.height = `${pw}px`;
     }
 
-    const fit = (it.fit === "full") ? fitFull : fitAnchor;
-
-    // ✅ 反転時の処理：検知はするが “座標補正” は絶対にしない（これがズレない条件）
-    function onFlipAwareTick() {
-      // ここで isFlipX を見ることで「反転中でも同じ処理を通ってる」ことを保証
-      // （過去のミス：反転時だけ別補正を入れてズレた）
-      void isFlipX(wrap);
-      fit();
-    }
+    // ✅ hat は全て full（同サイズ同位置）
+    const fit =
+      (slot === "hat" || it.fit === "full")
+        ? fitFullSameAsBunny
+        : () => fitAnchor(slot);
 
     setSrcWithFallback(img, it.imgs, () => {
-      requestAnimationFrame(() => requestAnimationFrame(onFlipAwareTick));
+      requestAnimationFrame(() => requestAnimationFrame(fit));
     });
 
-    requestAnimationFrame(() => requestAnimationFrame(onFlipAwareTick));
+    requestAnimationFrame(() => requestAnimationFrame(fit));
 
     let n = 0;
     const timer = setInterval(() => {
       n++;
-      onFlipAwareTick();
-      if (n >= 16) clearInterval(timer);
+      fit();
+      if (n >= 18) clearInterval(timer);
     }, 50);
   }
 
