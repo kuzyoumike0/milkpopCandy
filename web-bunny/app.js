@@ -793,6 +793,10 @@
       saveCoins();
       updateHud();
     },
+syAdd: (key, n = 1) => {
+  try { window.SYOUGOU?.add?.(key, n); } catch {}
+  try { window.WB?.emit?.("sy:add", { key, n }); } catch {}
+},
 
     getCoin: () => coins,
     spendCoin: (n) => {
