@@ -437,20 +437,23 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 .bunnyWrap{ overflow: visible !important; }
 
 /* ✅ 位置ズレの原因を絶つ：inset:0 で100%重ね（座標計算ゼロ） */
+/* ✅ “うさぎ画像の枠”に合わせて .isyouAcc を配置する（wrap全体ではない） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
-  left:0 !important; top:0 !important; right:0 !important; bottom:0 !important;
-  width:100% !important; height:100% !important;
+  left:0 !important; top:0 !important;
+  width:0 !important; height:0 !important; /* ← JSが都度セット */
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
-  transform:none !important; /* 親がflipなら親のまま受ける */
+  transform:none !important;
 }
+
 .bunnyWrap .isyouAcc > div{
   position:absolute;
-  left:0; top:0; width:100%; height:100%;
+  inset:0;
   transform-origin: 50% 50%;
 }
+
 .bunnyWrap .isyouAcc img{
   display:block;
   width:100%;
@@ -459,7 +462,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   pointer-events:none;
   transform-origin: 50% 50%;
 }
-`;
+
     document.head.appendChild(s);
   }
 
