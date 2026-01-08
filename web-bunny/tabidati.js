@@ -4,36 +4,20 @@
 // - 旅立ちモード中：うさぎホバーで赤縁取り
 // - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（はみ出し防止）
 // - 「長い空白メッセージ」対策：専用トーストCSSで表示
+// ✅ SYOUGOU.add("tabidachi") を直接呼ぶ（あれば）
 
 (() => {
   if (!window.WB) return;
   const WB = window.WB;
 
-  // ===== 設定 =====
-  const DEFAULT_COST = 2000; // WB.DEPART_COST が無い場合のデフォルト
+  const DEFAULT_COST = 2000;
   const getCost = () => (Number.isFinite(WB.DEPART_COST) ? WB.DEPART_COST : DEFAULT_COST);
 
-  // 旅立ちモードON/OFF
   let departMode = false;
-
-  // はみ出し防止クランプ用
   let clampTimer = null;
-function syAdd(key, n = 1) {
-  try {
-    if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
-  } catch {}
-  // syougou.js がまだ来てない時の保険
-  window.__syougouQueue = window.__syougouQueue || [];
-  window.__syougouQueue.push([key, n]);
-}
 
-  /* =========================
-   * WB互換ヘルパ（v12.8対応）
-   * ========================= */
   function getBunnyList() {
-    // v12.8: getBunnies()
     if (typeof WB.getBunnies === "function") return WB.getBunnies();
-    // 旧
     if (Array.isArray(WB.bunnies)) return WB.bunnies;
     return [];
   }
@@ -45,9 +29,7 @@ function syAdd(key, n = 1) {
   }
 
   function spendCoins(amount) {
-    // v12.8: spendCoin()
     if (typeof WB.spendCoin === "function") return WB.spendCoin(amount);
-    // 旧
     if (typeof WB.coins === "number") {
       if (WB.coins < amount) return false;
       WB.coins -= amount;
@@ -58,9 +40,6 @@ function syAdd(key, n = 1) {
     return false;
   }
 
-  /* =========================
-   * Toast（専用CSSで空白バグ回避）
-   * ========================= */
   function ensureToastStyles() {
     if (document.getElementById("tabidatiToastStyleV2")) return;
     const s = document.createElement("style");
@@ -94,16 +73,12 @@ function syAdd(key, n = 1) {
   from { opacity:1; transform:translate(-50%,-50%); }
   to   { opacity:0; transform:translate(-50%,-30%); }
 }
-
-/* ===== 旅立ちモード：ホバー赤縁取り ===== */
 body.departModeOn .bunnyWrap{ outline: none; }
 body.departModeOn .bunnyWrap:hover{
   outline: 4px solid rgba(255, 64, 64, .85);
   outline-offset: 3px;
   border-radius: 18px;
 }
-
-/* 旅立ち中のフェード */
 .bunnyWrap.departing{
   pointer-events: none !important;
   filter: saturate(1.05);
@@ -126,9 +101,6 @@ body.departModeOn .bunnyWrap:hover{
     setTimeout(() => { try { el.remove(); } catch {} }, 1800);
   }
 
-  /* =========================
-   * 旅立ちモードの見た目
-   * ========================= */
   function setDepartMode(on) {
     departMode = !!on;
 
@@ -142,14 +114,10 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   function toggleDepartMode() {
-    // BGM.jsのunlockと競合しないよう、あれば呼ぶ（無くてもOK）
     WB.unlockAudioOnce?.();
     setDepartMode(!departMode);
   }
 
-  /* =========================
-   * はみ出し防止（フィールド内にクランプ）
-   * ========================= */
   function startClamp() {
     stopClamp();
 
@@ -203,15 +171,11 @@ body.departModeOn .bunnyWrap:hover{
     }
   }
 
-  /* =========================
-   * 旅立ち実行
-   * ========================= */
   async function departBunny(bunny) {
     if (!bunny) return false;
 
     const list = getBunnyList();
 
-    // 最後の1匹は残す
     if (list.length <= 1) {
       toast("最後の1匹は旅立たせられないよ");
       return false;
@@ -219,32 +183,24 @@ body.departModeOn .bunnyWrap:hover{
 
     const cost = getCost();
 
-    // コスト不足
     if (getCoins() < cost) {
       toast(`コイン不足（必要：${cost}🪙）`);
       return false;
     }
 
-    // 支払い
     if (!spendCoins(cost)) {
       toast(`コイン不足（必要：${cost}🪙）`);
       return false;
     }
 
-    // SE（tabidati専用SEがあるならそれを鳴らす）
-    try {
-      if (WB.playSE && WB.seTabidati) WB.playSE(WB.seTabidati);
-    } catch {}
+    try { if (WB.playSE && WB.seTabidati) WB.playSE(WB.seTabidati); } catch {}
 
-    // 記録＆メッセージ
     try { WB.recordFarewell?.(bunny.kind || bunny.adultSrc || ""); } catch {}
     try { WB.showFarewellMessage?.(bunny.kind || ""); } catch {}
 
-    // 配列から外す（v12.8のbunnies配列参照を直接いじる）
     const idx = list.indexOf(bunny);
     if (idx >= 0) list.splice(idx, 1);
 
-    // 旅立ち演出
     try {
       const w = bunny.wrap;
       if (w) {
@@ -256,21 +212,19 @@ body.departModeOn .bunnyWrap:hover{
       try { bunny.wrap?.remove(); } catch {}
     }
 
-    // 保存＆解除チェック
     try { WB.saveBunnyMeta?.(); } catch {}
     try { WB.checkUnlocks?.(); } catch {}
 
-    // v12.8では saveBunnies は app.js 内部だけだけど、旅立ち後に保存させたい
-    // → 旅立ち後に bunnies が変わるので、createBunny内のsaveBunniesは動かない。
-    // ここで emit しておく（必要なら app.js 側で拾える）
     try { WB.emit?.("bunnyCountChanged", { count: list.length }); } catch {}
+
+    // ✅ 称号カウント
+    try { window.SYOUGOU?.add?.("tabidachi", 1); } catch {}
+    try { WB.emit?.("tabidachi"); } catch {}
+    try { window.dispatchEvent(new CustomEvent("wb:tabidachi")); } catch {}
 
     return true;
   }
 
-  /* =========================
-   * 旅立ちモード中：クリック横取り
-   * ========================= */
   function onPointerDownCapture(e) {
     if (!departMode) return;
     if (e.button != null && e.button !== 0) return;
@@ -289,9 +243,6 @@ body.departModeOn .bunnyWrap:hover{
     departBunny(bunny);
   }
 
-  /* =========================
-   * Hook
-   * ========================= */
   if (WB.departBtn) {
     WB.departBtn.addEventListener("click", (e) => {
       e.preventDefault();
