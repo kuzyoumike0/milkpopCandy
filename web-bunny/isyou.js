@@ -32,6 +32,14 @@
       }, TICK_MS);
     });
   }
+function syAdd(key, n = 1) {
+  try {
+    if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
+  } catch {}
+  // syougou.js がまだ来てない時の保険
+  window.__syougouQueue = window.__syougouQueue || [];
+  window.__syougouQueue.push([key, n]);
+}
 
   // ✅ WBは「存在」だけ見ればOK（on必須にしない）
   function waitForWB() {
