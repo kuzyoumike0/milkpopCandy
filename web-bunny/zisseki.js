@@ -1,33 +1,46 @@
-// zisseki.js（実績システム：増設版・互換強化 / ✅WB待機版 + ✅実績UI）
-// - localStorage 永続化
-// - WB events が無くても、定期チェックで解除できる
-// - SYOUGOU の各種カウント（うんち/旅立ち/花火/スロット当たり/お迎え）を実績に反映
-// - ✅ 新旧WB互換：getCoin/getBunnies/stats など優先して参照
-// ✅ FIX: 読み込み順で window.WB が無いと即returnしてしまい、永遠に実績が動かない問題を修正（WB待機）
-// ✅ FIX: app.js(v16.4)は coinsChanged をemitしていないので、hudUpdated も拾う（+定期チェックで確実に解除）
-// ✅ NEW: 実績UI（HUDに「実績」ボタン、一覧モーダル、解除/未解除、進捗表示）
+// zisseki.js（実績システム：増設版・互換強化 / ✅WB待機版 + ✅実績UI）V4.1
+// ✅ FIX：WBが object になった瞬間では早すぎる問題 → “実用状態”まで待つ（coins/bunnies参照できるまで）
+// ✅ FIX：SYOUGOU.getCount が無い環境でも動くように多重フォールバック（counts/data/localStorage走査）
+// ✅ FIX：解除できない時のための debug ログ（必要なら window.WB.zisseki.debug=true）
 
 (() => {
   "use strict";
 
   /* =========================
-   * Wait for WB
+   * Wait for WB (usable)
    * ========================= */
-  const WAIT_MS = 12000;
+  const WAIT_MS = 20000;
   const TICK_MS = 50;
 
-  function waitForWB() {
+  function waitForWBUsable() {
     const start = Date.now();
     return new Promise((resolve, reject) => {
       const t = setInterval(() => {
-        if (window.WB && typeof window.WB === "object") {
-          clearInterval(t);
-          resolve(window.WB);
-          return;
-        }
+        try {
+          const WB = window.WB;
+          if (WB && typeof WB === "object") {
+            // “実用状態”の最低条件：coinValue or WB.coins/getCoin と bunnies/getBunnies のどれかが触れる
+            const coinOk =
+              typeof WB.getCoin === "function" ||
+              typeof WB.coins === "number" ||
+              !!document.getElementById("coinValue");
+
+            const bunnyOk =
+              typeof WB.getBunnies === "function" ||
+              Array.isArray(WB.bunnies) ||
+              !!document.getElementById("bunnyLayer");
+
+            if (coinOk && bunnyOk) {
+              clearInterval(t);
+              resolve(WB);
+              return;
+            }
+          }
+        } catch {}
+
         if (Date.now() - start > WAIT_MS) {
           clearInterval(t);
-          reject(new Error("WB not found"));
+          reject(new Error("WB not usable in time"));
         }
       }, TICK_MS);
     });
@@ -36,12 +49,18 @@
   /* =========================
    * Main
    * ========================= */
-  waitForWB().then((WB) => {
-    // 実績キー（app.js とは別で管理）
+  waitForWBUsable().then((WB) => {
     const LS_ACH = "wb_ach_v4";
-
-    // 既存仕様：同時うさぎ数でショップ解放
     const UNLOCK_BUNNY4_NEED = 10;
+
+    /* =========================
+     * debug toggle
+     * ========================= */
+    const dbg = (...args) => {
+      try {
+        if (WB?.zisseki?.debug) console.log("[zisseki]", ...args);
+      } catch {}
+    };
 
     /* =========================
      * Storage
@@ -54,26 +73,18 @@
         return {};
       }
     }
-    function saveAch() {
-      localStorage.setItem(LS_ACH, JSON.stringify(ach));
-    }
-
     const ach = loadAch();
-
-    function isUnlocked(id) {
-      return !!ach[id];
+    function saveAch() {
+      try { localStorage.setItem(LS_ACH, JSON.stringify(ach)); } catch {}
     }
+    function isUnlocked(id) { return !!ach[id]; }
 
     function unlock(id, meta = {}) {
       if (ach[id]) return false;
-      ach[id] = true;
+      ach[id] = { at: Date.now(), ...meta }; // ✅ booleanじゃなく情報保存（後でUIに使える）
       saveAch();
-
       toast(`🏆 実績解除：${meta?.name || id}`);
-
-      // イベント通知（他UIと連動したい場合）
       try { WB.emit?.("achievementUnlocked", { id, ...meta }); } catch {}
-      // UIが開いてたら更新
       refreshUI();
       return true;
     }
@@ -136,7 +147,7 @@
         }
       } catch {}
       try {
-        if (typeof WB.coins === "number") return WB.coins;
+        if (typeof WB.coins === "number" && Number.isFinite(WB.coins)) return WB.coins;
       } catch {}
       const el = document.getElementById("coinValue");
       return el ? (Number(el.textContent) || 0) : 0;
@@ -152,15 +163,77 @@
       try {
         if (Array.isArray(WB.bunnies)) return WB.bunnies.length;
       } catch {}
+      // さらに保険：DOMから推定（bunnyLayerのimg数）
+      try {
+        const layer = document.getElementById("bunnyLayer");
+        if (layer) {
+          const imgs = layer.querySelectorAll("img");
+          return imgs ? imgs.length : 0;
+        }
+      } catch {}
       return 0;
     }
 
+    // ✅ SYOUGOU 互換強化（ここが「解除できない」最大原因になりがち）
     function getSyougouCount(key) {
+      const k = String(key);
+
+      // 1) API
       try {
-        return window.SYOUGOU?.getCount?.(key) ?? 0;
-      } catch {
-        return 0;
-      }
+        const S = window.SYOUGOU;
+        if (S && typeof S.getCount === "function") {
+          const v = Number(S.getCount(k));
+          return Number.isFinite(v) ? v : 0;
+        }
+      } catch {}
+
+      // 2) よくある保持場所
+      try {
+        const S = window.SYOUGOU;
+        const candidates = [
+          S?.counts?.[k],
+          S?.data?.counts?.[k],
+          S?.data?.[k],
+          S?.state?.counts?.[k],
+          S?.state?.[k],
+        ];
+        for (const v of candidates) {
+          const n = Number(v);
+          if (Number.isFinite(n)) return n;
+        }
+      } catch {}
+
+      // 3) localStorage 走査（wb_syougou 系のどれかに入ってることが多い）
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const lk = localStorage.key(i);
+          if (!lk) continue;
+          if (!/^wb_.*syougou/i.test(lk)) continue;
+
+          const raw = localStorage.getItem(lk);
+          if (!raw) continue;
+          let obj = null;
+          try { obj = JSON.parse(raw); } catch { obj = null; }
+          if (!obj || typeof obj !== "object") continue;
+
+          // パターンA: { counts:{ unchi:123 } }
+          if (obj.counts && typeof obj.counts === "object") {
+            const n = Number(obj.counts[k]);
+            if (Number.isFinite(n)) return n;
+          }
+          // パターンB: { unchi:123, tabidachi:... }
+          const n2 = Number(obj[k]);
+          if (Number.isFinite(n2)) return n2;
+
+          // パターンC: { data:{...} }
+          if (obj.data && typeof obj.data === "object") {
+            const n3 = Number(obj.data?.counts?.[k] ?? obj.data?.[k]);
+            if (Number.isFinite(n3)) return n3;
+          }
+        }
+      } catch {}
+
+      return 0;
     }
 
     function getStatMaybe(keys) {
@@ -174,6 +247,26 @@
           if (typeof v2 === "number" && Number.isFinite(v2)) return v2;
         } catch {}
       }
+
+      // 保険：localStorage の wb_stats 系を拾う
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const lk = localStorage.key(i);
+          if (!lk) continue;
+          if (!/^wb_.*stats/i.test(lk)) continue;
+          const raw = localStorage.getItem(lk);
+          if (!raw) continue;
+          let obj = null;
+          try { obj = JSON.parse(raw); } catch { obj = null; }
+          if (!obj || typeof obj !== "object") continue;
+
+          for (const kk of keys) {
+            const n = Number(obj?.[kk] ?? obj?.stats?.[kk]);
+            if (Number.isFinite(n)) return n;
+          }
+        }
+      } catch {}
+
       return 0;
     }
 
@@ -226,9 +319,18 @@
      * Check & unlock
      * ========================= */
     function checkUnlocks() {
+      dbg("tick", {
+        coins: getCoins(),
+        bunny: getBunnyCount(),
+        unchi: getSyougouCount("unchi"),
+        tabidachi: getSyougouCount("tabidachi"),
+        hanabi: getSyougouCount("hanabi"),
+        slot_win: getSyougouCount("slot_win"),
+        omukae: getSyougouCount("omukae"),
+      });
+
       for (const a of ACH_MASTER) {
         if (isUnlocked(a.id)) continue;
-
         let ok = false;
         try { ok = !!a.check?.(); } catch { ok = false; }
         if (!ok) continue;
@@ -245,7 +347,6 @@
      * ========================= */
     const PANEL_ID = "wbAchPanelV1";
     const BTN_ID   = "wbAchBtnV1";
-
     let uiEl = null;
 
     function ensureUiStyle() {
@@ -253,122 +354,30 @@
       const s = document.createElement("style");
       s.id = "wbAchUiStyleV1";
       s.textContent = `
-#${PANEL_ID}{
-  position: fixed;
-  inset: 0;
-  z-index: 2147483647;
-  display: none;
-  user-select: none;
-}
-#${PANEL_ID} .bg{
-  position:absolute; inset:0;
-  background: rgba(0,0,0,.38);
-}
-#${PANEL_ID} .card{
-  position:absolute;
-  left:50%; top:50%;
-  transform: translate(-50%, -50%);
-  width: min(760px, 94vw);
-  max-height: min(82vh, 820px);
-  overflow: hidden;
-  background: rgba(255,255,255,.97);
-  border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.24);
-  display:flex;
-  flex-direction: column;
-}
-#${PANEL_ID} .head{
-  display:flex; align-items:center; justify-content: space-between;
-  padding: 14px 14px 10px;
-  border-bottom: 1px solid rgba(0,0,0,.08);
-}
-#${PANEL_ID} .title{
-  font-weight: 1000;
-  letter-spacing: .02em;
-}
-#${PANEL_ID} .close{
-  border:none; background: rgba(0,0,0,.06);
-  border-radius: 12px;
-  padding: 8px 12px;
-  font-weight: 900;
-  cursor:pointer;
-}
-#${PANEL_ID} .body{
-  padding: 12px 14px;
-  overflow:auto;
-}
-#${PANEL_ID} .toolbar{
-  display:flex; gap:8px; flex-wrap:wrap;
-  align-items:center; justify-content: space-between;
-  margin-bottom: 10px;
-}
-#${PANEL_ID} .pill{
-  display:inline-flex; align-items:center; gap:8px;
-  background: rgba(0,0,0,.04);
-  border-radius: 999px;
-  padding: 8px 10px;
-  font-weight: 900;
-}
-#${PANEL_ID} .btn{
-  border:none;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-weight: 900;
-  cursor:pointer;
-  background: #fff;
-  box-shadow: 0 10px 22px rgba(0,0,0,.10);
-}
-#${PANEL_ID} .btn.primary{ background:#ffd6e7; }
-#${PANEL_ID} .btn.ghost{ background: rgba(0,0,0,.04); box-shadow:none; }
-#${PANEL_ID} .grid{
-  display:grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-#${PANEL_ID} .item{
-  background: rgba(255,255,255,.92);
-  border-radius: 14px;
-  padding: 12px;
-  box-shadow: 0 10px 22px rgba(0,0,0,.08);
-  display:flex;
-  align-items:flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-#${PANEL_ID} .item.locked{ opacity:.72; }
-#${PANEL_ID} .name{ font-weight: 1000; }
-#${PANEL_ID} .desc{ font-size: 12px; opacity:.78; font-weight: 800; margin-top:4px; }
-#${PANEL_ID} .meta{ font-size: 12px; opacity:.75; font-weight: 900; margin-top:6px; }
-#${PANEL_ID} .badge{
-  display:inline-flex; align-items:center; gap:6px;
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-weight: 900;
-  font-size: 12px;
-  background: rgba(255, 120, 120, .18);
-}
-#${PANEL_ID} .badge.on{ background: rgba(120, 210, 255, .22); }
-#${PANEL_ID} .bar{
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(0,0,0,.08);
-  overflow:hidden;
-  margin-top: 8px;
-}
-#${PANEL_ID} .bar > i{
-  display:block;
-  height:100%;
-  width:0%;
-  background: rgba(120,210,255,.55);
-}
-#${PANEL_ID} .small{
-  font-size: 12px;
-  opacity: .8;
-  font-weight: 900;
-}
-#${BTN_ID}{
-  margin-left: 8px;
-}
+#${PANEL_ID}{position:fixed;inset:0;z-index:2147483647;display:none;user-select:none;}
+#${PANEL_ID} .bg{position:absolute;inset:0;background:rgba(0,0,0,.38);}
+#${PANEL_ID} .card{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(760px,94vw);max-height:min(82vh,820px);overflow:hidden;background:rgba(255,255,255,.97);border-radius:18px;box-shadow:0 20px 60px rgba(0,0,0,.24);display:flex;flex-direction:column;}
+#${PANEL_ID} .head{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 10px;border-bottom:1px solid rgba(0,0,0,.08);}
+#${PANEL_ID} .title{font-weight:1000;letter-spacing:.02em;}
+#${PANEL_ID} .close{border:none;background:rgba(0,0,0,.06);border-radius:12px;padding:8px 12px;font-weight:900;cursor:pointer;}
+#${PANEL_ID} .body{padding:12px 14px;overflow:auto;}
+#${PANEL_ID} .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:10px;}
+#${PANEL_ID} .pill{display:inline-flex;align-items:center;gap:8px;background:rgba(0,0,0,.04);border-radius:999px;padding:8px 10px;font-weight:900;}
+#${PANEL_ID} .btn{border:none;border-radius:12px;padding:10px 12px;font-weight:900;cursor:pointer;background:#fff;box-shadow:0 10px 22px rgba(0,0,0,.10);}
+#${PANEL_ID} .btn.primary{background:#ffd6e7;}
+#${PANEL_ID} .btn.ghost{background:rgba(0,0,0,.04);box-shadow:none;}
+#${PANEL_ID} .grid{display:grid;grid-template-columns:1fr;gap:10px;}
+#${PANEL_ID} .item{background:rgba(255,255,255,.92);border-radius:14px;padding:12px;box-shadow:0 10px 22px rgba(0,0,0,.08);display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+#${PANEL_ID} .item.locked{opacity:.72;}
+#${PANEL_ID} .name{font-weight:1000;}
+#${PANEL_ID} .desc{font-size:12px;opacity:.78;font-weight:800;margin-top:4px;}
+#${PANEL_ID} .meta{font-size:12px;opacity:.75;font-weight:900;margin-top:6px;}
+#${PANEL_ID} .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 10px;font-weight:900;font-size:12px;background:rgba(255,120,120,.18);}
+#${PANEL_ID} .badge.on{background:rgba(120,210,255,.22);}
+#${PANEL_ID} .bar{height:10px;border-radius:999px;background:rgba(0,0,0,.08);overflow:hidden;margin-top:8px;}
+#${PANEL_ID} .bar>i{display:block;height:100%;width:0%;background:rgba(120,210,255,.55);}
+#${PANEL_ID} .small{font-size:12px;opacity:.8;font-weight:900;}
+#${BTN_ID}{margin-left:8px;}
 `;
       document.head.appendChild(s);
     }
@@ -417,13 +426,10 @@
       const total = ACH_MASTER.length;
       const unlockedCount = ACH_MASTER.filter(a => isUnlocked(a.id)).length;
 
-      const coins = getCoins();
-      const bunny = getBunnyCount();
-
       const pills = `
         <div class="pill">解除：<b>${unlockedCount}</b> / ${total}</div>
-        <div class="pill">🪙 <b>${coins.toLocaleString()}</b></div>
-        <div class="pill">🐰 <b>${bunny}</b></div>
+        <div class="pill">🪙 <b>${getCoins().toLocaleString()}</b></div>
+        <div class="pill">🐰 <b>${getBunnyCount()}</b></div>
         <div class="pill">💩 <b>${getSyougouCount("unchi")}</b></div>
         <div class="pill">🕊️ <b>${getSyougouCount("tabidachi")}</b></div>
         <div class="pill">🎆 <b>${getSyougouCount("hanabi")}</b></div>
@@ -527,6 +533,8 @@
       if (!hud) return;
       if (document.getElementById(BTN_ID)) return;
 
+      const mount = document.getElementById("hudButtons") || hud;
+
       const btn = document.createElement("button");
       btn.id = BTN_ID;
       btn.textContent = "実績";
@@ -534,7 +542,7 @@
         e.preventDefault();
         openPanel();
       });
-      hud.appendChild(btn);
+      mount.appendChild(btn);
     }
 
     /* =========================
@@ -557,18 +565,17 @@
       });
     } catch {}
 
-    // eventsが無くても解除できるように「定期チェック」
+    // ✅ eventsが無くても解除できるように「定期チェック」
     const TIMER_MS = 900;
     const timer = setInterval(() => {
       checkUnlocks();
       refreshUI();
     }, TIMER_MS);
 
-    // HUDにボタン
     window.addEventListener("load", () => {
       injectHudButton();
-      // 保険（HUDが後から変わる場合）
       setTimeout(injectHudButton, 400);
+      setTimeout(injectHudButton, 1200);
     });
 
     /* =========================
@@ -585,6 +592,7 @@
       openPanel,
       closePanel,
       stop: () => { try { clearInterval(timer); } catch {} },
+      debug: false, // ✅ 解除できない時は true にして console 見て
     };
 
     // 初回チェック
@@ -592,6 +600,7 @@
     injectHudButton();
 
     console.log("[zisseki] ready", { unlocked: Object.keys(ach).length });
+
   }).catch((e) => {
     console.warn("[zisseki] WB wait failed:", e?.message || e);
   });
