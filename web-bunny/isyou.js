@@ -1,7 +1,6 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit＋SE）完全版（V26）
-// ✅ FIX(最重要): 反転しても“位置”がズレない → isyouAcc(box) の getBoundingClientRect を基準にする
-// ✅ FIX: 反転したときアクセ画像まで左右反転してしまう問題 → アクセ側で scaleX(-1) をかけて「反転を打ち消す」
-//    （= うさぎは反転するが、帽子画像は正位置のまま）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit＋SE）完全版（V27）
+// ✅ FIX(最重要): 反転しても“位置”がズレない → isyouAcc(box) の getBoundingClientRect を基準にする（基準座標を統一）
+// ✅ 仕様変更: 反転すると hat 画像も「一緒に反転」する（= 打ち消し処理を完全撤廃）
 // ✅ hat は全部「うさぎ同サイズ同位置」（full）
 // ✅ assets/isyou/*.png を最優先で必ず試す
 // ✅ 装着決定時にSE
@@ -316,9 +315,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV26")) return;
+    if (document.getElementById("isyouStyleV27")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV26";
+    s.id = "isyouStyleV27";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -435,7 +434,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
 .bunnyWrap{ overflow: visible !important; }
 
-/* ✅ アクセの基準を固定 */
+/* ✅ アクセの基準を固定（box基準で矩形差分を取る） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important; right:0 !important; bottom:0 !important;
@@ -444,10 +443,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   overflow: visible !important;
   transform:none !important;
 }
-.bunnyWrap .isyouAcc > div{
-  position:absolute;
-  transform-origin: 50% 50%;
-}
+.bunnyWrap .isyouAcc > div{ position:absolute; transform-origin: 50% 50%; }
 .bunnyWrap .isyouAcc img{
   display:block;
   width:100%;
@@ -779,7 +775,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（V26）
+   * Accessory render（V27）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
@@ -819,29 +815,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
   }
 
-  // ✅ wrap が scaleX(-1) なら true（反転検知）
-  function isFlipX(el) {
-    try {
-      if (!el) return false;
-      if (el.classList?.contains("flip")) return true;
-      const tr = getComputedStyle(el).transform;
-      if (!tr || tr === "none") return false;
-
-      const m = tr.match(/matrix\(([^)]+)\)/);
-      if (m) {
-        const a = parseFloat(m[1].split(",")[0]);
-        return a < 0;
-      }
-      const m3 = tr.match(/matrix3d\(([^)]+)\)/);
-      if (m3) {
-        const a = parseFloat(m3[1].split(",")[0]); // m11
-        return a < 0;
-      }
-    } catch {}
-    return false;
-  }
-
-  // ✅ “見た目矩形差分”の基準は isyouAcc(box)（絶対配置の基準と完全一致）
+  // ✅ isyouAcc(box) 基準で差分を取る（この box が実際の absolute 参照枠）
   function rectInBoxByClientRect(box, imgEl) {
     const br = imgEl.getBoundingClientRect();
     const xr = box.getBoundingClientRect();
@@ -874,11 +848,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ 反転してても、アクセ画像は反転させない（見た目を正位置に固定）
-    // wrap が反転 = 親で左右反転される → 子で scaleX(-1) して打ち消す
-    const flip = isFlipX(wrap);
-    // 画像だけ反転打ち消し（位置計算に影響しない）
-    img.style.transform = flip ? "scaleX(-1)" : "none";
+    // ✅ 反転すると hat 画像も「一緒に反転」する：
+    // ここでは“打ち消し”を一切しない（親の反転をそのまま受ける）
+    img.style.transform = "none";
 
     function fitFullSameAsBunny() {
       const r = rectInBoxByClientRect(box, bunnyImg);
@@ -901,9 +873,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     let n = 0;
     const timer = setInterval(() => {
       n++;
-      // 途中でflip状態が変わっても追従
-      const nowFlip = isFlipX(wrap);
-      img.style.transform = nowFlip ? "scaleX(-1)" : "none";
       fit();
       if (n >= 18) clearInterval(timer);
     }, 50);
