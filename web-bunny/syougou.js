@@ -34,40 +34,95 @@
   /* =========================
    * Safe SYOUGOU.add (retry)
    * ========================= */
-  const __syQueue = [];
-  let __syRetryTimer = null;
+  /* =========================
+ * Safe SYOUGOU.add (retry 強化版)
+ * ========================= */
+const __syQueue = [];
+let __syRetryTimer = null;
 
-  function syAdd(key, n = 1) {
-    try {
-      if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
-    } catch {}
+function __syCallAdd(k, n) {
+  const S = window.SYOUGOU;
+  if (!S) return false;
 
-    // まだ無いならキューしてリトライ
-    __syQueue.push([key, n]);
+  // add系の関数名ゆらぎ吸収
+  const fn =
+    (typeof S.add === "function" && S.add) ||
+    (typeof S.inc === "function" && S.inc) ||
+    (typeof S.plus === "function" && S.plus);
 
-    if (!__syRetryTimer) {
-      let tries = 0;
-      __syRetryTimer = setInterval(() => {
-        tries++;
-        if (window.SYOUGOU?.add) {
-          try {
-            while (__syQueue.length) {
-              const [k, a] = __syQueue.shift();
-              try { window.SYOUGOU.add(k, a); } catch {}
-            }
-          } finally {
-            clearInterval(__syRetryTimer);
-            __syRetryTimer = null;
-          }
-          return;
-        }
-        if (tries >= 40) { // 約8秒で諦め
-          clearInterval(__syRetryTimer);
-          __syRetryTimer = null;
-        }
-      }, 200);
+  if (!fn) return false;
+
+  // キー一覧がある実装なら、存在しないキーを弾いて原因を見える化
+  try {
+    const keys =
+      (Array.isArray(S.keys) && S.keys) ||
+      (Array.isArray(S.KEYS) && S.KEYS) ||
+      (S.map && typeof S.map === "object" ? Object.keys(S.map) : null) ||
+      (S.defs && typeof S.defs === "object" ? Object.keys(S.defs) : null);
+
+    if (keys && !keys.includes(k)) {
+      console.warn("[isyou][syougou] unknown key:", k, "available:", keys.slice(0, 50));
+      // ここで return false にすると加算しない（=キー違いが確定）
+      return false;
     }
+  } catch {}
+
+  try {
+    fn.call(S, k, n);
+  } catch (e) {
+    console.warn("[isyou][syougou] add failed:", e);
+    return false;
   }
+
+  // 保存/再描画が必要な実装を吸収
+  try { S.save?.(); } catch {}
+  try { S.render?.(); } catch {}
+  try { S.update?.(); } catch {}
+  try { S.updateHud?.(); } catch {}
+
+  return true;
+}
+
+function syAdd(key, n = 1) {
+  // 即時に行けるなら行く
+  if (__syCallAdd(key, n)) return true;
+
+  // まだ無い / キー違いなどはキュー
+  __syQueue.push([key, n]);
+
+  if (!__syRetryTimer) {
+    let tries = 0;
+    __syRetryTimer = setInterval(() => {
+      tries++;
+
+      // キューを順に流す（成功したものだけ消える）
+      for (let i = 0; i < __syQueue.length; i++) {
+        const [k, a] = __syQueue[i];
+        if (__syCallAdd(k, a)) {
+          __syQueue.splice(i, 1);
+          i--;
+        }
+      }
+
+      // 全部流せたら終了
+      if (__syQueue.length === 0) {
+        clearInterval(__syRetryTimer);
+        __syRetryTimer = null;
+        return;
+      }
+
+      // ✅ 諦めを延長（60秒くらい待つ）
+      if (tries >= 300) { // 200ms * 300 = 60s
+        console.warn("[isyou][syougou] retry timeout. remaining queue:", __syQueue);
+        clearInterval(__syRetryTimer);
+        __syRetryTimer = null;
+      }
+    }, 200);
+  }
+
+  return false;
+}
+
 
   /* =========================
    * Config
