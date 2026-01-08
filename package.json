@@ -2,24 +2,14 @@
   "name": "web-bunny",
   "version": "1.0.0",
   "private": true,
-
-  // ★ ES Modules を明示（import を使っているため必須）
   "type": "module",
-
-  // ★ エントリーポイント
   "main": "server.js",
-
-  // ★ Railway が使う起動コマンド（日本語化しないこと）
   "scripts": {
     "start": "node server.js"
   },
-
-  // ★ 依存関係
   "dependencies": {
     "express": "^4.19.2"
   },
-
-  // ★ Railway / Node の事故防止
   "engines": {
     "node": "20.x"
   }
