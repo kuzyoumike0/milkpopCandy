@@ -19,28 +19,18 @@
 
   const HANABI_SE_SRC = "./assets/hanabi/hanabi.mp3";
 
-function syAdd(key, n = 1) {
-  try {
-    if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
-  } catch {}
-  // syougou.js がまだ来てない時の保険
-  window.__syougouQueue = window.__syougouQueue || [];
-  window.__syougouQueue.push([key, n]);
-}
-
   // ===== サイズ基本（通常）=====
-  // 以前の「大きめ」：320〜520
   const BASE_SIZE_MIN = 320;
   const BASE_SIZE_MAX = 520;
 
   // ===== 連打倍率（通常クリック用）=====
-  const STREAK_WINDOW_MS = 900;   // この時間内なら「連打」とみなす
-  const STREAK_RESET_MS  = 1400;  // これ以上空いたら完全リセット
-  const STREAK_MAX = 8;           // 上限（暴れ防止）
-  const MULT_MIN = 0.85;          // ランダム倍率の下限
-  const MULT_MAX = 1.35;          // ランダム倍率の上限
-  const MULT_STREAK_BONUS = 0.10; // 連打1増えるごとに上限側が伸びる
-  const MULT_CAP = 2.10;          // 最大倍率の上限
+  const STREAK_WINDOW_MS = 900;
+  const STREAK_RESET_MS  = 1400;
+  const STREAK_MAX = 8;
+  const MULT_MIN = 0.85;
+  const MULT_MAX = 1.35;
+  const MULT_STREAK_BONUS = 0.10;
+  const MULT_CAP = 2.10;
 
   // ===== 当たり特大倍率 =====
   const JACKPOT_MULT_MIN = 2.2;
@@ -82,8 +72,8 @@ function syAdd(key, n = 1) {
     s.textContent = `
 .hanabi-gif{
   position:absolute;
-  pointer-events:none; /* ★邪魔しない */
-  z-index:1;           /* ★うさぎ/コインより下 */
+  pointer-events:none;
+  z-index:1;
   opacity:1;
   animation: hanabiFade 2.9s ease-out forwards;
   will-change: transform, opacity;
@@ -115,7 +105,7 @@ function syAdd(key, n = 1) {
   }
 
   /* =========================
-   * GIF preload（初回遅延対策）
+   * GIF preload
    * ========================= */
   const preloadImgs = new Map(); // src -> HTMLImageElement
 
@@ -136,9 +126,7 @@ function syAdd(key, n = 1) {
 
     await p;
 
-    try {
-      if (img.decode) await img.decode();
-    } catch {}
+    try { if (img.decode) await img.decode(); } catch {}
 
     return img;
   }
@@ -178,7 +166,6 @@ function syAdd(key, n = 1) {
     } else if (dt <= STREAK_WINDOW_MS) {
       streak = Math.min(STREAK_MAX, streak + 1);
     } else {
-      // 連打ウィンドウは外れたがリセットではない：ゆるく1に戻す
       streak = 1;
     }
 
@@ -189,22 +176,20 @@ function syAdd(key, n = 1) {
   function calcTapMultiplier(now) {
     const s = updateStreak(now);
 
-    // ランダム倍率（連打で上限寄りになりやすくする）
     const bonus = Math.min(MULT_CAP - MULT_MAX, (s - 1) * MULT_STREAK_BONUS);
     const max = Math.min(MULT_CAP, MULT_MAX + bonus);
     const min = MULT_MIN;
 
-    // 連打が増えるほど「大きい値」を引きやすい（軽い偏り）
     const t = Math.random();
-    const biased = 1 - Math.pow(1 - t, 1 + (s * 0.35)); // sが大きいほど上振れしやすい
+    const biased = 1 - Math.pow(1 - t, 1 + (s * 0.35));
     return min + (max - min) * biased;
   }
 
   function spawnFirework(field, opts = {}) {
     const {
       multiplier = 1,
-      forceBig = false,      // 当たり用（特大）
-      costCoin = false,      // ボタンクリック時はtrue
+      forceBig = false,
+      costCoin = false,
     } = opts;
 
     if (costCoin) {
@@ -226,14 +211,10 @@ function syAdd(key, n = 1) {
 
     const rect = getRectSafe(field);
 
-    // 位置：上の方
     const x = rect.width * (0.15 + Math.random() * 0.7);
     const y = rect.height * (0.08 + Math.random() * 0.35);
 
-    // サイズ（通常 or 特大）
     let baseSize = rand(BASE_SIZE_MIN, BASE_SIZE_MAX);
-
-    // 特大なら基礎も少し底上げ
     if (forceBig) baseSize *= 1.15;
 
     const size = Math.floor(baseSize * multiplier);
@@ -245,17 +226,12 @@ function syAdd(key, n = 1) {
 
     field.appendChild(img);
 
-    requestAnimationFrame(() => {
-      img.style.opacity = "1";
-    });
+    requestAnimationFrame(() => { img.style.opacity = "1"; });
 
     playHanabiSE();
 
-    setTimeout(() => {
-      try { img.remove(); } catch {}
-    }, 3000);
+    setTimeout(() => { try { img.remove(); } catch {} }, 3000);
 
-    // 次に備えて温める
     preloadOne(pickSrc()).catch(() => {});
     return true;
   }
@@ -287,52 +263,50 @@ function syAdd(key, n = 1) {
     const mount = findMount();
     if (btn.parentElement !== mount) mount.appendChild(btn);
 
-    // 二重登録防止：毎回クローンはせずシンプルに
     btn.onclick = null;
 
     btn.addEventListener("click", () => {
       const now = Date.now();
       const mult = calcTapMultiplier(now);
 
-      // 通常クリック：連打でランダム倍率
       spawnFirework(getField(), {
         multiplier: mult,
         forceBig: false,
         costCoin: true,
       });
+
+      // ✅ 花火カウント（直呼び）
+      try { window.SYOUGOU?.add?.("hanabi", 1); } catch {}
+      try { window.WB?.emit?.("hanabiFired"); } catch {}
+      try { window.dispatchEvent(new CustomEvent("wb:hanabi")); } catch {}
     });
   }
 
   /* =========================
    * 当たり（特大）連携
-   * =========================
-   * slot.js 側から繋ぐ方法（どれでもOK）
-   * 1) window.HANABI.jackpot()
-   * 2) window.dispatchEvent(new CustomEvent("milkpop:slotWin"))
-   * 3) window.dispatchEvent(new CustomEvent("slot:win"))
-   */
+   * ========================= */
   function jackpotFire() {
     const mult = rand(JACKPOT_MULT_MIN, JACKPOT_MULT_MAX);
     spawnFirework(getField(), {
       multiplier: mult,
       forceBig: true,
-      costCoin: false, // 当たり演出は無料
+      costCoin: false,
     });
+
+    // ✅ 当たり花火カウントも入れてOK（必要なら外して）
+    try { window.SYOUGOU?.add?.("hanabi", 1); } catch {}
+    try { window.WB?.emit?.("hanabiFired"); } catch {}
+    try { window.dispatchEvent(new CustomEvent("wb:hanabi")); } catch {}
   }
 
-  // 外部公開（slot.js から呼べる）
   window.HANABI = window.HANABI || {};
   window.HANABI.fire = (opts = {}) => spawnFirework(getField(), opts);
   window.HANABI.jackpot = () => jackpotFire();
 
-  // イベントでも受ける（複数名で保険）
   ["milkpop:slotWin", "slot:win", "slotWin", "jackpot"].forEach((name) => {
     window.addEventListener(name, () => jackpotFire());
   });
 
-  /* =========================
-   * init
-   * ========================= */
   window.addEventListener("load", () => {
     injectStyles();
     ensureButton();
