@@ -1,16 +1,14 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版（HAT表示FIX版）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
 // ✅ 赤枠は選択中だけz-indexを上げる
-// ✅ FIX：アンカーはoffset系（transform/flipでもズレにくい）
-// ✅ NEW：fitToBunny（うさぎ画像と同じrectに重ね、autoズレ対策）
+// ✅ FIX：アクセは「最前面」＆「はみ出しOK」（z-index / overflow / stacking対策）
+// ✅ FIX：位置計算は offset を優先（transform/flipでも安定）+ 連続fitで取りこぼし防止
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
-// ✅ FIX：assets構成に合わせて衣装画像パスを ./assets/isyou/* に修正（404解消）
-// ✅ 追加：画像404のときコンソールに原因を出す（デバッグしやすい）
 
 (() => {
   "use strict";
@@ -49,23 +47,8 @@
 
       if (!fn) return false;
 
-      // キー一覧がある実装なら存在チェック（ミスキー検知）
-      try {
-        const keys =
-          (Array.isArray(S.keys) && S.keys) ||
-          (Array.isArray(S.KEYS) && S.KEYS) ||
-          (S.map && typeof S.map === "object" ? Object.keys(S.map) : null) ||
-          (S.defs && typeof S.defs === "object" ? Object.keys(S.defs) : null);
-
-        if (keys && !keys.includes(key)) {
-          console.warn("[isyou][syougou] unknown key:", key, "available:", keys.slice(0, 80));
-          return false;
-        }
-      } catch {}
-
       fn.call(S, key, n);
 
-      // 保存/再描画が必要な実装を吸収
       try { S.save?.(); } catch {}
       try { S.render?.(); } catch {}
       try { S.update?.(); } catch {}
@@ -80,7 +63,6 @@
   function syAdd(key, n = 1) {
     if (__syCallAdd(key, n)) return true;
 
-    // まだ無いならキューしてリトライ
     __syQueue.push([key, n]);
 
     if (!__syRetryTimer) {
@@ -102,7 +84,7 @@
           return;
         }
 
-        if (tries >= 300) { // 約60秒で諦め
+        if (tries >= 300) { // 約60秒
           console.warn("[isyou][syougou] retry timeout. remaining:", __syQueue);
           clearInterval(__syRetryTimer);
           __syRetryTimer = null;
@@ -121,8 +103,7 @@
     equipped: "wb_isyou_equipped_v3", // { bornAt: { slotKey: itemKey } }
   };
 
-  // ✅ slot: "hat" は置き換え
-  // ✅ FIX：画像パスを ./assets/isyou/* に合わせる（あなたのassets構成）
+  // ✅ assets構成に合わせる
   const ITEMS = {
     partyhat: { slot: "hat", label: "パーティーハット", img: "./assets/isyou/partyhat.png", price: 500 },
     crown:    { slot: "hat", label: "クラウン",         img: "./assets/isyou/crown.png",    price: 900 },
@@ -130,12 +111,11 @@
   };
 
   // 帽子位置（うさぎ画像に対する割合）
-  // ※画像ごとに微調整したい場合はここだけ触ればOK
   const ANCHOR = {
     hat: {
-      x: 0.50,   // 横：中央
-      y: 0.06,   // 縦：上寄り（耳と耳の間の少し下〜上に合わせる）
-      w: 0.58,   // 幅：うさぎ画像幅に対する割合
+      x: 0.50,
+      y: 0.06,
+      w: 0.58,
     },
   };
 
@@ -143,12 +123,12 @@
    * State
    * ========================= */
   const state = {
-    owned: {},          // itemKey -> count
-    equipped: {},       // bornAt -> { hat: itemKey }
-    mode: "browse",     // "browse" | "equip"
-    selectedItem: null, // itemKey
-    pendingAction: "equip", // "equip" | "remove"
-    selectedWrap: null, // .bunnyWrap
+    owned: {},
+    equipped: {},
+    mode: "browse",
+    selectedItem: null,
+    pendingAction: "equip",
+    selectedWrap: null,
     selectedBornAt: null,
     removeSlot: null,
   };
@@ -191,15 +171,12 @@
     const nv = Math.max(0, Math.floor(v));
     try {
       if (WB) {
-        // あなたの app.js は setter coins を実装してるので最優先
-        if ("coins" in WB) WB.coins = nv;
+        if ("coins" in WB) WB.coins = nv; // app.js setter対応
         else if (typeof WB.coins === "number") WB.coins = nv;
-
         WB.saveCoins?.();
         WB.updateHud?.();
       }
     } catch {}
-
     const el = document.getElementById("coinValue");
     if (el) el.textContent = String(nv);
   }
@@ -229,9 +206,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV8")) return;
+    if (document.getElementById("isyouStyleV9")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV8";
+    s.id = "isyouStyleV9";
     s.textContent = `
 /* === modal === */
 #isyouBackdrop{
@@ -311,7 +288,6 @@
   background: rgba(0,0,0,.06);
   font-weight: 1000; font-size:12px;
 }
-#isyouModal .badge.on{ background: rgba(120,210,255,.22); }
 #isyouModal .badge.lock{ background: rgba(255,120,120,.18); }
 
 /* === equip confirm bar === */
@@ -347,33 +323,32 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   outline: 4px solid rgba(255, 64, 64, .88);
   outline-offset: 3px;
   border-radius: 18px;
-  z-index: 2147482000; /* 赤枠が埋もれない */
+  z-index: 2147482000;
 }
 
-/* === accessory layer === */
-/* === accessory layer（帽子が埋もれない＆切れない） === */
+/* === accessory layer（帽子が埋もれない＆切れない：ここが最重要） === */
 .bunnyWrap{
   position: relative !important;
-  overflow: visible !important;   /* ← 上にはみ出しても切られない */
+  overflow: visible !important;     /* はみ出しOK */
 }
 
-/* うさぎ本体を下に、帽子を上に（同じスタッキングコンテキスト内で勝つ） */
+/* うさぎ本体は下 */
 .bunnyWrap > img.bunny,
 .bunnyWrap > img{
   position: relative;
   z-index: 1;
 }
 
+/* 帽子は上 */
 .bunnyWrap .isyouAcc{
   position:absolute;
   left:0; top:0;
   pointer-events:none;
-  z-index: 9999;                 /* ← とにかく最前面 */
-  overflow: visible;
+  z-index: 9999 !important;         /* 必ず最前面 */
+  overflow: visible !important;
   will-change: transform;
-  transform: translateZ(0);       /* ← 一部ブラウザの描画順対策 */
+  transform: translateZ(0);
 }
-
 .bunnyWrap .isyouAcc img{
   display:block;
   width:100%;
@@ -381,10 +356,12 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   object-fit: contain;
   pointer-events:none;
 }
-
+`;
+    document.head.appendChild(s);
+  }
 
   /* =========================
-   * Toast (simple)
+   * Toast
    * ========================= */
   function toast(text) {
     const t = String(text ?? "").trim();
@@ -439,10 +416,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       backdrop.appendChild(modal);
     }
 
-    // backdropクリック：browseなら閉じる / equip中はクリック透過したい
     backdrop.onclick = (e) => {
       if (state.mode === "equip") {
-        // 装着モード中は field クリックを邪魔しないため「閉じない」
         e.stopPropagation();
         return;
       }
@@ -477,7 +452,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     state.owned[itemKey] = ownedCount(itemKey) + 1;
     saveAll();
 
-    // ✅ 購入を称号カウント（必要ならキーを合わせて）
     syAdd("omukae", 1);
 
     toast(`🛍️ 購入：${it.label}`);
@@ -609,7 +583,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Confirm bar (決定式)
+   * Confirm bar
    * ========================= */
   let confirmBar = null;
 
@@ -705,20 +679,25 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render (fitToBunny)
+   * Accessory render（offset優先 + fit連続）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
-    return wrap.querySelector("img.bunny, img.bunnyImg, img, .bunny img") || null;
+    return wrap.querySelector(":scope > img.bunny, :scope > img") || wrap.querySelector("img.bunny, img") || null;
   }
 
   function ensureAccContainer(wrap) {
     if (!wrap) return null;
     let box = wrap.querySelector(":scope > .isyouAcc");
     if (box) return box;
+
     box = document.createElement("div");
     box.className = "isyouAcc";
-    wrap.appendChild(box);
+
+    // ✅ うさぎimgより「後ろ」に入れる必要はない（z-indexで上にする）
+    // ただ、DOM先頭に入れると selector の誤検出が起きにくい
+    wrap.insertBefore(box, wrap.firstChild);
+
     return box;
   }
 
@@ -736,9 +715,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const bunnyImg = getBunnyImg(wrap);
     const box = ensureAccContainer(wrap);
-    if (!box || !bunnyImg) return;
+    if (!box || !bunnyImg) {
+      console.warn("[isyou] bunnyImg not found for wrap", wrap);
+      return;
+    }
 
-    // まず同スロットは置き換え
     removeAccSlot(wrap, slot);
 
     const node = document.createElement("div");
@@ -753,16 +734,26 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     box.appendChild(node);
 
+    const a = ANCHOR[slot] || ANCHOR.hat;
+
     const fit = () => {
-      const br = bunnyImg.getBoundingClientRect();
-      const wr = wrap.getBoundingClientRect();
-      const w = br.width;
-      const h = br.height;
+      // ✅ offset系（transform影響を受けにくい）
+      let w = bunnyImg.offsetWidth || 0;
+      let h = bunnyImg.offsetHeight || 0;
+      let left = bunnyImg.offsetLeft || 0;
+      let top  = bunnyImg.offsetTop  || 0;
 
-      const left = (br.left - wr.left);
-      const top  = (br.top  - wr.top);
+      // fallback（念のため）
+      if (w <= 0 || h <= 0) {
+        const br = bunnyImg.getBoundingClientRect();
+        const wr = wrap.getBoundingClientRect();
+        w = br.width;
+        h = br.height;
+        left = (br.left - wr.left);
+        top  = (br.top  - wr.top);
+      }
 
-      const a = ANCHOR[slot] || ANCHOR.hat;
+      if (w <= 1 || h <= 1) return; // まだ確定してない
 
       const pw = w * (a.w || 0.58);
       const px = left + w * (a.x || 0.5) - pw / 2;
@@ -774,8 +765,16 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.height = `${pw}px`;
     };
 
+    // ✅ 取りこぼし防止：数フレーム + 少しだけ連続fit
     requestAnimationFrame(() => requestAnimationFrame(fit));
     img.onload = () => requestAnimationFrame(() => requestAnimationFrame(fit));
+
+    let n = 0;
+    const timer = setInterval(() => {
+      n++;
+      fit();
+      if (n >= 12) clearInterval(timer); // 約600msで停止
+    }, 50);
   }
 
   function applyEquipsForWrap(wrap) {
@@ -843,7 +842,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Selection (red outline)
+   * Selection
    * ========================= */
   function selectWrap(wrap) {
     if (!wrap) return;
@@ -858,7 +857,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (state.mode !== "equip") return;
     if (e.button != null && e.button !== 0) return;
 
-    // モーダル上のクリックは無視
     if (backdrop && backdrop.style.display !== "none") {
       const inModal = e.target?.closest?.("#isyouModal");
       if (inModal) return;
@@ -916,6 +914,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     try {
       WB?.on?.("bunnyCountChanged", () => setTimeout(applyEquipsAll, 50));
       WB?.on?.("bunnySpawned", () => setTimeout(applyEquipsAll, 50));
+      WB?.on?.("resize", () => setTimeout(applyEquipsAll, 50));
     } catch {}
   }
 
