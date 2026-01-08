@@ -1,16 +1,14 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋fit＋SE）完全版（V29.2）
-// ✅ 最重要（いちばんバグらない方式）
-// 1) 位置ズレ対策：hatは「wrap100%」ではなく「bunny画像の枠」に追従（offset系でtransform/flipでも安定）
-// 2) 反転ズレ対策：wrapではなくimgにだけ反転が掛かるケースを検出 → hatも同じ反転を適用（ダブル反転回避）
-// 3) パス事故対策：/assets の“絶対パス”を捨てて相対パスに統一（/web-bunny/配信でも死なない）
-// ✅ assets/isyou/*.png を最優先で必ず試す（あなたの構成に完全一致）
-// ✅ 装着決定時SE（assets/isyou/Onoma-Pop03-1(High).mp3 最優先）
-// ✅ 装着モード中：うさぎクリック→赤枠→決定 / 外すも同様
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋fit＋SE）完全版（V29.2-FIX）
+// ✅ V29.2 の「帽子が表示されない（isyouAccが0サイズ）」事故を根絶した修正版
+// 1) 位置合わせ：offset → rect差分 → wrap100% の三段フォールバック
+// 2) flip追従：wrap反転 / img反転を判定してダブル反転回避
+// 3) パス：相対のみ（/assets 絶対パスは使わない）
+// 4) 初回0事故：rAF + setTimeout で再同期
 
 (() => {
   "use strict";
 
-  console.log("[isyou.js] LOADED V29.2", Date.now());
+  console.log("[isyou.js] LOADED V29.2-FIX", Date.now());
 
   /* =========================
    * Wait for HUD / WB
@@ -98,7 +96,7 @@
   }
 
   /* =========================
-   * Script base (kept for debug; V29.2 uses relative paths only)
+   * Script base (debug only)
    * ========================= */
   function getScriptBase() {
     try {
@@ -115,7 +113,7 @@
   const SCRIPT_BASE = getScriptBase();
 
   /* =========================
-   * 画像候補を順に試す（相対パスに統一）
+   * 画像候補を順に試す（相対パス）
    * ========================= */
   function setSrcWithFallback(imgEl, candidates, onOk) {
     const list = (candidates || []).filter(Boolean);
@@ -140,10 +138,9 @@
   }
 
   /* =========================
-   * SE（装着時）— あなたの assets/isyou/ にある音を最優先
+   * SE（装着時）
    * ========================= */
   const EQUIP_SE_CANDIDATES = [
-    // ✅ assets/isyou フォルダに存在（スクショ確認済）
     encodeURI("./assets/isyou/Onoma-Pop03-1(High).mp3"),
     "./assets/poyo.mp3",
     "./assets/coin.mp3",
@@ -185,7 +182,6 @@
     equipped: "wb_isyou_equipped_v7",
   };
 
-  // ✅ 相対パスだけ（サブパス配信でも死なない）
   function imgCandidates(name) {
     return [
       `./assets/isyou/${name}`,
@@ -312,10 +308,10 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV292")) return;
+    if (document.getElementById("isyouStyleV292fix")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV292";
+    s.id = "isyouStyleV292fix";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -436,7 +432,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important;
-  width:0 !important; height:0 !important; /* ← JSが都度セット */
+  width:0 !important; height:0 !important; /* ← JSが都度セット（失敗時フォールバックあり） */
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
@@ -782,7 +778,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（V29.2：bunny画像枠へ追従 + 反転追従）
+   * Accessory render（V29.2-FIX）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
@@ -810,9 +806,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       box.className = "isyouAcc";
       wrap.appendChild(box);
     }
-    // 最前面に（最後に付け直す）
     try { if (box.parentNode === wrap) wrap.appendChild(box); } catch {}
-
     box.style.transform = "none";
     return box;
   }
@@ -824,7 +818,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
   }
 
-  // ✅ 実際に「反転しているか」をtransform行列で判定（a<0ならX反転）
   function isMirrored(el) {
     if (!el) return false;
     try {
@@ -837,31 +830,61 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     }
   }
 
-  // ✅ bunnyImg の offset を wrap まで積み上げ（Rect禁止：transform/flipでもズレない）
+  // ✅ offsetParent が wrap に到達しないケースがあるので null を返す
   function getOffsetToAncestor(el, ancestor) {
     let x = 0, y = 0;
     let cur = el;
-    while (cur && cur !== ancestor) {
+    let guard = 0;
+
+    while (cur && cur !== ancestor && guard++ < 200) {
       x += cur.offsetLeft || 0;
       y += cur.offsetTop || 0;
       cur = cur.offsetParent;
     }
+
+    if (cur !== ancestor) return null;
     return { x, y };
   }
 
-  // ✅ isyouAcc を「うさぎ画像の表示枠」に一致させる
+  // ✅ isyouAcc を「うさぎ画像枠」に一致（失敗時フォールバック）
   function syncAccToBunnyImg(wrap, bunnyImg, box) {
-    if (!wrap || !bunnyImg || !box) return;
+    if (!wrap || !bunnyImg || !box) return false;
 
-    const { x, y } = getOffsetToAncestor(bunnyImg, wrap);
-    const w = bunnyImg.offsetWidth || 0;
-    const h = bunnyImg.offsetHeight || 0;
-    if (w <= 0 || h <= 0) return;
+    // (A) offset 優先
+    const off = getOffsetToAncestor(bunnyImg, wrap);
+    if (off) {
+      const w = bunnyImg.offsetWidth || 0;
+      const h = bunnyImg.offsetHeight || 0;
+      if (w > 0 && h > 0) {
+        box.style.left = `${off.x}px`;
+        box.style.top = `${off.y}px`;
+        box.style.width = `${w}px`;
+        box.style.height = `${h}px`;
+        return true;
+      }
+    }
 
-    box.style.left = `${x}px`;
-    box.style.top = `${y}px`;
-    box.style.width = `${w}px`;
-    box.style.height = `${h}px`;
+    // (B) rect差分（到達できないDOMの救済）
+    try {
+      const wr = wrap.getBoundingClientRect();
+      const br = bunnyImg.getBoundingClientRect();
+      const w = br.width || 0;
+      const h = br.height || 0;
+      if (w > 0 && h > 0) {
+        box.style.left = `${(br.left - wr.left)}px`;
+        box.style.top = `${(br.top - wr.top)}px`;
+        box.style.width = `${w}px`;
+        box.style.height = `${h}px`;
+        return true;
+      }
+    } catch {}
+
+    // (C) 最後の保険：wrap100%（表示されない事故を防ぐ）
+    box.style.left = "0px";
+    box.style.top = "0px";
+    box.style.width = `${wrap.clientWidth || wrap.offsetWidth || 0}px`;
+    box.style.height = `${wrap.clientHeight || wrap.offsetHeight || 0}px`;
+    return true;
   }
 
   function placeAcc(wrap, slot, itemKey) {
@@ -871,8 +894,10 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const box = ensureAccContainer(wrap);
     if (!box || !bunnyImg) return;
 
-    // ✅ ここが本命：hatの基準を「wrap」ではなく「bunny画像枠」に合わせる
+    // ✅ ここが本命：boxをうさぎ画像枠へ同期（＋遅延再同期で初回0事故防止）
     syncAccToBunnyImg(wrap, bunnyImg, box);
+    requestAnimationFrame(() => syncAccToBunnyImg(wrap, bunnyImg, box));
+    setTimeout(() => syncAccToBunnyImg(wrap, bunnyImg, box), 60);
 
     removeAccSlot(wrap, slot);
 
@@ -888,14 +913,12 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ boxがbunny画像枠なので、その中で100%重ねるだけ
     node.style.left = "0px";
     node.style.top = "0px";
     node.style.width = "100%";
     node.style.height = "100%";
     node.style.transformOrigin = "50% 50%";
 
-    // ✅ 反転は「ダブル反転回避」しながら追従
     const wrapMir = isMirrored(wrap);
     const imgMir  = isMirrored(bunnyImg);
     const needMirror = (!wrapMir && imgMir);
@@ -909,11 +932,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   function applyEquipsForWrap(wrap) {
     const bornAt = getBornAtFromWrap(wrap);
     if (!bornAt) return;
-
-    // ✅ 先に同期（ロード直後のズレ防止）
-    const bunnyImg = getBunnyImg(wrap);
-    const box = wrap.querySelector(":scope > .isyouAcc");
-    if (bunnyImg && box) syncAccToBunnyImg(wrap, bunnyImg, box);
 
     const eq = state.equipped[String(bornAt)] || {};
     const key = eq.hat;
@@ -1054,14 +1072,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       WB?.on?.("bunnySpawned", () => setTimeout(applyEquipsAll, 50));
       WB?.on?.("resize", () => setTimeout(applyEquipsAll, 50));
     } catch {}
-
-    // ✅ レイアウト変化でも追従（軽量）
-    try {
-      const ro = new ResizeObserver(() => {
-        if (state.mode !== "equip") setTimeout(applyEquipsAll, 0);
-      });
-      document.querySelectorAll(".bunnyWrap").forEach(w => ro.observe(w));
-    } catch {}
   }
 
   window.addEventListener("load", () => {
@@ -1083,4 +1093,32 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     _state: state,
     _scriptBase: SCRIPT_BASE,
   };
+
+  /* =========================================================
+   * 以下：このファイル内で使う未定義関数（V29.2元から必要）
+   *  - ここが欠けていると動きません
+   * ========================================================= */
+
+  // (V29.2元) confirm bar 更新に必要
+  function updateConfirmBar() {
+    ensureConfirmBar();
+    const t = confirmBar.querySelector("#isyouSelText");
+    const doBtn = confirmBar.querySelector("#isyouDoBtn");
+    const rmBtn = confirmBar.querySelector("#isyouRemoveBtn");
+
+    const it = state.selectedItem ? ITEMS[state.selectedItem] : null;
+    const sel = state.selectedBornAt ? `選択：${state.selectedBornAt}` : "未選択";
+
+    const modeText =
+      state.pendingAction === "equip"
+        ? `装着：${it ? it.label : "（未選択）"} / ${sel}`
+        : `外す：${state.removeSlot || "?"} / ${sel}`;
+
+    if (t) t.textContent = modeText;
+
+    const hasTarget = !!state.selectedBornAt;
+    if (doBtn) doBtn.disabled = !(hasTarget && state.pendingAction === "equip" && !!it);
+    if (rmBtn) rmBtn.disabled = !(hasTarget && state.pendingAction === "remove");
+  }
+
 })();
