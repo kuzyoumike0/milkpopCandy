@@ -164,14 +164,15 @@
 
       /* ✅ ougonunchi */
       .ougonunchi{
-        width:44px;
-        height:44px;
-        position:absolute;
-        user-select:none;
-        -webkit-user-drag:none;
-        cursor:pointer;
-        filter: drop-shadow(0 10px 14px rgba(0,0,0,.22));
-      }
+  width:34px;
+  height:34px;
+  position:absolute;
+  user-select:none;
+  -webkit-user-drag:none;
+  cursor:pointer;
+  filter: drop-shadow(0 8px 10px rgba(0,0,0,.20));
+}
+
 
       /* ✅ hart.png を小さく */
       .wbChargeHart {
