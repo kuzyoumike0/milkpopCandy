@@ -7,15 +7,14 @@
 // ✅ NEW：fitToBunny（うさぎ画像と完全一致で重ねる：autoズレ対策）
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ FIX：他のうさぎより帽子だけ上に出ない（bunnyWrapをスタッキングコンテキスト化＋zを小さく）
-// ✅ NEW：衣装付け替え（装着）中は「コイン落とし」を止める（captureで止める）
+// ✅ NEW：装着（衣装付け替え）中は「コイン落とし」を止める（ただし装着処理は止めない）
 // ✅ NEW：装着/付け替え/外す 成功時に /assets/isyou/Onoma-Pop03-1(High).mp3 を鳴らす
-// ✅ NEW：装着タブに「外す」ボタン（選択中のうさぎのhatを外す）
-// ✅ FIX：WB待機を「WBがある」だけに緩和（on必須にしない）→ timeoutで死なない
+// ✅ NEW：「外す」は赤枠で対象選択 → 「外す確定」で決定（2段階）
 
 (() => {
   "use strict";
 
-  const WAIT_MS = 20000;   // 余裕持たせる
+  const WAIT_MS = 12000;
   const TICK_MS = 50;
 
   function waitFor(getter, timeoutMs = WAIT_MS) {
@@ -34,7 +33,7 @@
     });
   }
 
-  // ✅ ここが最重要：WB.on を必須にしない
+  // ✅ WBは「存在」だけ見ればOK（on必須にしない）
   function waitForWB() {
     return waitFor(() => (window.WB ? window.WB : null));
   }
@@ -46,6 +45,19 @@
     .then(([WB, hud]) => {
       if (window.__ISYOU_INITED__) return;
       window.__ISYOU_INITED__ = true;
+
+      /* =========================
+       * WB互換（on/off/emitが無い環境でも壊さない）
+       * ========================= */
+      const __events = new Map();
+      const on = WB.on || ((ev, fn) => {
+        if (!__events.has(ev)) __events.set(ev, new Set());
+        __events.get(ev).add(fn);
+      });
+      const off = WB.off || ((ev, fn) => { __events.get(ev)?.delete(fn); });
+      const emit = WB.emit || ((ev, payload) => {
+        __events.get(ev)?.forEach((fn) => { try { fn(payload); } catch {} });
+      });
 
       /* =========================
        * Config
@@ -61,11 +73,66 @@
       };
 
       const ITEMS = {
-        partyhat: { label:"パーティーハット", img:"/assets/isyou/partyhat.png", price:500,  slot:"hat", fitToBunny:true, offsetX:0, offsetY:0, scale:1, z:2, keepUpright:false },
-        crown:    { label:"王冠",           img:"/assets/isyou/crown.png",    price:3500, slot:"hat", fitToBunny:true, offsetX:0, offsetY:0, scale:1, z:2, keepUpright:false },
-        ribbon:   { label:"リボン",         img:"/assets/isyou/ribbon.png",   price:1200, slot:"hat", fitToBunny:true, offsetX:0, offsetY:0, scale:1, z:2, keepUpright:false },
-        aimasuku: { label:"アイマスク",     img:"/assets/isyou/aimasuku.png", price:1200, slot:"hat", fitToBunny:true, offsetX:0, offsetY:0, scale:1, z:2, keepUpright:false },
-        ahiru:    { label:"ぷかアヒル",     img:"/assets/isyou/ahiru.png",    price:600,  slot:"hat", fitToBunny:true, offsetX:0, offsetY:0, scale:1, z:2, keepUpright:false },
+        partyhat: {
+          label: "パーティーハット",
+          img: "/assets/isyou/partyhat.png",
+          price: 500,
+          slot: "hat",
+          fitToBunny: true,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+          z: 2,
+          keepUpright: false,
+        },
+        crown: {
+          label: "王冠",
+          img: "/assets/isyou/crown.png",
+          price: 3500,
+          slot: "hat",
+          fitToBunny: true,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+          z: 2,
+          keepUpright: false,
+        },
+        ribbon: {
+          label: "リボン",
+          img: "/assets/isyou/ribbon.png",
+          price: 1200,
+          slot: "hat",
+          fitToBunny: true,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+          z: 2,
+          keepUpright: false,
+        },
+        aimasuku: {
+          label: "アイマスク",
+          img: "/assets/isyou/aimasuku.png",
+          price: 1200,
+          slot: "hat",
+          fitToBunny: true,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+          z: 2,
+          keepUpright: false,
+        },
+        ahiru: {
+          label: "ぷかアヒル",
+          img: "/assets/isyou/ahiru.png",
+          price: 600,
+          slot: "hat",
+          fitToBunny: true,
+          offsetX: 0,
+          offsetY: 0,
+          scale: 1,
+          z: 2,
+          keepUpright: false,
+        },
       };
 
       /* =========================
@@ -197,6 +264,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 }
 .isyouBtn.primary{ background:#ffe6f2; }
 .isyouBtn.danger{ background:#ffecec; }
+.isyouBtn.ok{ background:#e9fff0; }
 .isyouSmall{ font-size:12px; opacity:.85; }
         `;
         document.head.appendChild(s);
@@ -256,7 +324,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       /* =========================
-       * Modal
+       * Modal state
        * ========================= */
       let backdrop = null;
       let tab = "shop";
@@ -264,6 +332,9 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
       const selectedItems = new Set(); // hatは1つだけ選ぶ
       let selectedBornAt = null;
+
+      // ✅ 外すは「準備→確定」の2段階
+      let removePending = false;
 
       function getBunnyList() {
         return Array.isArray(WB.bunnies) ? WB.bunnies : (typeof WB.getBunnies === "function" ? WB.getBunnies() : []);
@@ -285,6 +356,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
       function closeModal() {
         equipMode = false;
+        removePending = false;
         document.body.classList.remove("isyouEquipMode");
         selectedItems.clear();
         setSelectedTarget(null);
@@ -402,28 +474,60 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
             toggle.addEventListener("click", () => {
               equipMode = !equipMode;
               document.body.classList.toggle("isyouEquipMode", equipMode);
-              if (!equipMode) setSelectedTarget(null);
+              if (!equipMode) {
+                removePending = false;
+                setSelectedTarget(null);
+              }
               render();
             });
 
-            // ✅ 外すボタン（選択中のうさぎのhatを外す）
+            // ✅ 外す（準備）
             const offBtn = document.createElement("button");
             offBtn.className = "isyouBtn danger";
-            offBtn.textContent = "外す（帽子）";
-            offBtn.disabled = !getSelectedBunny();
+            offBtn.textContent = removePending ? "外す準備中…" : "外す（帽子）";
             offBtn.addEventListener("click", () => {
+              // 装着モードONにして、赤枠で対象選ぶ
+              if (!equipMode) {
+                equipMode = true;
+                document.body.classList.add("isyouEquipMode");
+              }
+              removePending = true;
+              render();
+            });
+
+            // ✅ 外す確定（対象が赤枠になってから押す）
+            const confirmOff = document.createElement("button");
+            confirmOff.className = "isyouBtn ok";
+            confirmOff.textContent = "外す確定";
+            confirmOff.disabled = !(removePending && getSelectedBunny());
+            confirmOff.addEventListener("click", () => {
               const b = getSelectedBunny();
               if (!b) return;
-              clearEquipBySlot(b, "hat");
+              if (!removePending) return;
+              clearEquipBySlot(b, "hat"); // ✅ 成功時SEは中で鳴る
+              removePending = false;
+              render();
+            });
+
+            const cancelOff = document.createElement("button");
+            cancelOff.className = "isyouBtn";
+            cancelOff.textContent = "キャンセル";
+            cancelOff.disabled = !removePending;
+            cancelOff.addEventListener("click", () => {
+              removePending = false;
               render();
             });
 
             const hint = document.createElement("div");
             hint.className = "isyouSmall";
-            hint.textContent = "①アイテム選択（hatは1つだけ） ②うさぎをクリックで赤枠 ③同じうさぎを再クリックで着せ替え / 外す";
+            hint.textContent = removePending
+              ? "外す準備中：うさぎをクリックして赤枠 →「外す確定」で決定"
+              : "①アイテム選択（hatは1つだけ） ②うさぎをクリックで赤枠 ③同じうさぎを再クリックで着せ替え";
 
             rowTop.appendChild(toggle);
             rowTop.appendChild(offBtn);
+            rowTop.appendChild(confirmOff);
+            rowTop.appendChild(cancelOff);
             rowTop.appendChild(hint);
             body.appendChild(rowTop);
 
@@ -470,6 +574,9 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
 
               pick.addEventListener("click", () => {
                 if (count <= 0) return;
+
+                // 外す準備中に選択変更したら、外す準備は解除（誤操作防止）
+                if (removePending) removePending = false;
 
                 const slot = String(it.slot || "");
                 if (slot === "hat") {
@@ -688,6 +795,9 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         // ✅ 装着/付け替えが“変化”した時だけSE
         if (prev !== itemKey) playEquipSE();
 
+        // ✅ 外す準備は解除（装着したから）
+        removePending = false;
+
         if (itemKey === "partyhat") {
           bunny.wrap.classList.add("isyouPopHat");
           setTimeout(() => bunny.wrap?.classList?.remove("isyouPopHat"), 260);
@@ -722,26 +832,26 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       }
 
       /* =========================
-       * ✅ 装着中は「コイン落とし系クリック」を止める（最優先capture）
-       * - pointerdown/click の両方を止める（環境差対策）
+       * ✅ 装着モード中は「うさぎクリック＝コイン」を止める
+       * 重要：stopImmediatePropagation は使わない（装着処理まで止まるから）
        * ========================= */
-      function stopIfEquipOn(e) {
+      function stopCoinClickOnly(e) {
         if (!equipMode) return;
         if (e.target?.closest?.(".isyouModal")) return;
 
         const wrap = e.target?.closest?.(".bunnyWrap");
         if (!wrap) return;
 
+        // app.js 側へイベントを届けない
         try { e.preventDefault?.(); } catch {}
         try { e.stopPropagation?.(); } catch {}
-        try { e.stopImmediatePropagation?.(); } catch {}
+        // ❌ stopImmediatePropagation はしない（これが切替不能の原因）
       }
-
-      document.addEventListener("pointerdown", stopIfEquipOn, { capture: true });
-      document.addEventListener("click",      stopIfEquipOn, { capture: true });
+      document.addEventListener("pointerdown", stopCoinClickOnly, { capture: true });
+      document.addEventListener("click",      stopCoinClickOnly, { capture: true });
 
       /* =========================
-       * Equip mode click
+       * Equip mode click（赤枠選択＆着せ替え）
        * ========================= */
       document.addEventListener("pointerdown", (e) => {
         if (!equipMode) return;
@@ -753,11 +863,13 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
         const bunny = (getBunnyList() || []).find((b) => b && b.wrap === wrap) || null;
         if (!bunny || bunny.isBaby) return;
 
+        // まず対象選択（赤枠）
         if (selectedBornAt == null) {
           setSelectedTarget(bunny);
           return;
         }
 
+        // 同じうさぎをクリックしたら「装着」
         if (bunny.bornAt === selectedBornAt) {
           let pickedHat = null;
           for (const k of selectedItems) {
@@ -765,20 +877,33 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
             if (it && String(it.slot || "") === "hat") { pickedHat = k; break; }
           }
 
-          if (pickedHat) setEquipExclusiveBySlot(bunny, pickedHat);
-          else clearEquipBySlot(bunny, "hat"); // ✅ 何も選択されてないなら外す
+          if (pickedHat) {
+            setEquipExclusiveBySlot(bunny, pickedHat);
+          } else {
+            // ✅ 何も選んでない時は勝手に外さない
+            // 外したいなら「外す→外す確定」を使う
+            // ただし、外す準備だけはONにしておくと便利
+            removePending = true;
+          }
+
+          // モーダル開いてる想定なので、再描画だけ
+          // （backdropが無い場合でも安全）
+          try {
+            const modalBody = document.querySelector(".isyouModal");
+            // noop
+          } catch {}
           return;
         }
 
+        // 別のうさぎに切替
         setSelectedTarget(bunny);
       }, { capture: true });
 
       /* =========================
        * Hooks + flip watcher
        * ========================= */
-      // ✅ on が無い環境でも落ちない
-      WB.on?.("bunnyCountChanged", redrawAll);
-      WB.on?.("resize", redrawAll);
+      on?.("bunnyCountChanged", redrawAll);
+      on?.("resize", redrawAll);
 
       let rafId = null;
       function startFlipWatcher() {
@@ -795,7 +920,7 @@ body.isyouEquipMode .isyouModal{ pointer-events:auto; }
       startFlipWatcher();
 
       redrawAll();
-      console.log("[isyou] ready (WB relaxed + equip blocks coin + se + remove button)");
+      console.log("[isyou] ready (equip works + remove confirm)");
     })
     .catch((err) => {
       console.warn("[isyou] init failed:", err?.message || err);
