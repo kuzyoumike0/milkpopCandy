@@ -1,14 +1,12 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V29.4）
-// ✅ V29.3で hat が出ない根本原因（bunnyごとのwrapが無い）を解決：
-// - うさぎDOM構造に依存しない「オーバーレイ描画」方式に変更
-// - 帽子は #isyouOverlay に absolute 配置（imgのrect追従）
-// - bornAt は WBの bunnies から img→bornAt をマップ化して確実に取得
-// - サブパス配信対応：baseURIで絶対URL化
-// - flip対応：imgのtransform行列から左右反転判定 → 帽子にも適用
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V29.5）
+// ✅ V29.5 FIX
+// - 選択赤枠が出ない → outline + box-shadow を !important で強制（transform環境でも視認）
+// - 装着モード中にクリックでコインが出る → pointerdown/pointerup/click を capture でブロック（#bunnyLayer内のみ）
+// - 帽子は overlay描画（DOM構造に依存しない）+ bornAtはWB(img→bornAt)マップ
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V29.4", Date.now());
+  console.log("[isyou.js] LOADED V29.5", Date.now());
 
   /* =========================
    * Wait
@@ -51,7 +49,6 @@
         (typeof S?.add === "function" && S.add) ||
         (typeof S?.inc === "function" && S.inc) ||
         (typeof S?.plus === "function" && S.plus);
-
       if (!fn) return false;
 
       fn.call(S, key, n);
@@ -186,10 +183,10 @@
     owned: {},
     equipped: {},
 
-    mode: "browse",
+    mode: "browse",          // "browse" | "equip"
     selectedItem: null,
-    pendingAction: "equip",
-    removeSlot: null,
+    pendingAction: "equip",  // "equip" | "remove"
+    removeSlot: null,        // "hat"
 
     selectedImg: null,
     selectedBornAt: null,
@@ -259,14 +256,11 @@
   }
 
   /* =========================
-   * img → bornAt map（V29.4の要）
+   * img → bornAt map（要）
    * ========================= */
   const imgToBornAt = new WeakMap();
 
   function rebuildImgBornAtMap() {
-    try {
-      imgToBornAt.clear?.(); // WeakMapにはclear無いのでtryだけ
-    } catch {}
     const list = getBunnies();
     for (const b of list) {
       const img = b?.img || b?.bunnyImg || b?.node;
@@ -281,8 +275,6 @@
     if (!img) return null;
     const v = imgToBornAt.get(img);
     if (v) return v;
-
-    // 保険：datasetなど
     const ds = img.dataset || {};
     return ds.bornAt || ds.bornat || ds.born_at || null;
   }
@@ -291,10 +283,10 @@
    * Styles（overlay + 選択枠）
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV294")) return;
+    if (document.getElementById("isyouStyleV295")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV294";
+    s.id = "isyouStyleV295";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -424,11 +416,14 @@
   display:block;
 }
 
-/* ✅ 選択枠（imgにクラス付与） */
+/* ✅ 選択枠：transform環境でも“必ず見える”強制版 */
 img.isyouSelectedImg{
-  outline: 4px solid rgba(255, 64, 64, .88);
-  outline-offset: 3px;
-  border-radius: 18px;
+  outline: 4px solid rgba(255, 64, 64, .95) !important;
+  outline-offset: 3px !important;
+  border-radius: 18px !important;
+  box-shadow:
+    0 0 0 3px rgba(255,255,255,.95),
+    0 14px 34px rgba(0,0,0,.22) !important;
 }
 `;
     document.head.appendChild(s);
@@ -482,7 +477,6 @@ img.isyouSelectedImg{
       document.getElementById("field") ||
       document.body;
 
-    // hostがposition:staticならrelativeに
     try {
       const pos = getComputedStyle(host).position;
       if (pos === "static") host.style.position = "relative";
@@ -494,13 +488,11 @@ img.isyouSelectedImg{
       overlay.id = "isyouOverlay";
       host.appendChild(overlay);
     } else {
-      // 常に最前に
       try { host.appendChild(overlay); } catch {}
     }
     return overlay;
   }
 
-  // ✅ 反転判定（transformのa<0）
   function isMirrored(el) {
     if (!el) return false;
     try {
@@ -513,7 +505,14 @@ img.isyouSelectedImg{
     }
   }
 
-  // ✅ overlay基準座標に変換して帽子配置
+  function removeHatOnOverlay(img) {
+    const bornAt = getBornAtFromImg(img);
+    if (!bornAt) return;
+    const ov = ensureOverlay();
+    ov.querySelectorAll(`.isyouHat[data-bornat="${CSS.escape(String(bornAt))}"][data-slot="hat"]`)
+      .forEach(n => { try { n.remove(); } catch {} });
+  }
+
   function placeHatOnOverlay(img, itemKey) {
     const bornAt = getBornAtFromImg(img);
     if (!bornAt) return;
@@ -545,36 +544,23 @@ img.isyouSelectedImg{
       const ir = img.getBoundingClientRect();
       if (ir.width <= 0 || ir.height <= 0) return;
 
-      // 画像の枠にぴったり（あなたのpartyhatが“頭位置に合ってるセル”なのでまずは完全一致）
       hat.style.left = `${ir.left - ovRect.left}px`;
       hat.style.top  = `${ir.top  - ovRect.top }px`;
       hat.style.width  = `${ir.width }px`;
       hat.style.height = `${ir.height}px`;
 
-      // 反転追従：imgだけ反転してるなら帽子も反転
-      const needMirror = isMirrored(img);
-      hat.style.transform = needMirror ? "scaleX(-1)" : "none";
+      hat.style.transform = isMirrored(img) ? "scaleX(-1)" : "none";
     };
 
-    // 初回＋追従
     sync();
     requestAnimationFrame(sync);
     setTimeout(sync, 60);
     setTimeout(sync, 180);
 
     setSrcWithFallback(hatImg, it.imgs, () => {
-      // 読み込み後も再同期
       requestAnimationFrame(sync);
       setTimeout(sync, 80);
     });
-  }
-
-  function removeHatOnOverlay(img) {
-    const bornAt = getBornAtFromImg(img);
-    if (!bornAt) return;
-    const ov = ensureOverlay();
-    ov.querySelectorAll(`.isyouHat[data-bornat="${CSS.escape(String(bornAt))}"][data-slot="hat"]`)
-      .forEach(n => { try { n.remove(); } catch {} });
   }
 
   /* =========================
@@ -590,7 +576,7 @@ img.isyouSelectedImg{
       if (img && img.tagName === "IMG") out.push(img);
     }
 
-    // fallback：#bunnyLayer内のimg（うさぎ画像だけに近い）
+    // fallback：#bunnyLayer内
     const layer = document.getElementById("bunnyLayer") || document.body;
     layer.querySelectorAll("img").forEach((img) => {
       if (img && img.tagName === "IMG") out.push(img);
@@ -958,23 +944,50 @@ img.isyouSelectedImg{
     updateConfirmBar();
   }
 
-  function onPointerDownCapture(e) {
-    if (state.mode !== "equip") return;
-    if (e.button != null && e.button !== 0) return;
+  /* =========================
+   * ✅ コインが出ないようにするブロック（V29.5の核）
+   * - 装着モード中、#bunnyLayer内のクリック系イベントを全遮断
+   * - pointerdown だけ止めても click/pointerup で発火する実装があるので全部止める
+   * ========================= */
+  function isInsideBunnyLayer(target) {
+    const layer = document.getElementById("bunnyLayer");
+    if (!layer) return true; // 念のため：無いなら全体で拾う
+    return layer.contains(target);
+  }
 
+  function blockGameClickIfEquipMode(e) {
+    if (state.mode !== "equip") return;
+    if (!e?.target) return;
+    if (!isInsideBunnyLayer(e.target)) return;
+
+    // モーダル内は除外（ボタン押せる）
     if (backdrop && backdrop.style.display !== "none") {
       const inModal = e.target?.closest?.("#isyouModal");
       if (inModal) return;
     }
 
-    const img = e.target?.closest?.("#bunnyLayer img") || e.target?.closest?.("img");
-    if (!img) return;
-
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
+  }
 
+  function onPointerDownCapture(e) {
+    if (state.mode !== "equip") return;
+
+    // まずゲーム側を確実に止める
+    blockGameClickIfEquipMode(e);
+
+    const img = e.target?.closest?.("#bunnyLayer img") || e.target?.closest?.("img");
+    if (!img) return;
     selectImg(img);
+  }
+
+  function onPointerUpCapture(e) {
+    blockGameClickIfEquipMode(e);
+  }
+
+  function onClickCapture(e) {
+    blockGameClickIfEquipMode(e);
   }
 
   /* =========================
@@ -1013,17 +1026,18 @@ img.isyouSelectedImg{
     ensureModal();
     ensureConfirmBar();
 
+    // ✅ 3種類をcaptureで全部止める（コイン発火潰し）
     document.addEventListener("pointerdown", onPointerDownCapture, true);
+    document.addEventListener("pointerup", onPointerUpCapture, true);
+    document.addEventListener("click", onClickCapture, true);
 
     preloadEquipSe();
 
-    // 初回＆遅延（画像確定待ち）
     setTimeout(applyEquipsAll, 120);
     setTimeout(applyEquipsAll, 420);
     setTimeout(applyEquipsAll, 900);
     setTimeout(applyEquipsAll, 1600);
 
-    // レイアウト変化で追従（スクロール/リサイズ/うさぎ増減）
     window.addEventListener("resize", () => setTimeout(applyEquipsAll, 0), { passive: true });
     window.addEventListener("scroll", () => setTimeout(applyEquipsAll, 0), { passive: true });
 
@@ -1033,7 +1047,6 @@ img.isyouSelectedImg{
       WB?.on?.("resize", () => setTimeout(applyEquipsAll, 50));
     } catch {}
 
-    // DOM増減でも拾う
     try {
       const layer = document.getElementById("bunnyLayer");
       if (layer) {
