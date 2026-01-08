@@ -90,13 +90,12 @@
   // 帽子位置（うさぎ画像に対する割合）
   // 「うさぎ画像と完全一致」＝基準矩形(うさぎimg)と座標が一致するように計算（offset系）
   const ANCHOR = {
-    hat: {
-      x: 0.50,   // 横：中央
-      y: 0.06,   // 縦：上寄り
-      w: 0.58,   // 幅：うさぎ画像幅に対する割合
-      lift: 0.40 // 上に持ち上げる量（width * lift）
-    },
-  };
+    const ANCHOR = {
+  hat: {
+    matchBunny: true, // ★追加：うさぎ画像と完全一致（位置/サイズ）
+  },
+};
+
 
   /* =========================
    * State
@@ -699,43 +698,55 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   function fitNodeToBunny(wrap, bunnyImg, node, slot) {
-    if (!wrap || !bunnyImg || !node) return;
+  if (!wrap || !bunnyImg || !node) return;
 
-    // まず offset 系で「wrap内のうさぎimg矩形」を取る（transform/flipに強い）
-    const off = relOffsetTo(bunnyImg, wrap);
-    let left, top, w, h;
+  // offset系で wrap 内の bunnyImg 矩形を取る（transform/flipに強い）
+  const off = relOffsetTo(bunnyImg, wrap);
+  let left, top, w, h;
 
-    if (off) {
-      left = off.x;
-      top  = off.y;
-      w = bunnyImg.offsetWidth || bunnyImg.clientWidth || 0;
-      h = bunnyImg.offsetHeight || bunnyImg.clientHeight || 0;
-    } else {
-      // どうしても辿れない場合だけ rect fallback
-      const br = bunnyImg.getBoundingClientRect();
-      const wr = wrap.getBoundingClientRect();
-      left = br.left - wr.left;
-      top  = br.top  - wr.top;
-      w = br.width;
-      h = br.height;
-    }
-
-    if (!(w > 0 && h > 0)) return;
-
-    const a = ANCHOR[slot] || ANCHOR.hat;
-
-    // ★「うさぎ画像と完全一致」の基準( left/top/w/h )を使って配置
-    const pw = w * (a.w ?? 0.58);
-    const px = left + w * (a.x ?? 0.5) - pw / 2;
-
-    const lift = (a.lift ?? 0.40);
-    const py = top + h * (a.y ?? 0.06) - pw * lift;
-
-    node.style.left = `${px}px`;
-    node.style.top = `${py}px`;
-    node.style.width = `${pw}px`;
-    node.style.height = `${pw}px`;
+  if (off) {
+    left = off.x;
+    top  = off.y;
+    w = bunnyImg.offsetWidth || bunnyImg.clientWidth || 0;
+    h = bunnyImg.offsetHeight || bunnyImg.clientHeight || 0;
+  } else {
+    const br = bunnyImg.getBoundingClientRect();
+    const wr = wrap.getBoundingClientRect();
+    left = br.left - wr.left;
+    top  = br.top  - wr.top;
+    w = br.width;
+    h = br.height;
   }
+
+  if (!(w > 0 && h > 0)) return;
+
+  const a = ANCHOR[slot] || {};
+
+  // ★完全一致モード：うさぎ画像の矩形 = アクセ矩形
+  if (a.matchBunny) {
+    node.style.left = `${left}px`;
+    node.style.top = `${top}px`;
+    node.style.width = `${w}px`;
+    node.style.height = `${h}px`;
+    return;
+  }
+
+  // （ここから下は“頭に置く”アンカーモード用：残しておくならこのまま）
+  const x = (a.x ?? 0.5);
+  const y = (a.y ?? 0.06);
+  const ww = (a.w ?? 0.58);
+  const lift = (a.lift ?? 0.40);
+
+  const pw = w * ww;
+  const px = left + w * x - pw / 2;
+  const py = top + h * y - pw * lift;
+
+  node.style.left = `${px}px`;
+  node.style.top = `${py}px`;
+  node.style.width = `${pw}px`;
+  node.style.height = `${pw}px`;
+}
+
 
   // 追従用：wrapごとに監視（画像サイズ変化・src差し替え・DOM変化）
   const wrapWatch = new WeakMap(); // wrap -> { ro, mo }
