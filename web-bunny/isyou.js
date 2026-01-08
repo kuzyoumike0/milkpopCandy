@@ -1,13 +1,17 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V30.3）
-// ✅ V30.3 修正点：partyhat/crown/ribbon/ahiru/aimasuku を「実寸（naturalWidth/Height）」で表示
-// - fit を ratio(割合) / natural(実寸) の両対応に
-// - node(スロットDIV) の transform は位置調整(translate)に使うので、反転は img 側に適用（衝突防止）
-// - 画像ロード完了時に natural が確定するので、onload で fit を再適用
-// - 12fps同期・アクセがある時だけ維持
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V30.1）
+// ✅ 修正点（重要）
+// 1) aimasuku 等のアクセが「前面のうさぎを貫通して最前に出る」問題を根絶
+//    → “グローバル最前面overlayにhatを描く”方式をやめ、各うさぎのwrap内にアクセを描画（同じスタッキングで重なり自然）
+// 2) ブラウザが重くなる原因を削減
+//    → applyEquipsAllで毎回全生成しない / rAF常時ループしない
+//    → 「アクセが存在する時だけ」軽い同期ループ（約12fps）を回し、rect計算を最小化
+// 3) 赤枠は引き続き確実に表示（グローバル選択枠DIV）
+//
+// ★そのまま isyou.js をこれに差し替え★
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V30.3", Date.now());
+  console.log("[isyou.js] LOADED V30.1", Date.now());
 
   /* =========================
    * Wait
@@ -156,8 +160,8 @@
    * Config / Items
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v10",
-    equipped: "wb_isyou_equipped_v10",
+    owned: "wb_isyou_owned_v9",
+    equipped: "wb_isyou_equipped_v9",
   };
 
   function imgCandidates(name) {
@@ -169,32 +173,13 @@
     ].map(absUrl);
   }
 
-  // ✅ FIT（V30.3）
-  // - mode:"natural" -> 画像ファイルの実寸（naturalWidth/Height）で表示（scaleで微調整）
-  // - anchor: "top-center" / "center" / "top-left" / "top-right"
-  // - x/y は px オフセット（微調整）
-  const FIT = {
-    headHat:   { mode: "natural", anchor: "top-center", x: 0, y: -8, scale: 1 },
-    headHat2:  { mode: "natural", anchor: "top-center", x: 0, y: -6, scale: 1 },
-    headSmall: { mode: "natural", anchor: "top-center", x: 0, y: -2, scale: 1 },
-    eyeMask:   { mode: "natural", anchor: "center",     x: 0, y:  8, scale: 1 },
-
-    // ※ ratio を使いたい場合の例（保険）
-    // headRatio: { mode:"ratio", w:0.55, h:0.45, x:0.225, y:-0.10 },
-  };
-
   const ITEMS = {
-    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: FIT.headHat2 },
-    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900, fit: FIT.headHat },
-    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700, fit: FIT.headHat2 },
-    ahiru:    { slot: "hat", label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450, fit: FIT.headSmall },
-    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650, fit: FIT.eyeMask },
+    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500 },
+    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
+    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
+    ahiru:    { slot: "hat", label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450 },
+    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
   };
-
-  function getItemFit(itemKey) {
-    const it = ITEMS[itemKey];
-    return it?.fit || { mode: "ratio", w: 1, h: 1, x: 0, y: 0 };
-  }
 
   /* =========================
    * State
@@ -321,10 +306,10 @@
    * Styles（アクセは各wrap内 / 赤枠はglobal box）
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV303")) return;
+    if (document.getElementById("isyouStyleV301")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV303";
+    s.id = "isyouStyleV301";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -431,7 +416,7 @@
 #isyouConfirmBar button.primary{ background:#ffd6e7; }
 #isyouConfirmBar button.danger{ background: rgba(255,80,80,.12); }
 
-/* ✅ 選択枠 */
+/* ✅ 選択枠（確実に見えるglobal box） */
 #isyouSelectBox{
   position:fixed;
   left:-9999px; top:-9999px;
@@ -446,19 +431,18 @@
     0 14px 34px rgba(0,0,0,.22);
 }
 
-/* ✅ 各うさぎwrap内アクセ */
+/* ✅ 各うさぎwrap内アクセ：同じスタッキングに乗せる（重なり自然） */
 .isyouAcc{
   position:absolute !important;
   left:0; top:0;
   width:0; height:0;
   pointer-events:none !important;
   overflow: visible !important;
-  z-index: 5 !important;
+  z-index: 5 !important; /* うさぎ画像の上（同じwrap内） */
 }
 .isyouAcc .slot{
   position:absolute;
-  left:0; top:0;
-  width:10px; height:10px;
+  inset:0;
   transform-origin: 50% 50%;
 }
 .isyouAcc img{
@@ -511,7 +495,7 @@
   }
 
   /* =========================
-   * Red selection box
+   * Red selection box (global)
    * ========================= */
   let selectBox = null;
 
@@ -543,7 +527,7 @@
   }
 
   /* =========================
-   * Accessory per wrap
+   * Accessory container per wrap
    * ========================= */
   function ensureSafePositioning(el) {
     try {
@@ -560,6 +544,8 @@
   function ensureAccContainer(wrap) {
     if (!wrap) return null;
     ensureSafePositioning(wrap);
+
+    // クリップされて消えるケースを潰す
     try { wrap.style.overflow = "visible"; } catch {}
 
     let box = wrap.querySelector(":scope > .isyouAcc");
@@ -568,6 +554,7 @@
       box.className = "isyouAcc";
       wrap.appendChild(box);
     } else {
+      // DOM順で画像より後に置き直し（上に出す）
       try { wrap.appendChild(box); } catch {}
     }
     return box;
@@ -592,6 +579,7 @@
     }
   }
 
+  // rect差分で “wrap内座標” に同期（flip/transformしても安定）
   function syncAccToImgRect(wrap, img, box) {
     if (!wrap || !img || !box) return false;
     try {
@@ -611,63 +599,8 @@
     }
   }
 
-  // ✅ V30.3: fit（ratio / natural）
-  function applyFitToNode(node, fit, accImg) {
-    const mode = String(fit?.mode || "ratio");
-
-    // ===== 実寸（画像ファイルの naturalWidth / naturalHeight） =====
-    if (mode === "natural") {
-      const scale = Number(fit?.scale ?? 1) || 1;
-      const nw = (accImg?.naturalWidth  || 0);
-      const nh = (accImg?.naturalHeight || 0);
-
-      // natural がまだ取れない場合の保険（onloadで再適用される）
-      const wpx = Math.max(1, Math.round((nw || 64) * scale));
-      const hpx = Math.max(1, Math.round((nh || 64) * scale));
-
-      node.style.width  = `${wpx}px`;
-      node.style.height = `${hpx}px`;
-
-      const anchor = String(fit?.anchor || "top-center");
-      const x = Number(fit?.x ?? 0) || 0;
-      const y = Number(fit?.y ?? 0) || 0;
-
-      if (anchor === "center") {
-        node.style.left = "50%";
-        node.style.top  = "50%";
-        node.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
-      } else if (anchor === "top-left") {
-        node.style.left = "0%";
-        node.style.top  = "0%";
-        node.style.transform = `translate(${x}px, ${y}px)`;
-      } else if (anchor === "top-right") {
-        node.style.left = "100%";
-        node.style.top  = "0%";
-        node.style.transform = `translate(-100%, 0%) translate(${x}px, ${y}px)`;
-      } else {
-        // top-center
-        node.style.left = "50%";
-        node.style.top  = "0%";
-        node.style.transform = `translate(-50%, 0%) translate(${x}px, ${y}px)`;
-      }
-      return;
-    }
-
-    // ===== 従来の割合表示 =====
-    const w = Math.max(0.01, Number(fit?.w ?? 1));
-    const h = Math.max(0.01, Number(fit?.h ?? 1));
-    const x = Number(fit?.x ?? 0);
-    const y = Number(fit?.y ?? 0);
-
-    node.style.width  = `${w * 100}%`;
-    node.style.height = `${h * 100}%`;
-    node.style.left   = `${x * 100}%`;
-    node.style.top    = `${y * 100}%`;
-    node.style.transform = "";
-  }
-
-  // アクセ要素の再利用（軽量）
-  const liveAcc = new Map(); // key -> { img, wrap, box, slotNodes: Map(slot->node), itemBySlot: Map(slot->itemKey) }
+  // アクセ要素の再利用（重くならない）
+  const liveAcc = new Map(); // key -> { img, wrap, box, slotNodes: Map(slot->node) }
 
   function upsertAcc(img, slot, itemKey) {
     const key = getKeyFromImg(img);
@@ -679,9 +612,10 @@
     const box = ensureAccContainer(wrap);
     if (!box) return;
 
+    // entry
     let ent = liveAcc.get(String(key));
     if (!ent) {
-      ent = { img, wrap, box, slotNodes: new Map(), itemBySlot: new Map() };
+      ent = { img, wrap, box, slotNodes: new Map() };
       liveAcc.set(String(key), ent);
     } else {
       ent.img = img;
@@ -689,6 +623,7 @@
       ent.box = box;
     }
 
+    // slot node
     let node = ent.slotNodes.get(slot);
     if (!node || !node.isConnected) {
       node = document.createElement("div");
@@ -700,8 +635,7 @@
       try { ent.box.appendChild(node); } catch {}
     }
 
-    ent.itemBySlot.set(slot, itemKey);
-
+    // img tag
     let accImg = node.querySelector("img");
     if (!accImg) {
       accImg = document.createElement("img");
@@ -709,22 +643,16 @@
       node.appendChild(accImg);
     }
 
+    // fill
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ サイズ/位置（実寸モード対応）
-    applyFitToNode(node, getItemFit(itemKey), accImg);
-
-    // ✅ 反転追従は img 側に（node transform と衝突させない）
+    // 反転追従（wrap単位の重なりなので自然）
     const wrapMir = isMirrored(wrap);
     const imgMir  = isMirrored(img);
-    accImg.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
+    node.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
 
-    setSrcWithFallback(accImg, it.imgs, () => {
-      // naturalWidth/Height 確定後に fit を当て直す
-      applyFitToNode(node, getItemFit(itemKey), accImg);
-      scheduleSyncLoop();
-    });
+    setSrcWithFallback(accImg, it.imgs, () => scheduleSyncLoop());
 
     scheduleSyncLoop();
   }
@@ -735,10 +663,10 @@
       const node = ent.slotNodes.get(slot);
       if (node && node.isConnected) { try { node.remove(); } catch {} }
       ent.slotNodes.delete(slot);
-      ent.itemBySlot.delete(slot);
       if (ent.slotNodes.size === 0) liveAcc.delete(String(key));
     }
 
+    // 既存DOMも念のため削除
     const imgs = getAllBunnyImgs();
     for (const img of imgs) {
       const k = getKeyFromImg(img);
@@ -749,7 +677,7 @@
   }
 
   /* =========================
-   * Bunny img detect
+   * うさぎ画像検出
    * ========================= */
   function getAllBunnyImgs() {
     const out = [];
@@ -784,69 +712,73 @@
       }
     }
 
-    if (state.mode === "equip" && state.selectedImg) syncSelectBoxToImg(state.selectedImg);
+    if (state.mode === "equip" && state.selectedImg) {
+      syncSelectBoxToImg(state.selectedImg);
+    }
+
+    // 同期ループは「アクセがある時だけ」
     scheduleSyncLoop();
   }
 
   /* =========================
-   * Lightweight sync loop (12fps)
+   * ✅ 軽量同期ループ（重さ解消）
    * ========================= */
   let __syncRaf = 0;
   let __syncLast = 0;
 
   function scheduleSyncLoop() {
     if (__syncRaf) return;
+    // アクセも選択枠も無ければ回さない
     if (liveAcc.size === 0 && !(state.mode === "equip" && state.selectedImg)) return;
+
     __syncRaf = requestAnimationFrame(syncTick);
   }
 
   function syncTick(ts) {
     __syncRaf = 0;
 
-    if (ts - __syncLast < 80) { // ~12fps
+    // 12fps程度に制限（重いのを止める）
+    if (ts - __syncLast < 80) {
       scheduleSyncLoop();
       return;
     }
     __syncLast = ts;
 
-    if (state.mode === "equip" && state.selectedImg) syncSelectBoxToImg(state.selectedImg);
+    // 選択枠追従
+    if (state.mode === "equip" && state.selectedImg) {
+      syncSelectBoxToImg(state.selectedImg);
+    }
 
+    // アクセ追従（wrap内に座標同期）
     if (liveAcc.size > 0) {
       for (const [key, ent] of liveAcc) {
         const img = ent.img;
         if (!img || !img.isConnected) { liveAcc.delete(key); continue; }
-
         const wrap = getWrapFromBunnyImg(img);
         if (!wrap) { liveAcc.delete(key); continue; }
-
         const box = ensureAccContainer(wrap);
         if (!box) { liveAcc.delete(key); continue; }
 
         ent.wrap = wrap;
         ent.box = box;
 
+        // 位置同期
         syncAccToImgRect(wrap, img, box);
 
+        // 反転同期（slotごと）
         const wrapMir = isMirrored(wrap);
         const imgMir  = isMirrored(img);
-
-        for (const [slot, node] of ent.slotNodes.entries()) {
+        for (const node of ent.slotNodes.values()) {
           if (!node || !node.isConnected) continue;
-
-          const itemKey = ent.itemBySlot.get(slot);
-          const accImg = node.querySelector("img");
-
-          if (itemKey) applyFitToNode(node, getItemFit(itemKey), accImg);
-
-          // ✅ 反転は img 側
-          if (accImg) {
-            accImg.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
-          }
+          node.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
         }
       }
     }
 
-    if (liveAcc.size > 0 || (state.mode === "equip" && state.selectedImg)) scheduleSyncLoop();
+    // まだ必要なら継続
+    if (liveAcc.size > 0 || (state.mode === "equip" && state.selectedImg)) {
+      scheduleSyncLoop();
+    }
   }
 
   /* =========================
@@ -1154,6 +1086,7 @@
 
     saveAll();
 
+    // ここで差分だけ当てる（軽い）
     upsertAcc(img, it.slot, itemKey);
     scheduleSyncLoop();
 
@@ -1181,7 +1114,7 @@
   }
 
   /* =========================
-   * Selection
+   * Selection（クリックでimg選択 → 赤枠追従）
    * ========================= */
   function selectImg(img) {
     if (!img) return;
@@ -1198,7 +1131,7 @@
   }
 
   /* =========================
-   * Block coin clicks while equip mode
+   * ✅ コインが出ないようにする（装着モード中）
    * ========================= */
   function isInsideBunnyLayer(target) {
     const layer = document.getElementById("bunnyLayer");
@@ -1211,6 +1144,7 @@
     if (!e?.target) return;
     if (!isInsideBunnyLayer(e.target)) return;
 
+    // モーダル内は除外
     if (backdrop && backdrop.style.display !== "none") {
       const inModal = e.target?.closest?.("#isyouModal");
       if (inModal) return;
@@ -1273,20 +1207,24 @@
     ensureModal();
     ensureConfirmBar();
 
+    // ✅ captureで遮断（コイン根絶）
     document.addEventListener("pointerdown", onPointerDownCapture, true);
     document.addEventListener("pointerup", onPointerUpCapture, true);
     document.addEventListener("click", onClickCapture, true);
 
     preloadEquipSe();
 
+    // 初回＆遅延
     setTimeout(applyEquipsAll, 120);
     setTimeout(applyEquipsAll, 420);
     setTimeout(applyEquipsAll, 900);
     setTimeout(applyEquipsAll, 1600);
 
+    // resize系（軽い同期）
     window.addEventListener("resize", () => scheduleSyncLoop(), { passive: true });
     window.addEventListener("scroll",  () => scheduleSyncLoop(), { passive: true });
 
+    // DOM追加にも追従（ただし apply はまとめて）
     try {
       const layer = document.getElementById("bunnyLayer");
       if (layer) {
@@ -1311,7 +1249,7 @@
   });
 
   /* =========================
-   * Debug
+   * Debug / public
    * ========================= */
   window.ISYOU = {
     openModal,
