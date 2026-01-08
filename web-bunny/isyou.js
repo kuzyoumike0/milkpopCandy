@@ -1,4 +1,4 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版（HAT表示FIX + うさぎ下がりFIX版）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版（HAT表示FIX + うさぎ下がり完全FIX版）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
@@ -7,8 +7,8 @@
 // ✅ 赤枠は選択中だけz-indexを上げる
 // ✅ FIX：アクセは「最前面」＆「はみ出しOK」（z-index / overflow / stacking対策）
 // ✅ FIX：位置計算は offset を優先（transform/flipでも安定）+ 連続fitで取りこぼし防止
-// ✅ FIX：isyouAcc を先頭に入れず append（flex/grid環境で「うさぎが下に行く」問題を確実に止める）
-// ✅ FIX：.bunnyWrap を display:block に固定（子要素増加でレイアウトが崩れない）
+// ✅ FIX：isyouAcc を append（wrapレイアウトへ影響ゼロ）
+// ✅ FIX：うさぎが下に行く原因（flex/line-height/gap等）を完全遮断：bunnyWrapを inline-block + line-height:0 + 余白ゼロ固定
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
 
@@ -114,11 +114,7 @@
 
   // 帽子位置（うさぎ画像に対する割合）
   const ANCHOR = {
-    hat: {
-      x: 0.50,
-      y: 0.06,
-      w: 0.58,
-    },
+    hat: { x: 0.50, y: 0.06, w: 0.58 },
   };
 
   /* =========================
@@ -173,7 +169,7 @@
     const nv = Math.max(0, Math.floor(v));
     try {
       if (WB) {
-        if ("coins" in WB) WB.coins = nv; // app.js setter対応
+        if ("coins" in WB) WB.coins = nv;
         else if (typeof WB.coins === "number") WB.coins = nv;
         WB.saveCoins?.();
         WB.updateHud?.();
@@ -208,9 +204,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV10")) return;
+    if (document.getElementById("isyouStyleV11")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV10";
+    s.id = "isyouStyleV11";
     s.textContent = `
 /* === modal === */
 #isyouBackdrop{
@@ -328,29 +324,39 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* === accessory layer（帽子が埋もれない＆切れない：ここが最重要） === */
+/* ===== ✅ うさぎ下がり完全FIX：wrapのレイアウト影響を遮断 ===== */
 .bunnyWrap{
-  position: relative !important;
-  overflow: visible !important;     /* はみ出しOK */
-  display: block !important;        /* ✅ 子要素追加で下がらない */
+  position: absolute !important;        /* app.jsの挙動（left/top移動）を壊さない */
+  overflow: visible !important;
+  display: block !important;            /* flex等を潰す */
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 0 !important;            /* inline要素の下余白を消す */
+  font-size: 0 !important;              /* 行高由来の余白も消す */
 }
 
-/* うさぎ本体は下 */
+/* うさぎ本体 */
 .bunnyWrap > img.bunny,
 .bunnyWrap > img{
-  position: relative;
-  z-index: 1;
+  display:block !important;
+  margin:0 !important;
+  padding:0 !important;
+  position: relative !important;
+  z-index: 1 !important;
 }
 
-/* 帽子は上 */
+/* アクセコンテナ（wrapレイアウトに関与しない） */
 .bunnyWrap .isyouAcc{
-  position:absolute;
-  left:0; top:0;
-  pointer-events:none;
-  z-index: 9999 !important;         /* 必ず最前面 */
+  position:absolute !important;
+  left:0 !important; top:0 !important;
+  width:0; height:0;                    /* node側でwidth/heightを持つのでここは0でOK */
+  pointer-events:none !important;
+  z-index: 9999 !important;
   overflow: visible !important;
-  will-change: transform;
   transform: translateZ(0);
+}
+.bunnyWrap .isyouAcc > div{
+  position:absolute;
 }
 .bunnyWrap .isyouAcc img{
   display:block;
@@ -696,10 +702,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     box = document.createElement("div");
     box.className = "isyouAcc";
-
-    // ✅ FIX：appendにする（flex/gridで「うさぎが下に行く」原因を潰す）
     wrap.appendChild(box);
-
     return box;
   }
 
@@ -726,7 +729,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const node = document.createElement("div");
     node.dataset.slot = slot;
-    node.style.position = "absolute";
 
     const img = document.createElement("img");
     img.src = imgSrc;
@@ -739,13 +741,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const a = ANCHOR[slot] || ANCHOR.hat;
 
     const fit = () => {
-      // ✅ offset系（transform影響を受けにくい）
       let w = bunnyImg.offsetWidth || 0;
       let h = bunnyImg.offsetHeight || 0;
       let left = bunnyImg.offsetLeft || 0;
       let top  = bunnyImg.offsetTop  || 0;
 
-      // fallback
       if (w <= 0 || h <= 0) {
         const br = bunnyImg.getBoundingClientRect();
         const wr = wrap.getBoundingClientRect();
