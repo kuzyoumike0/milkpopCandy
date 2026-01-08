@@ -1,6 +1,7 @@
 // isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（FIX: 反転でも位置ズレない）
 // ✅ partyhat は「うさぎ同サイズ同位置」
-// ✅ FIX: wrap が scaleX(-1) で反転していても、座標を左右反転補正してズレを消す
+// ✅ FIX: wrap が scaleX(-1) でも、アクセ側で座標系を“元に戻す”方式（逆flip）でズレを消す
+// ✅ FIX: bunnyWrap のレイアウトを壊す display:block 強制などを撤去（うさぎ自体がズレる原因）
 
 (() => {
   "use strict";
@@ -267,9 +268,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV15")) return;
+    if (document.getElementById("isyouStyleV16")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV15";
+    s.id = "isyouStyleV16";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -384,31 +385,22 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ✅ うさぎ下がり遮断 */
+/* ✅ うさぎ“下がり/ズレ”の原因になる display:block 強制などを撤去
+   - ここでは overflow だけ許可（アクセがはみ出してもOK）
+*/
 .bunnyWrap{
   overflow: visible !important;
-  display: block !important;
-  padding: 0 !important;
-  margin: 0 !important;
-  line-height: 0 !important;
-  font-size: 0 !important;
-}
-.bunnyWrap > img.bunny,
-.bunnyWrap > img{
-  display:block !important;
-  margin:0 !important;
-  padding:0 !important;
-  position: relative !important;
-  z-index: 1 !important;
 }
 
-/* アクセ最前面 */
+/* アクセ最前面（座標系はここで作る） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important;
+  width:100% !important; height:100% !important;
   pointer-events:none !important;
   z-index: 9999 !important;
   overflow: visible !important;
+  transform-origin: 0 0 !important;
   transform: translateZ(0);
 }
 .bunnyWrap .isyouAcc > div{ position:absolute; }
@@ -418,6 +410,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   height:100%;
   object-fit: contain;
   pointer-events:none;
+  transform-origin: 50% 50%;
 }
 `;
     document.head.appendChild(s);
@@ -748,21 +741,51 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（FIX: flip補正）
+   * Accessory render（FIX: flip完全対策）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
     return wrap.querySelector(":scope > img.bunny, :scope > img") || wrap.querySelector("img.bunny, img") || null;
   }
 
+  // ✅ wrap が scaleX(-1) なら true
+  function isFlipX(el) {
+    try {
+      if (!el) return false;
+      if (el.classList?.contains("flip")) return true;
+      const tr = getComputedStyle(el).transform;
+      if (!tr || tr === "none") return false;
+
+      const m = tr.match(/matrix\(([^)]+)\)/);
+      if (m) {
+        const a = parseFloat(m[1].split(",")[0]);
+        return a < 0;
+      }
+      const m3 = tr.match(/matrix3d\(([^)]+)\)/);
+      if (m3) {
+        const a = parseFloat(m3[1].split(",")[0]);
+        return a < 0;
+      }
+    } catch {}
+    return false;
+  }
+
   function ensureAccContainer(wrap) {
     if (!wrap) return null;
     let box = wrap.querySelector(":scope > .isyouAcc");
-    if (box) return box;
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "isyouAcc";
+      wrap.appendChild(box);
+    }
 
-    box = document.createElement("div");
-    box.className = "isyouAcc";
-    wrap.appendChild(box);
+    // ✅ ここが本命：
+    //   親wrapが反転していたら、アクセコンテナだけ逆flipして「座標系を通常に戻す」
+    //   ただし画像は後で scaleX(-1) して“見た目はうさぎと同じ反転”にする
+    const flip = isFlipX(wrap);
+    box.style.transform = flip ? "scaleX(-1)" : "none";
+    box.style.transformOrigin = "0 0";
+
     return box;
   }
 
@@ -773,29 +796,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => {
       try { n.remove(); } catch {}
     });
-  }
-
-  // ✅ wrap が scaleX(-1) なら true
-  function isFlipX(el) {
-    try {
-      if (!el) return false;
-      if (el.classList?.contains("flip")) return true; // ありがちなクラス
-      const tr = getComputedStyle(el).transform;
-      if (!tr || tr === "none") return false;
-
-      // matrix(a,b,c,d,tx,ty) の a が負なら左右反転
-      const m = tr.match(/matrix\(([^)]+)\)/);
-      if (m) {
-        const a = parseFloat(m[1].split(",")[0]);
-        return a < 0;
-      }
-      const m3 = tr.match(/matrix3d\(([^)]+)\)/);
-      if (m3) {
-        const a = parseFloat(m3[1].split(",")[0]); // m11
-        return a < 0;
-      }
-    } catch {}
-    return false;
   }
 
   function placeAcc(wrap, slot, itemKey) {
@@ -822,6 +822,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
+    const wrapFlip = isFlipX(wrap);
+
     function rectInWrap() {
       let w = bunnyImg.offsetWidth || 0;
       let h = bunnyImg.offsetHeight || 0;
@@ -836,49 +838,29 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
         left = (br.left - wr.left);
         top  = (br.top  - wr.top);
       }
-
-      // wrapの“見た目幅”を使う（flip補正の基準）
-      let wrapW = wrap.clientWidth || wrap.offsetWidth || 0;
-      if (!wrapW) {
-        const wr = wrap.getBoundingClientRect();
-        wrapW = wr.width;
-      }
-
-      return { w, h, left, top, wrapW };
+      return { w, h, left, top };
     }
 
-    // ✅ partyhat: うさぎ画像と完全一致（同サイズ・同位置） + flip補正
+    // ✅ partyhat: うさぎ画像と完全一致（同サイズ・同位置）
     function fitFull() {
       const r = rectInWrap();
       if (r.w <= 1 || r.h <= 1) return;
 
-      let x = r.left;
-      const y = r.top;
-
-      // ★ここがズレ原因：親が左右反転だと child の left が“右基準”になるので反転補正
-      if (isFlipX(wrap) && r.wrapW > 1) {
-        x = r.wrapW - (r.left + r.w);
-      }
-
-      node.style.left = `${x}px`;
-      node.style.top  = `${y}px`;
+      node.style.left = `${r.left}px`;
+      node.style.top  = `${r.top}px`;
       node.style.width  = `${r.w}px`;
       node.style.height = `${r.h}px`;
     }
 
-    // 通常帽子（耳間に置く） + flip補正
+    // 通常帽子（耳間に置く）
     const a = ANCHOR[slot] || ANCHOR.hat;
     function fitAnchor() {
       const r = rectInWrap();
       if (r.w <= 1 || r.h <= 1) return;
 
       const pw = r.w * (a.w || 0.58);
-      let px = r.left + r.w * (a.x || 0.5) - pw / 2;
+      const px = r.left + r.w * (a.x || 0.5) - pw / 2;
       const py = r.top  + r.h * (a.y || 0.06) - pw * 0.40;
-
-      if (isFlipX(wrap) && r.wrapW > 1) {
-        px = r.wrapW - (px + pw);
-      }
 
       node.style.left = `${px}px`;
       node.style.top  = `${py}px`;
@@ -889,14 +871,22 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const fit = (it.fit === "full") ? fitFull : fitAnchor;
 
     setSrcWithFallback(img, it.imgs, () => {
+      // ✅ 見た目はうさぎと同じ向きにしたいので、画像だけ反転
+      img.style.transform = wrapFlip ? "scaleX(-1)" : "none";
       requestAnimationFrame(() => requestAnimationFrame(fit));
     });
 
+    // 初回も反映
+    img.style.transform = wrapFlip ? "scaleX(-1)" : "none";
     requestAnimationFrame(() => requestAnimationFrame(fit));
 
     let n = 0;
     const timer = setInterval(() => {
       n++;
+      // wrapのflip状態が途中で変わっても追従
+      const nowFlip = isFlipX(wrap);
+      img.style.transform = nowFlip ? "scaleX(-1)" : "none";
+      box.style.transform = nowFlip ? "scaleX(-1)" : "none";
       fit();
       if (n >= 12) clearInterval(timer);
     }, 50);
