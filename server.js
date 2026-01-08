@@ -50,4 +50,5 @@ app.listen(PORT, () => {
   console.log(`Server running on :${PORT}`);
   console.log("ROOT =", ROOT);
   console.log("WEB_ROOT =", WEB_ROOT);
+  console.log("SERVER_VERSION = 2026-01-09-1");
 });
