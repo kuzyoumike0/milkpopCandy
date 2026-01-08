@@ -1,4 +1,4 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版（HAT表示FIX版）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版（HAT表示FIX + うさぎ下がりFIX版）
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
@@ -7,6 +7,8 @@
 // ✅ 赤枠は選択中だけz-indexを上げる
 // ✅ FIX：アクセは「最前面」＆「はみ出しOK」（z-index / overflow / stacking対策）
 // ✅ FIX：位置計算は offset を優先（transform/flipでも安定）+ 連続fitで取りこぼし防止
+// ✅ FIX：isyouAcc を先頭に入れず append（flex/grid環境で「うさぎが下に行く」問題を確実に止める）
+// ✅ FIX：.bunnyWrap を display:block に固定（子要素増加でレイアウトが崩れない）
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
 
@@ -206,9 +208,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV9")) return;
+    if (document.getElementById("isyouStyleV10")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV9";
+    s.id = "isyouStyleV10";
     s.textContent = `
 /* === modal === */
 #isyouBackdrop{
@@ -330,6 +332,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 .bunnyWrap{
   position: relative !important;
   overflow: visible !important;     /* はみ出しOK */
+  display: block !important;        /* ✅ 子要素追加で下がらない */
 }
 
 /* うさぎ本体は下 */
@@ -694,9 +697,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box = document.createElement("div");
     box.className = "isyouAcc";
 
-    // ✅ うさぎimgより「後ろ」に入れる必要はない（z-indexで上にする）
-    // ただ、DOM先頭に入れると selector の誤検出が起きにくい
-    wrap.insertBefore(box, wrap.firstChild);
+    // ✅ FIX：appendにする（flex/gridで「うさぎが下に行く」原因を潰す）
+    wrap.appendChild(box);
 
     return box;
   }
@@ -743,7 +745,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       let left = bunnyImg.offsetLeft || 0;
       let top  = bunnyImg.offsetTop  || 0;
 
-      // fallback（念のため）
+      // fallback
       if (w <= 0 || h <= 0) {
         const br = bunnyImg.getBoundingClientRect();
         const wr = wrap.getBoundingClientRect();
@@ -753,7 +755,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
         top  = (br.top  - wr.top);
       }
 
-      if (w <= 1 || h <= 1) return; // まだ確定してない
+      if (w <= 1 || h <= 1) return;
 
       const pw = w * (a.w || 0.58);
       const px = left + w * (a.x || 0.5) - pw / 2;
@@ -765,7 +767,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.height = `${pw}px`;
     };
 
-    // ✅ 取りこぼし防止：数フレーム + 少しだけ連続fit
     requestAnimationFrame(() => requestAnimationFrame(fit));
     img.onload = () => requestAnimationFrame(() => requestAnimationFrame(fit));
 
@@ -773,7 +774,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const timer = setInterval(() => {
       n++;
       fit();
-      if (n >= 12) clearInterval(timer); // 約600msで停止
+      if (n >= 12) clearInterval(timer);
     }, 50);
   }
 
