@@ -3,9 +3,32 @@
 // - 未解放は「？？？」表示（解放条件は表示）
 // - HUDの「名前の横」に現在称号を常時表示（見つからなければHUD左側に表示）
 // ✅ FIX: 解除が効かない（v1/v2キー不一致）を完全修正：装備/解除は v1/v2 両方同期、起動時も互換読み込み
+// ✅ FIX: 花火/うんち等がカウントされない → WB.emit / windowイベント を拾って自動でincする
 
 (() => {
   "use strict";
+
+  /* =========================
+   * Wait for WB
+   * ========================= */
+  const WAIT_MS = 12000;
+  const TICK_MS = 50;
+  function waitForWB() {
+    const start = Date.now();
+    return new Promise((resolve, reject) => {
+      const t = setInterval(() => {
+        if (window.WB && typeof window.WB === "object") {
+          clearInterval(t);
+          resolve(window.WB);
+          return;
+        }
+        if (Date.now() - start > WAIT_MS) {
+          clearInterval(t);
+          reject(new Error("WB not found"));
+        }
+      }, TICK_MS);
+    });
+  }
 
   /* =========================
    * Config
@@ -13,78 +36,37 @@
   const THRESHOLDS = [10, 50, 100];
 
   const CATEGORIES = [
-    {
-      key: "unchi",
-      label: "ウンチ",
-      emoji: "💩",
-      titles: { 10: "黄金を踏みし者", 50: "黄金に選ばれし者", 100: "黄金の王" },
-    },
-    {
-      key: "tabidachi",
-      label: "旅立ち",
-      emoji: "🕊️",
-      titles: { 10: "旅立ちの見届け人", 50: "旅路の語り部", 100: "永遠の見送り人" },
-    },
-    {
-      key: "hanabi",
-      label: "花火",
-      emoji: "🎆",
-      titles: { 10: "小さな花火師", 50: "夜空の演出家", 100: "天上の花火師" },
-    },
-    {
-      key: "slot_win",
-      label: "スロット当たり",
-      emoji: "🎰",
-      titles: { 10: "ビギナーズラック", 50: "勝利の常連", 100: "運命の寵児" },
-    },
-    {
-      key: "omukae",
-      label: "お迎え",
-      emoji: "🚪",
-      titles: { 10: "お迎え係", 50: "案内人", 100: "冥府の執事" },
-    },
+    { key: "unchi",     label: "ウンチ",         emoji: "💩", titles: { 10: "黄金を踏みし者", 50: "黄金に選ばれし者", 100: "黄金の王" } },
+    { key: "tabidachi", label: "旅立ち",         emoji: "🕊️", titles: { 10: "旅立ちの見届け人", 50: "旅路の語り部", 100: "永遠の見送り人" } },
+    { key: "hanabi",    label: "花火",           emoji: "🎆", titles: { 10: "小さな花火師", 50: "夜空の演出家", 100: "天上の花火師" } },
+    { key: "slot_win",  label: "スロット当たり", emoji: "🎰", titles: { 10: "ビギナーズラック", 50: "勝利の常連", 100: "運命の寵児" } },
+    { key: "omukae",    label: "お迎え",         emoji: "🚪", titles: { 10: "お迎え係", 50: "案内人", 100: "冥府の執事" } },
   ];
 
   // ✅ v2 をメインに保存しつつ、互換で v1 も同期する
   const LS = {
-    counts: "wb_counts_v2",          // { unchi: 0, tabidachi: 0, ... }
-    currentTitle: "wb_title_v2",     // string（HUDに出す文字列）
-    ownedTitles: "wb_title_list_v2", // ["unchi:10", ...]
+    counts: "wb_counts_v2",
+    currentTitle: "wb_title_v2",
+    ownedTitles: "wb_title_list_v2",
     uiOpenOnce: "wb_title_ui_hint_v1",
   };
 
   /* =========================
    * State
    * ========================= */
-  const state = {
-    counts: {},
-    owned: [],
-    current: "",
-  };
-
+  const state = { counts: {}, owned: [], current: "" };
   let WB = null;
 
   /* =========================
    * Storage
    * ========================= */
   function loadJson(key, def) {
-    try {
-      const v = JSON.parse(localStorage.getItem(key) || "null");
-      return v ?? def;
-    } catch {
-      return def;
-    }
+    try { const v = JSON.parse(localStorage.getItem(key) || "null"); return v ?? def; }
+    catch { return def; }
   }
-  function saveJson(key, v) {
-    localStorage.setItem(key, JSON.stringify(v));
-  }
-  function loadStr(key, def = "") {
-    const v = localStorage.getItem(key);
-    return (v == null) ? def : String(v);
-  }
-  function saveStr(key, v) {
-    localStorage.setItem(key, String(v ?? ""));
-  }
+  function saveJson(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
+  function loadStr(key, def = "") { const v = localStorage.getItem(key); return (v == null) ? def : String(v); }
+  function saveStr(key, v) { localStorage.setItem(key, String(v ?? "")); }
 
   // ✅ v1キー（app.js / WB互換）を確実に取得
   function getV1TitleKey() {
@@ -94,11 +76,8 @@
   function saveAll() {
     saveJson(LS.counts, state.counts);
     saveJson(LS.ownedTitles, state.owned);
-
-    // v2
     saveStr(LS.currentTitle, state.current || "");
-
-    // ✅ v1にも同期（他JS互換：ここが「解除が効かない」の主原因）
+    // ✅ v1にも同期
     saveStr(getV1TitleKey(), state.current || "");
   }
 
@@ -111,11 +90,8 @@
 
     // まず v2
     state.current = loadStr(LS.currentTitle, "");
-
-    // ✅ v2が空なら v1から復元（互換）
-    if (!state.current) {
-      state.current = loadStr(getV1TitleKey(), "");
-    }
+    // ✅ v2が空なら v1から復元
+    if (!state.current) state.current = loadStr(getV1TitleKey(), "");
 
     for (const c of CATEGORIES) {
       if (!Number.isFinite(state.counts[c.key])) state.counts[c.key] = 0;
@@ -125,14 +101,8 @@
   /* =========================
    * Master
    * ========================= */
-  function getCategory(key) {
-    return CATEGORIES.find((c) => c.key === key) || null;
-  }
-
-  function buildTitleId(key, at) {
-    return `${key}:${at}`;
-  }
-
+  function getCategory(key) { return CATEGORIES.find((c) => c.key === key) || null; }
+  function buildTitleId(key, at) { return `${key}:${at}`; }
   function displayTitleText(key, at) {
     const c = getCategory(key);
     const name = c?.titles?.[at];
@@ -146,22 +116,10 @@
       for (const at of THRESHOLDS) {
         const name = c.titles?.[at];
         if (!name) continue;
-        out.push({
-          key: c.key,
-          label: c.label,
-          emoji: c.emoji,
-          at,
-          id: buildTitleId(c.key, at),
-          title: displayTitleText(c.key, at),
-          rawTitle: String(name),
-        });
+        out.push({ key: c.key, label: c.label, emoji: c.emoji, at, id: buildTitleId(c.key, at), title: displayTitleText(c.key, at), rawTitle: String(name) });
       }
     }
     return out;
-  }
-
-  function isOwned(id) {
-    return state.owned.includes(id);
   }
 
   /* =========================
@@ -199,7 +157,6 @@
 `;
     document.head.appendChild(s);
   }
-
   function showToast(text) {
     ensureToastStyles();
     const el = document.createElement("div");
@@ -210,7 +167,7 @@
   }
 
   /* =========================
-   * HUD Title Badge (常時表示)
+   * HUD Title Badge
    * ========================= */
   const HUD_BADGE_ID = "wbHudTitleBadgeV1";
 
@@ -233,23 +190,15 @@
   line-height: 1;
   white-space: nowrap;
 }
-#${HUD_BADGE_ID} .label{
-  opacity: .72;
-}
-#${HUD_BADGE_ID}.empty{
-  opacity: .55;
-}
+#${HUD_BADGE_ID} .label{ opacity: .72; }
+#${HUD_BADGE_ID}.empty{ opacity: .55; }
 `;
     document.head.appendChild(s);
   }
 
   function findNameAnchorInHud(hud) {
     if (!hud) return null;
-    const selectors = [
-      "#playerName", ".playerName",
-      "#userName", ".userName",
-      "#name", ".name",
-    ];
+    const selectors = ["#playerName", ".playerName", "#userName", ".userName", "#name", ".name"];
     for (const sel of selectors) {
       const el = hud.querySelector(sel);
       if (el) return el;
@@ -271,47 +220,38 @@
     badge.innerHTML = `<span class="label">称号</span><span class="value">（なし）</span>`;
 
     const anchor = findNameAnchorInHud(hud);
-    if (anchor && anchor.parentElement) {
-      anchor.insertAdjacentElement("afterend", badge);
-    } else {
+    if (anchor && anchor.parentElement) anchor.insertAdjacentElement("afterend", badge);
+    else {
       const coin = hud.querySelector("#coin") || hud.firstElementChild;
       if (coin && coin.parentElement) coin.insertAdjacentElement("afterend", badge);
       else hud.appendChild(badge);
     }
-
     return badge;
   }
+
+  function getCurrentTitle() { return String(state.current || ""); }
 
   function updateHudTitleBadge() {
     const badge = ensureHudBadge();
     if (!badge) return;
-
     const v = badge.querySelector(".value");
     if (!v) return;
-
     const cur = getCurrentTitle();
     v.textContent = cur ? cur : "（なし）";
     badge.classList.toggle("empty", !cur);
   }
 
   /* =========================
-   * Unlock / Equip
+   * Unlock / Equip / Count
    * ========================= */
   function equipTitle(titleText) {
     state.current = String(titleText || "");
     saveAll();
-
-    // ✅ 即反映（解除もここで確実に消える）
     updateHudTitleBadge();
     refreshUI();
-
-    // HUD更新は最後（他JSの更新トリガ）
     WB?.updateHud?.();
   }
-
-  function unequipTitle() {
-    equipTitle("");
-  }
+  function unequipTitle() { equipTitle(""); }
 
   function unlockTitleById(id) {
     if (!state.owned.includes(id)) state.owned.push(id);
@@ -324,7 +264,6 @@
     if (!text) return;
 
     const firstTime = !state.owned.includes(id);
-
     unlockTitleById(id);
     equipTitle(text);
 
@@ -337,31 +276,19 @@
     }
   }
 
-  function getCount(key) {
-    return Number(state.counts?.[key] || 0);
-  }
-
-  function getAllCounts() {
-    const out = {};
-    for (const c of CATEGORIES) out[c.key] = getCount(c.key);
-    return out;
-  }
+  function getCount(key) { return Number(state.counts?.[key] || 0); }
+  function getAllCounts() { const out = {}; for (const c of CATEGORIES) out[c.key] = getCount(c.key); return out; }
 
   function getNextMilestone(key) {
     const n = getCount(key);
-    for (const at of THRESHOLDS) {
-      if (n < at) return { at, remain: at - n };
-    }
+    for (const at of THRESHOLDS) if (n < at) return { at, remain: at - n };
     return null;
   }
 
   function maybeUnlockByCount(key) {
     const n = getCount(key);
     for (const at of THRESHOLDS) {
-      if (n === at) {
-        unlockAndEquip(key, at);
-        break;
-      }
+      if (n === at) { unlockAndEquip(key, at); break; }
     }
   }
 
@@ -379,18 +306,11 @@
     WB?.updateHud?.();
   }
 
-  function getOwnedTitleIds() {
-    return Array.isArray(state.owned) ? state.owned.slice() : [];
-  }
-
+  function getOwnedTitleIds() { return Array.isArray(state.owned) ? state.owned.slice() : []; }
   function getOwnedTitlesDisplay() {
     const master = getTitlesMaster();
     const ownedSet = new Set(getOwnedTitleIds());
     return master.filter((m) => ownedSet.has(m.id)).map((m) => m.title);
-  }
-
-  function getCurrentTitle() {
-    return String(state.current || "");
   }
 
   /* =========================
@@ -403,140 +323,35 @@
     const s = document.createElement("style");
     s.id = "syougouUiStyleV4";
     s.textContent = `
-#syougouPanel{
-  position: fixed;
-  inset: 0;
-  z-index: 2147483647;
-  display: none;
-  user-select: none;
-}
-#syougouPanel .bg{
-  position:absolute; inset:0;
-  background: rgba(0,0,0,.38);
-}
+#syougouPanel{ position: fixed; inset: 0; z-index: 2147483647; display: none; user-select: none; }
+#syougouPanel .bg{ position:absolute; inset:0; background: rgba(0,0,0,.38); }
 #syougouPanel .card{
-  position:absolute;
-  left:50%; top:50%;
-  transform: translate(-50%, -50%);
-  width: min(700px, 94vw);
-  max-height: min(80vh, 760px);
-  overflow: hidden;
-  background: rgba(255,255,255,.97);
-  border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(0,0,0,.24);
-  display:flex;
-  flex-direction: column;
+  position:absolute; left:50%; top:50%; transform: translate(-50%, -50%);
+  width: min(700px, 94vw); max-height: min(80vh, 760px); overflow: hidden;
+  background: rgba(255,255,255,.97); border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.24);
+  display:flex; flex-direction: column;
 }
-#syougouPanel .head{
-  display:flex; align-items:center; justify-content: space-between;
-  padding: 14px 14px 10px;
-  border-bottom: 1px solid rgba(0,0,0,.08);
-}
-#syougouPanel .title{
-  font-weight: 1000;
-  letter-spacing: .02em;
-}
-#syougouPanel .close{
-  border:none; background: rgba(0,0,0,.06);
-  border-radius: 12px;
-  padding: 8px 12px;
-  font-weight: 900;
-  cursor:pointer;
-}
-#syougouPanel .body{
-  padding: 12px 14px;
-  overflow:auto;
-}
-#syougouPanel .section{
-  background: rgba(0,0,0,.03);
-  border-radius: 14px;
-  padding: 12px;
-  margin-bottom: 12px;
-}
-#syougouPanel .row{
-  display:flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  align-items:center;
-  justify-content: space-between;
-}
-#syougouPanel .mini{
-  opacity:.82;
-  font-weight: 800;
-}
-#syougouPanel .pill{
-  display:inline-flex;
-  align-items:center;
-  gap:8px;
-  background: rgba(255,255,255,.92);
-  border-radius: 999px;
-  padding: 8px 10px;
-  box-shadow: 0 10px 22px rgba(0,0,0,.08);
-  font-weight: 900;
-}
-#syougouPanel .btn{
-  border:none;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-weight: 900;
-  cursor:pointer;
-  background: #fff;
-  box-shadow: 0 10px 22px rgba(0,0,0,.10);
-}
+#syougouPanel .head{ display:flex; align-items:center; justify-content: space-between; padding: 14px 14px 10px; border-bottom: 1px solid rgba(0,0,0,.08); }
+#syougouPanel .title{ font-weight: 1000; letter-spacing: .02em; }
+#syougouPanel .close{ border:none; background: rgba(0,0,0,.06); border-radius: 12px; padding: 8px 12px; font-weight: 900; cursor:pointer; }
+#syougouPanel .body{ padding: 12px 14px; overflow:auto; }
+#syougouPanel .section{ background: rgba(0,0,0,.03); border-radius: 14px; padding: 12px; margin-bottom: 12px; }
+#syougouPanel .row{ display:flex; gap: 10px; flex-wrap: wrap; align-items:center; justify-content: space-between; }
+#syougouPanel .mini{ opacity:.82; font-weight: 800; }
+#syougouPanel .pill{ display:inline-flex; align-items:center; gap:8px; background: rgba(255,255,255,.92); border-radius: 999px; padding: 8px 10px; box-shadow: 0 10px 22px rgba(0,0,0,.08); font-weight: 900; }
+#syougouPanel .btn{ border:none; border-radius: 12px; padding: 10px 12px; font-weight: 900; cursor:pointer; background: #fff; box-shadow: 0 10px 22px rgba(0,0,0,.10); }
 #syougouPanel .btn.primary{ background: #ffd6e7; }
 #syougouPanel .btn.danger{ background: rgba(255,80,80,.12); }
-#syougouPanel .btn[disabled]{
-  opacity:.55;
-  cursor:not-allowed;
-  box-shadow:none;
-}
-#syougouPanel .grid{
-  display:grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-#syougouPanel .item{
-  background: rgba(255,255,255,.92);
-  border-radius: 14px;
-  padding: 12px;
-  box-shadow: 0 10px 22px rgba(0,0,0,.08);
-  display:flex;
-  align-items:center;
-  justify-content: space-between;
-  gap: 10px;
-}
-#syougouPanel .item.locked{
-  opacity:.70;
-}
-#syougouPanel .item .left{
-  display:flex;
-  flex-direction: column;
-  gap: 4px;
-}
-#syougouPanel .item .name{
-  font-weight: 1000;
-}
-#syougouPanel .item .meta{
-  font-size: 12px;
-  opacity: .75;
-  font-weight: 900;
-}
-#syougouPanel .badge{
-  display:inline-flex;
-  align-items:center;
-  gap: 6px;
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: rgba(0,0,0,.06);
-  font-weight: 900;
-  font-size: 12px;
-}
-#syougouPanel .badge.on{
-  background: rgba(120, 210, 255, .22);
-}
-#syougouPanel .badge.lock{
-  background: rgba(255, 120, 120, .18);
-}
+#syougouPanel .btn[disabled]{ opacity:.55; cursor:not-allowed; box-shadow:none; }
+#syougouPanel .grid{ display:grid; grid-template-columns: 1fr; gap: 10px; }
+#syougouPanel .item{ background: rgba(255,255,255,.92); border-radius: 14px; padding: 12px; box-shadow: 0 10px 22px rgba(0,0,0,.08); display:flex; align-items:center; justify-content: space-between; gap: 10px; }
+#syougouPanel .item.locked{ opacity:.70; }
+#syougouPanel .item .left{ display:flex; flex-direction: column; gap: 4px; }
+#syougouPanel .item .name{ font-weight: 1000; }
+#syougouPanel .item .meta{ font-size: 12px; opacity: .75; font-weight: 900; }
+#syougouPanel .badge{ display:inline-flex; align-items:center; gap: 6px; border-radius: 999px; padding: 6px 10px; background: rgba(0,0,0,.06); font-weight: 900; font-size: 12px; }
+#syougouPanel .badge.on{ background: rgba(120, 210, 255, .22); }
+#syougouPanel .badge.lock{ background: rgba(255, 120, 120, .18); }
 `;
     document.head.appendChild(s);
   }
@@ -559,14 +374,8 @@
     `;
     document.body.appendChild(uiEl);
 
-    uiEl.querySelector(".bg")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      closeTitlePanel();
-    });
-    uiEl.querySelector(".close")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      closeTitlePanel();
-    });
+    uiEl.querySelector(".bg")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeTitlePanel(); });
+    uiEl.querySelector(".close")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeTitlePanel(); });
     uiEl.querySelector(".card")?.addEventListener("click", (e) => e.stopPropagation());
 
     return uiEl;
@@ -685,19 +494,9 @@
     });
   }
 
-  function openTitlePanel() {
-    const p = buildUI();
-    renderUI();
-    p.style.display = "block";
-  }
-  function closeTitlePanel() {
-    const p = uiEl || document.getElementById("syougouPanel");
-    if (!p) return;
-    p.style.display = "none";
-  }
-  function refreshUI() {
-    if (uiEl && uiEl.style.display !== "none") renderUI();
-  }
+  function openTitlePanel() { const p = buildUI(); renderUI(); p.style.display = "block"; }
+  function closeTitlePanel() { const p = uiEl || document.getElementById("syougouPanel"); if (!p) return; p.style.display = "none"; }
+  function refreshUI() { if (uiEl && uiEl.style.display !== "none") renderUI(); }
 
   function injectHudButton() {
     const hud = document.getElementById("hud");
@@ -708,11 +507,43 @@
     btn.id = "syougouBtn";
     btn.textContent = "称号";
     btn.style.marginLeft = "8px";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      openTitlePanel();
-    });
+    btn.addEventListener("click", (e) => { e.preventDefault(); openTitlePanel(); });
     hud.appendChild(btn);
+  }
+
+  /* =========================
+   * ✅ Event bridge (WB.emit / window events → incCount)
+   * ========================= */
+  let bridgeInstalled = false;
+
+  function installBridge() {
+    if (bridgeInstalled) return;
+    bridgeInstalled = true;
+
+    const bindWB = (ev, key, amount = 1) => {
+      try {
+        WB?.on?.(ev, () => incCount(key, amount));
+      } catch {}
+    };
+
+    // ✅ WB events（他JSが emit してくれれば自動で増える）
+    bindWB("goldenUnchiCollected", "unchi", 1);
+    bindWB("tabidachi", "tabidachi", 1);
+    bindWB("hanabiFired", "hanabi", 1);
+    bindWB("slotWin", "slot_win", 1);
+    bindWB("omukae", "omukae", 1);
+
+    // ✅ window CustomEvent でも増やせる（WB使わないJSでもOK）
+    // 例：window.dispatchEvent(new CustomEvent("wb:hanabi"))
+    const bindWin = (type, key, amount = 1) => {
+      window.addEventListener(type, () => incCount(key, amount));
+    };
+
+    bindWin("wb:goldenUnchi", "unchi", 1);
+    bindWin("wb:tabidachi", "tabidachi", 1);
+    bindWin("wb:hanabi", "hanabi", 1);
+    bindWin("wb:slotWin", "slot_win", 1);
+    bindWin("wb:omukae", "omukae", 1);
   }
 
   /* =========================
@@ -721,19 +552,20 @@
   function attach(wb) {
     WB = wb || null;
 
-    // ✅ WBが来たタイミングで v1キーを確定できるので、互換同期しておく
-    if (state.current) {
-      saveStr(getV1TitleKey(), state.current);
-    }
+    // ✅ WBが来たタイミングで v1キーを確定できるので同期
+    if (state.current) saveStr(getV1TitleKey(), state.current);
 
     injectHudButton();
     ensureHudBadge();
     updateHudTitleBadge();
+
+    installBridge();
+
     WB?.updateHud?.();
   }
 
   /* =========================
-   * Event API (increment)
+   * Public increment API（直接呼ぶ用）
    * ========================= */
   function onGoldenUnchiCollected() { incCount("unchi", 1); }
   function onTabidachi()           { incCount("tabidachi", 1); }
@@ -752,25 +584,11 @@
     ensureHudBadge();
     updateHudTitleBadge();
 
-    const btn =
-      document.getElementById("syougouBtn") ||
-      [...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("称号"));
-
-    if (btn) {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        openTitlePanel();
-      });
-    }
-
-    // HUD構造が後から変わる場合にも追従（保険）
-    setTimeout(() => {
-      ensureHudBadge();
-      updateHudTitleBadge();
-    }, 400);
-
-    // ✅ WBが既にあるなら attach（保険）
+    // ✅ WBが既にあるなら attach、無ければ待つ
     if (window.WB) attach(window.WB);
+    else {
+      waitForWB().then((wb) => attach(wb)).catch(() => {});
+    }
   });
 
   /* =========================
