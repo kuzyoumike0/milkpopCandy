@@ -1,18 +1,22 @@
-// hanabi.js（即表示版・強化 / FIX: 称号が確実にカウントされる版）
-// - GIFを事前プリロード（初回クリックでもすぐ動く）
+// hanabi.js（即表示版・強化 / FIX: 称号・実績が確実にカウントされる完全版）
+// - GIF事前プリロード（初回でも即表示）
 // - 1クリック=1発 / コイン-2000 / SE1回
-// - 当たり時だけ特大：イベント購読 + window.HANABI.jackpot() で起動
-// - 連打でランダム倍率：短時間連打ほど倍率が伸びやすい
+// - 成功時のみカウント（コイン不足時は加算しない）
+// - 連打でランダム倍率（短時間ほど伸びる）
+// - 当たり（特大）：外部イベント/slot連携で発火
 // - うさぎ・コインは邪魔しない（pointer-events:none / 低z-index）
 //
-// ✅ FIX1: コイン処理を WB.spendCoin / WB.coins に寄せる（HUD直書きだけだと保存/整合性が壊れる）
-// ✅ FIX2: 花火が「成功した時だけ」称号加算（コイン不足で false の時は加算しない）
-// ✅ FIX3: SYOUGOU が後から来ても加算できるように retry キューを実装
-// ✅ FIX4: 可能なら WB.emit("sy:add",{key,n}) にも投げる（統一窓口がある場合に対応）
+// ✅ 重要
+//   ・成功時に必ず WB.emit("sy:add",{key:"hanabi", n:1}) を投げる
+//   ・WB が無い/遅い環境でも retry で SYOUGOU に加算
+//   ・zisseki.js は sy:add を拾って進捗に反映（推奨）
 
 (() => {
   "use strict";
 
+  /* =========================
+   * Config
+   * ========================= */
   const COST = 2000;
   const BTN_ID = "hanabiBtn";
 
@@ -26,11 +30,11 @@
 
   const HANABI_SE_SRC = "./assets/hanabi/hanabi.mp3";
 
-  // ===== サイズ基本（通常）=====
+  // サイズ（通常）
   const BASE_SIZE_MIN = 320;
   const BASE_SIZE_MAX = 520;
 
-  // ===== 連打倍率（通常クリック用）=====
+  // 連打倍率
   const STREAK_WINDOW_MS = 900;
   const STREAK_RESET_MS  = 1400;
   const STREAK_MAX = 8;
@@ -39,75 +43,62 @@
   const MULT_STREAK_BONUS = 0.10;
   const MULT_CAP = 2.10;
 
-  // ===== 当たり特大倍率 =====
+  // 当たり（特大）
   const JACKPOT_MULT_MIN = 2.2;
   const JACKPOT_MULT_MAX = 3.0;
 
   const $ = (q, p = document) => p.querySelector(q);
 
   /* =========================
-   * WB / SYOUGOU Safe Add（retry）
+   * SYOUGOU Safe Add（retry）
    * ========================= */
   const __syQueue = [];
   let __syRetryTimer = null;
 
   function __syCallAdd(k, n) {
-    // 1) 直接SYOUGOU
     try {
       const S = window.SYOUGOU;
       const fn =
         (typeof S?.add === "function" && S.add) ||
         (typeof S?.inc === "function" && S.inc) ||
         (typeof S?.plus === "function" && S.plus);
+      if (!fn) return false;
 
-      if (fn) {
-        // キー一覧が取れる実装なら存在チェック（ミスキーを検知）
-        try {
-          const keys =
-            (Array.isArray(S.keys) && S.keys) ||
-            (Array.isArray(S.KEYS) && S.KEYS) ||
-            (S.map && typeof S.map === "object" ? Object.keys(S.map) : null) ||
-            (S.defs && typeof S.defs === "object" ? Object.keys(S.defs) : null);
+      // キー存在チェック（取れる実装のみ）
+      try {
+        const keys =
+          (Array.isArray(S.keys) && S.keys) ||
+          (Array.isArray(S.KEYS) && S.KEYS) ||
+          (S.map && typeof S.map === "object" ? Object.keys(S.map) : null) ||
+          (S.defs && typeof S.defs === "object" ? Object.keys(S.defs) : null);
+        if (keys && !keys.includes(k)) {
+          console.warn("[hanabi][syougou] unknown key:", k);
+          return false;
+        }
+      } catch {}
 
-          if (keys && !keys.includes(k)) {
-            console.warn("[hanabi][syougou] unknown key:", k, "available:", keys.slice(0, 80));
-            // キー違いは成功扱いにしない（原因が分かる）
-            return false;
-          }
-        } catch {}
-
-        fn.call(S, k, n);
-
-        // 保存/再描画が必要な実装を吸収
-        try { S.save?.(); } catch {}
-        try { S.render?.(); } catch {}
-        try { S.update?.(); } catch {}
-        try { S.updateHud?.(); } catch {}
-
-        return true;
-      }
-    } catch {}
-
-    return false;
+      fn.call(S, k, n);
+      try { S.save?.(); } catch {}
+      try { S.render?.(); } catch {}
+      try { S.update?.(); } catch {}
+      try { S.updateHud?.(); } catch {}
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function syAdd(key, n = 1) {
-    // まず即時に行けるなら行く
     if (__syCallAdd(key, n)) return true;
 
-    // 2) WB統一窓口（もしあれば）にも投げる
-    // ※ syougou.js 側で WB.on("sy:add",...) してるならこれだけでOKになる
+    // WB 統一窓口（zisseki.js が拾う）
     try { window.WB?.emit?.("sy:add", { key, n }); } catch {}
 
-    // まだ無いならキューして後で流す
     __syQueue.push([key, n]);
-
     if (!__syRetryTimer) {
       let tries = 0;
       __syRetryTimer = setInterval(() => {
         tries++;
-
-        // キューを順に流す（成功したものだけ消える）
         for (let i = 0; i < __syQueue.length; i++) {
           const [k, a] = __syQueue[i];
           if (__syCallAdd(k, a)) {
@@ -115,60 +106,46 @@
             i--;
           }
         }
-
         if (__syQueue.length === 0) {
           clearInterval(__syRetryTimer);
           __syRetryTimer = null;
           return;
         }
-
-        // 60秒で諦め（200ms * 300）
         if (tries >= 300) {
-          console.warn("[hanabi][syougou] retry timeout. remaining:", __syQueue);
+          console.warn("[hanabi][syougou] retry timeout:", __syQueue);
           clearInterval(__syRetryTimer);
           __syRetryTimer = null;
         }
       }, 200);
     }
-
     return false;
   }
 
   /* =========================
-   * Coin HUD（WB優先）
+   * Coin helpers（WB優先）
    * ========================= */
   function getCoin() {
     try {
-      if (window.WB?.getCoin) return window.WB.getCoin();
+      if (window.WB?.getCoin) return Number(window.WB.getCoin()) || 0;
       if (typeof window.WB?.coins === "number") return window.WB.coins;
     } catch {}
     const el = $("#coinValue");
     return el ? Number(el.textContent) || 0 : 0;
   }
 
-  function setCoin(v) {
-    const nv = Math.max(0, Math.floor(Number(v) || 0));
-    try {
-      if (window.WB && "coins" in window.WB) {
-        window.WB.coins = nv; // setterがある想定（あなたのapp.jsは setter 実装済み）
-        return;
-      }
-    } catch {}
-    const el = $("#coinValue");
-    if (el) el.textContent = String(nv);
-  }
-
   function spendCoin(amount) {
     amount = Math.floor(Number(amount) || 0);
     if (amount <= 0) return true;
-
     try {
-      if (typeof window.WB?.spendCoin === "function") return !!window.WB.spendCoin(amount);
+      if (typeof window.WB?.spendCoin === "function") {
+        return !!window.WB.spendCoin(amount);
+      }
     } catch {}
-
     const have = getCoin();
     if (have < amount) return false;
-    setCoin(have - amount);
+    try { window.WB.coins = have - amount; } catch {}
+    const el = $("#coinValue");
+    if (el) el.textContent = String(have - amount);
     return true;
   }
 
@@ -186,7 +163,7 @@
   }
 
   /* =========================
-   * Style
+   * Styles
    * ========================= */
   function injectStyles() {
     if (document.getElementById("hanabiGifStyleV4")) return;
@@ -212,7 +189,7 @@
   }
 
   /* =========================
-   * Field & z-index整備
+   * Field / z-index
    * ========================= */
   function getField() {
     const field = document.getElementById("field") || document.body;
@@ -220,46 +197,44 @@
     if (cs.position === "static") field.style.position = "relative";
 
     const bunnyLayer = document.getElementById("bunnyLayer");
-    const coinLayer = document.getElementById("coinLayer");
+    const coinLayer  = document.getElementById("coinLayer");
     if (bunnyLayer) bunnyLayer.style.zIndex = "3";
-    if (coinLayer) coinLayer.style.zIndex = "4";
-
+    if (coinLayer)  coinLayer.style.zIndex  = "4";
     return field;
   }
 
   /* =========================
-   * GIF preload
+   * Preload
    * ========================= */
-  const preloadImgs = new Map(); // src -> HTMLImageElement
+  const preloadImgs = new Map();
 
-  async function preloadOne(src) {
-    if (preloadImgs.has(src)) return preloadImgs.get(src);
-
+  function preloadOne(src) {
+    if (preloadImgs.has(src)) return Promise.resolve(preloadImgs.get(src));
     const img = new Image();
     img.decoding = "async";
     img.loading = "eager";
-
     const p = new Promise((resolve) => {
       img.onload = () => resolve(img);
       img.onerror = () => resolve(img);
     });
-
     img.src = src;
     preloadImgs.set(src, img);
-
-    await p;
-
-    try { if (img.decode) await img.decode(); } catch {}
-    return img;
+    return p;
   }
 
-  async function preloadAll() {
-    await Promise.all(FIREWORKS.map(preloadOne));
+  function preloadAll() {
+    return Promise.all(FIREWORKS.map(preloadOne));
   }
 
   /* =========================
-   * 花火生成
+   * Utils
    * ========================= */
+  function pickSrc() {
+    return FIREWORKS[(Math.random() * FIREWORKS.length) | 0];
+  }
+  function rand(min, max) {
+    return min + Math.random() * (max - min);
+  }
   function getRectSafe(el) {
     const r = el.getBoundingClientRect();
     if (r.width < 50 || r.height < 50) {
@@ -268,58 +243,40 @@
     return r;
   }
 
-  function pickSrc() {
-    return FIREWORKS[(Math.random() * FIREWORKS.length) | 0];
-  }
-
-  function rand(min, max) {
-    return min + Math.random() * (max - min);
-  }
-
-  // ==== 連打管理 ====
+  /* =========================
+   * 連打倍率
+   * ========================= */
   let streak = 0;
   let lastClickAt = 0;
 
   function updateStreak(now) {
     const dt = now - lastClickAt;
-
-    if (dt > STREAK_RESET_MS) {
-      streak = 1;
-    } else if (dt <= STREAK_WINDOW_MS) {
-      streak = Math.min(STREAK_MAX, streak + 1);
-    } else {
-      streak = 1;
-    }
-
+    if (dt > STREAK_RESET_MS) streak = 1;
+    else if (dt <= STREAK_WINDOW_MS) streak = Math.min(STREAK_MAX, streak + 1);
+    else streak = 1;
     lastClickAt = now;
     return streak;
   }
 
   function calcTapMultiplier(now) {
     const s = updateStreak(now);
-
     const bonus = Math.min(MULT_CAP - MULT_MAX, (s - 1) * MULT_STREAK_BONUS);
     const max = Math.min(MULT_CAP, MULT_MAX + bonus);
     const min = MULT_MIN;
-
     const t = Math.random();
     const biased = 1 - Math.pow(1 - t, 1 + (s * 0.35));
     return min + (max - min) * biased;
   }
 
+  /* =========================
+   * Firework
+   * ========================= */
   function spawnFirework(field, opts = {}) {
-    const {
-      multiplier = 1,
-      forceBig = false,
-      costCoin = false,
-    } = opts;
+    const { multiplier = 1, forceBig = false, costCoin = false } = opts;
 
-    // ✅ 成功判定（コイン不足なら false）
-    if (costCoin) {
-      if (!spendCoin(COST)) {
-        alert("コインが足りない…！");
-        return false;
-      }
+    if (costCoin && !spendCoin(COST)) {
+      alert("コインが足りない…！");
+      return false;
     }
 
     const src = pickSrc();
@@ -331,103 +288,65 @@
     img.src = cached ? cached.src : src;
 
     const rect = getRectSafe(field);
-
-    const x = rect.width * (0.15 + Math.random() * 0.7);
+    const x = rect.width  * (0.15 + Math.random() * 0.7);
     const y = rect.height * (0.08 + Math.random() * 0.35);
 
     let baseSize = rand(BASE_SIZE_MIN, BASE_SIZE_MAX);
     if (forceBig) baseSize *= 1.15;
 
     const size = Math.floor(baseSize * multiplier);
-
     img.style.left = `${x - size / 2}px`;
     img.style.top  = `${y - size / 2}px`;
     img.style.width = `${size}px`;
-    img.style.height = "auto";
 
     field.appendChild(img);
-
     requestAnimationFrame(() => { img.style.opacity = "1"; });
 
     playHanabiSE();
     setTimeout(() => { try { img.remove(); } catch {} }, 3000);
 
-    // 次の1枚を先読み
     preloadOne(pickSrc()).catch(() => {});
     return true;
   }
 
   /* =========================
-   * 成功時称号＆イベント（共通）
+   * 成功時処理（称号・実績）
    * ========================= */
   function onHanabiSuccess(isJackpot = false) {
-    // ✅ 称号（成功時のみ）
     syAdd("hanabi", 1);
-
-    // 必要なら当たり用も別カウントできる
-    // if (isJackpot) syAdd("hanabi_jackpot", 1);
-
-    // 既存イベント
+    try { window.WB?.emit?.("sy:add", { key: "hanabi", n: 1 }); } catch {}
     try { window.WB?.emit?.("hanabiFired", { jackpot: !!isJackpot }); } catch {}
     try { window.dispatchEvent(new CustomEvent("wb:hanabi", { detail: { jackpot: !!isJackpot } })); } catch {}
   }
 
   /* =========================
-   * Button mount（HUD）
+   * Button
    * ========================= */
-  function findMount() {
-    return document.getElementById("hudButtons")
-      || document.getElementById("hud")
-      || document.body;
-  }
-
   function ensureButton() {
     let btn = document.getElementById(BTN_ID);
     if (!btn) {
-      btn = [...document.querySelectorAll("button")].find(b =>
-        (b.textContent || "").includes("花火")
-      ) || null;
-    }
-    if (!btn) {
       btn = document.createElement("button");
       btn.type = "button";
+      btn.id = BTN_ID;
+      btn.textContent = `🎆 花火（-${COST}）`;
+      (document.getElementById("hudButtons") || document.getElementById("hud") || document.body).appendChild(btn);
     }
 
-    btn.id = BTN_ID;
-    btn.textContent = `🎆 花火（-${COST}）`;
-
-    const mount = findMount();
-    if (btn.parentElement !== mount) mount.appendChild(btn);
-
     btn.onclick = null;
-
     btn.addEventListener("click", () => {
       const now = Date.now();
       const mult = calcTapMultiplier(now);
-
-      const ok = spawnFirework(getField(), {
-        multiplier: mult,
-        forceBig: false,
-        costCoin: true,
-      });
-
-      // ✅ 成功した時だけカウント
+      const ok = spawnFirework(getField(), { multiplier: mult, forceBig: false, costCoin: true });
       if (ok) onHanabiSuccess(false);
     });
   }
 
   /* =========================
-   * 当たり（特大）連携
+   * Jackpot hook
    * ========================= */
   function jackpotFire() {
     const mult = rand(JACKPOT_MULT_MIN, JACKPOT_MULT_MAX);
-
-    const ok = spawnFirework(getField(), {
-      multiplier: mult,
-      forceBig: true,
-      costCoin: false,
-    });
-
+    const ok = spawnFirework(getField(), { multiplier: mult, forceBig: true, costCoin: false });
     if (ok) onHanabiSuccess(true);
   }
 
@@ -439,6 +358,9 @@
     window.addEventListener(name, () => jackpotFire());
   });
 
+  /* =========================
+   * Boot
+   * ========================= */
   window.addEventListener("load", () => {
     injectStyles();
     ensureButton();
