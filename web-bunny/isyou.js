@@ -1,15 +1,13 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V30.2）
-// ✅ 修正点（partyhat/crown が「うさぎ全体に重なってデカい」問題を根絶）
-// - いままで：アクセ箱(=うさぎ画像と同サイズ)に対して hat を width/height:100% で貼ってた
-//   → 画像が「頭用の小さなセル」だと、全身に引き伸ばされて “レイヤー別っぽく” 見える
-// - これから：各アイテムに「fit（位置/サイズ）」を持たせ、頭の位置に小さく配置する
-// - ついでに：重さ対策（12fps同期・アクセがある時だけ）も維持
-//
-// ★そのまま isyou.js をこれに差し替え★
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V30.3）
+// ✅ V30.3 修正点：partyhat/crown/ribbon/ahiru/aimasuku を「実寸（naturalWidth/Height）」で表示
+// - fit を ratio(割合) / natural(実寸) の両対応に
+// - node(スロットDIV) の transform は位置調整(translate)に使うので、反転は img 側に適用（衝突防止）
+// - 画像ロード完了時に natural が確定するので、onload で fit を再適用
+// - 12fps同期・アクセがある時だけ維持
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V30.2", Date.now());
+  console.log("[isyou.js] LOADED V30.3", Date.now());
 
   /* =========================
    * Wait
@@ -171,18 +169,18 @@
     ].map(absUrl);
   }
 
-  // ✅ fit: うさぎ画像(100%)の中での配置（割合）
-  //  - w/h: サイズ比
-  //  - x/y: 左上オフセット比（0.0=左/上、0.5=中央寄せ）
-  // 例）w0.55, x0.225 → 左 22.5% / 幅 55%（左右中央）
+  // ✅ FIT（V30.3）
+  // - mode:"natural" -> 画像ファイルの実寸（naturalWidth/Height）で表示（scaleで微調整）
+  // - anchor: "top-center" / "center" / "top-left" / "top-right"
+  // - x/y は px オフセット（微調整）
   const FIT = {
-    // 頭（耳と耳の間）系：小さく上に
-    headHat: { w: 0.55, h: 0.45, x: 0.225, y: -0.12 },
-    headHat2:{ w: 0.55, h: 0.45, x: 0.225, y: -0.10 },
-    headSmall:{ w: 0.45, h: 0.35, x: 0.275, y: -0.05 },
+    headHat:   { mode: "natural", anchor: "top-center", x: 0, y: -8, scale: 1 },
+    headHat2:  { mode: "natural", anchor: "top-center", x: 0, y: -6, scale: 1 },
+    headSmall: { mode: "natural", anchor: "top-center", x: 0, y: -2, scale: 1 },
+    eyeMask:   { mode: "natural", anchor: "center",     x: 0, y:  8, scale: 1 },
 
-    // アイマスク：顔の中央付近
-    eyeMask: { w: 0.62, h: 0.28, x: 0.19, y: 0.28 },
+    // ※ ratio を使いたい場合の例（保険）
+    // headRatio: { mode:"ratio", w:0.55, h:0.45, x:0.225, y:-0.10 },
   };
 
   const ITEMS = {
@@ -195,7 +193,7 @@
 
   function getItemFit(itemKey) {
     const it = ITEMS[itemKey];
-    return it?.fit || { w: 1, h: 1, x: 0, y: 0 }; // 最後の保険（ただし通常使わない）
+    return it?.fit || { mode: "ratio", w: 1, h: 1, x: 0, y: 0 };
   }
 
   /* =========================
@@ -323,10 +321,10 @@
    * Styles（アクセは各wrap内 / 赤枠はglobal box）
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV302")) return;
+    if (document.getElementById("isyouStyleV303")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV302";
+    s.id = "isyouStyleV303";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -469,6 +467,7 @@
   display:block;
   object-fit: contain;
   pointer-events:none;
+  transform-origin: 50% 50%;
 }
 `;
     document.head.appendChild(s);
@@ -612,8 +611,49 @@
     }
   }
 
-  // ✅ fitを反映（box=うさぎ画像サイズ内で配置）
-  function applyFitToNode(node, fit) {
+  // ✅ V30.3: fit（ratio / natural）
+  function applyFitToNode(node, fit, accImg) {
+    const mode = String(fit?.mode || "ratio");
+
+    // ===== 実寸（画像ファイルの naturalWidth / naturalHeight） =====
+    if (mode === "natural") {
+      const scale = Number(fit?.scale ?? 1) || 1;
+      const nw = (accImg?.naturalWidth  || 0);
+      const nh = (accImg?.naturalHeight || 0);
+
+      // natural がまだ取れない場合の保険（onloadで再適用される）
+      const wpx = Math.max(1, Math.round((nw || 64) * scale));
+      const hpx = Math.max(1, Math.round((nh || 64) * scale));
+
+      node.style.width  = `${wpx}px`;
+      node.style.height = `${hpx}px`;
+
+      const anchor = String(fit?.anchor || "top-center");
+      const x = Number(fit?.x ?? 0) || 0;
+      const y = Number(fit?.y ?? 0) || 0;
+
+      if (anchor === "center") {
+        node.style.left = "50%";
+        node.style.top  = "50%";
+        node.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+      } else if (anchor === "top-left") {
+        node.style.left = "0%";
+        node.style.top  = "0%";
+        node.style.transform = `translate(${x}px, ${y}px)`;
+      } else if (anchor === "top-right") {
+        node.style.left = "100%";
+        node.style.top  = "0%";
+        node.style.transform = `translate(-100%, 0%) translate(${x}px, ${y}px)`;
+      } else {
+        // top-center
+        node.style.left = "50%";
+        node.style.top  = "0%";
+        node.style.transform = `translate(-50%, 0%) translate(${x}px, ${y}px)`;
+      }
+      return;
+    }
+
+    // ===== 従来の割合表示 =====
     const w = Math.max(0.01, Number(fit?.w ?? 1));
     const h = Math.max(0.01, Number(fit?.h ?? 1));
     const x = Number(fit?.x ?? 0);
@@ -621,8 +661,9 @@
 
     node.style.width  = `${w * 100}%`;
     node.style.height = `${h * 100}%`;
-    node.style.left = `${x * 100}%`;
-    node.style.top  = `${y * 100}%`;
+    node.style.left   = `${x * 100}%`;
+    node.style.top    = `${y * 100}%`;
+    node.style.transform = "";
   }
 
   // アクセ要素の再利用（軽量）
@@ -671,15 +712,20 @@
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    // ✅ サイズ/位置（ここがV30.2の修正）
-    applyFitToNode(node, getItemFit(itemKey));
+    // ✅ サイズ/位置（実寸モード対応）
+    applyFitToNode(node, getItemFit(itemKey), accImg);
 
-    // ✅ 反転追従（wrap内）
+    // ✅ 反転追従は img 側に（node transform と衝突させない）
     const wrapMir = isMirrored(wrap);
     const imgMir  = isMirrored(img);
-    node.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
+    accImg.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
 
-    setSrcWithFallback(accImg, it.imgs, () => scheduleSyncLoop());
+    setSrcWithFallback(accImg, it.imgs, () => {
+      // naturalWidth/Height 確定後に fit を当て直す
+      applyFitToNode(node, getItemFit(itemKey), accImg);
+      scheduleSyncLoop();
+    });
+
     scheduleSyncLoop();
   }
 
@@ -786,9 +832,16 @@
 
         for (const [slot, node] of ent.slotNodes.entries()) {
           if (!node || !node.isConnected) continue;
+
           const itemKey = ent.itemBySlot.get(slot);
-          if (itemKey) applyFitToNode(node, getItemFit(itemKey)); // ✅ fit再適用（念のため）
-          node.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
+          const accImg = node.querySelector("img");
+
+          if (itemKey) applyFitToNode(node, getItemFit(itemKey), accImg);
+
+          // ✅ 反転は img 側
+          if (accImg) {
+            accImg.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
+          }
         }
       }
     }
