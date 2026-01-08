@@ -19,6 +19,14 @@
 
   const HANABI_SE_SRC = "./assets/hanabi/hanabi.mp3";
 
+function syAdd(key, n = 1) {
+  try {
+    if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
+  } catch {}
+  // syougou.js がまだ来てない時の保険
+  window.__syougouQueue = window.__syougouQueue || [];
+  window.__syougouQueue.push([key, n]);
+}
 
   // ===== サイズ基本（通常）=====
   // 以前の「大きめ」：320〜520
