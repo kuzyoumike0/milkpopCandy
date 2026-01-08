@@ -351,14 +351,29 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 }
 
 /* === accessory layer === */
-.bunnyWrap{ position: relative; } /* 念のため */
+/* === accessory layer（帽子が埋もれない＆切れない） === */
+.bunnyWrap{
+  position: relative !important;
+  overflow: visible !important;   /* ← 上にはみ出しても切られない */
+}
+
+/* うさぎ本体を下に、帽子を上に（同じスタッキングコンテキスト内で勝つ） */
+.bunnyWrap > img.bunny,
+.bunnyWrap > img{
+  position: relative;
+  z-index: 1;
+}
+
 .bunnyWrap .isyouAcc{
   position:absolute;
   left:0; top:0;
   pointer-events:none;
-  z-index: 5;
+  z-index: 9999;                 /* ← とにかく最前面 */
+  overflow: visible;
   will-change: transform;
+  transform: translateZ(0);       /* ← 一部ブラウザの描画順対策 */
 }
+
 .bunnyWrap .isyouAcc img{
   display:block;
   width:100%;
@@ -366,9 +381,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   object-fit: contain;
   pointer-events:none;
 }
-`;
-    document.head.appendChild(s);
-  }
+
 
   /* =========================
    * Toast (simple)
