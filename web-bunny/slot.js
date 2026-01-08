@@ -25,6 +25,14 @@
 
   const SPIN = { loops: 22, colDelay: 220, baseDuration: 980 };
   const $ = (q, p = document) => p.querySelector(q);
+function syAdd(key, n = 1) {
+  try {
+    if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
+  } catch {}
+  // syougou.js がまだ来てない時の保険
+  window.__syougouQueue = window.__syougouQueue || [];
+  window.__syougouQueue.push([key, n]);
+}
 
   /* =========================
    * Bet state
