@@ -1,18 +1,6 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（partyhat=うさぎ同サイズ同位置FIX）
-// ✅ #hud待機して「お洒落ボタン」が必ず出る
-// ✅ 購入→所持保存
-// ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
-// ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
-// ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
-// ✅ 赤枠は選択中だけz-indexを上げる
-// ✅ FIX：アクセは最前面＆はみ出しOK
-// ✅ FIX：位置計算は offset 優先（transform/flipでも安定）+ 連続fit
-// ✅ FIX：partyhat等が404でも「候補パスを順に試す」ので必ず表示される（環境差吸収）
-// ✅ FIX：うさぎが下がるのを遮断（line-height/font-size/余白）
-// ✅ FIX：bornAt の取得を強化（WBのwrap参照差異でも必ず拾う）
-// ✅ NEW：partyhat は「うさぎ画像と完全一致（同サイズ・同位置）」で重ねる
-// ✅ 重要：hat は置き換え（同時に1つだけ）
-// ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（FIX: 反転でも位置ズレない）
+// ✅ partyhat は「うさぎ同サイズ同位置」
+// ✅ FIX: wrap が scaleX(-1) で反転していても、座標を左右反転補正してズレを消す
 
 (() => {
   "use strict";
@@ -88,7 +76,7 @@
           return;
         }
 
-        if (tries >= 300) { // 約60秒
+        if (tries >= 300) {
           console.warn("[isyou][syougou] retry timeout. remaining:", __syQueue);
           clearInterval(__syRetryTimer);
           __syRetryTimer = null;
@@ -100,7 +88,7 @@
   }
 
   /* =========================
-   * Script base（isyou.jsの場所を基準にする）
+   * Script base
    * ========================= */
   function getScriptBase() {
     try {
@@ -121,7 +109,7 @@
   }
 
   /* =========================
-   * 画像の「候補パス」を順に試す
+   * 画像候補を順に試す
    * ========================= */
   function setSrcWithFallback(imgEl, candidates, onOk) {
     const list = (candidates || []).filter(Boolean);
@@ -132,8 +120,7 @@
         console.warn("[isyou] all candidates failed:", list);
         return;
       }
-      const src = list[i++];
-      imgEl.src = src;
+      imgEl.src = list[i++];
     };
 
     imgEl.onload = () => { try { onOk?.(); } catch {} };
@@ -146,8 +133,8 @@
    * Config
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v3",       // { itemKey:number }
-    equipped: "wb_isyou_equipped_v3", // { bornAt: { slotKey: itemKey } }
+    owned: "wb_isyou_owned_v3",
+    equipped: "wb_isyou_equipped_v3",
   };
 
   function imgCandidates(name) {
@@ -161,14 +148,12 @@
     ];
   }
 
-  // ✅ partyhat を「うさぎ同サイズ同位置」にするため fit:"full" を追加
   const ITEMS = {
     partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: "full" },
     crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
     ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
   };
 
-  // 通常の帽子位置（partyhatはfullなので使わない）
   const ANCHOR = {
     hat: { x: 0.50, y: 0.06, w: 0.58 },
   };
@@ -261,7 +246,6 @@
     if (a1) return a1;
 
     const list = getBunnies();
-
     let b = list.find((x) => x?.wrap === wrap || x?.el === wrap || x?.root === wrap);
     if (b?.bornAt != null) return b.bornAt;
 
@@ -276,7 +260,6 @@
       b = list.find((x) => x?.img === img || x?.bunnyImg === img || x?.node === img);
       if (b?.bornAt != null) return b.bornAt;
     }
-
     return null;
   }
 
@@ -284,9 +267,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV14")) return;
+    if (document.getElementById("isyouStyleV15")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV14";
+    s.id = "isyouStyleV15";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -765,7 +748,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Accessory render（offset優先 + fit連続）
+   * Accessory render（FIX: flip補正）
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
@@ -790,6 +773,29 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => {
       try { n.remove(); } catch {}
     });
+  }
+
+  // ✅ wrap が scaleX(-1) なら true
+  function isFlipX(el) {
+    try {
+      if (!el) return false;
+      if (el.classList?.contains("flip")) return true; // ありがちなクラス
+      const tr = getComputedStyle(el).transform;
+      if (!tr || tr === "none") return false;
+
+      // matrix(a,b,c,d,tx,ty) の a が負なら左右反転
+      const m = tr.match(/matrix\(([^)]+)\)/);
+      if (m) {
+        const a = parseFloat(m[1].split(",")[0]);
+        return a < 0;
+      }
+      const m3 = tr.match(/matrix3d\(([^)]+)\)/);
+      if (m3) {
+        const a = parseFloat(m3[1].split(",")[0]); // m11
+        return a < 0;
+      }
+    } catch {}
+    return false;
   }
 
   function placeAcc(wrap, slot, itemKey) {
@@ -830,34 +836,49 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
         left = (br.left - wr.left);
         top  = (br.top  - wr.top);
       }
-      return { w, h, left, top };
+
+      // wrapの“見た目幅”を使う（flip補正の基準）
+      let wrapW = wrap.clientWidth || wrap.offsetWidth || 0;
+      if (!wrapW) {
+        const wr = wrap.getBoundingClientRect();
+        wrapW = wr.width;
+      }
+
+      return { w, h, left, top, wrapW };
     }
 
-    // ✅ partyhat: うさぎ画像と完全一致（同サイズ・同位置）
+    // ✅ partyhat: うさぎ画像と完全一致（同サイズ・同位置） + flip補正
     function fitFull() {
       const r = rectInWrap();
       if (r.w <= 1 || r.h <= 1) return;
 
-      node.style.left = `${r.left}px`;
-      node.style.top  = `${r.top}px`;
+      let x = r.left;
+      const y = r.top;
+
+      // ★ここがズレ原因：親が左右反転だと child の left が“右基準”になるので反転補正
+      if (isFlipX(wrap) && r.wrapW > 1) {
+        x = r.wrapW - (r.left + r.w);
+      }
+
+      node.style.left = `${x}px`;
+      node.style.top  = `${y}px`;
       node.style.width  = `${r.w}px`;
       node.style.height = `${r.h}px`;
-
-      // 画像は枠にぴったり（partyhat.pngが“うさぎ同サイズセル”なら完全一致）
-      img.style.width = "100%";
-      img.style.height = "100%";
-      img.style.objectFit = "contain";
     }
 
-    // 通常帽子（耳間に置く）
+    // 通常帽子（耳間に置く） + flip補正
     const a = ANCHOR[slot] || ANCHOR.hat;
     function fitAnchor() {
       const r = rectInWrap();
       if (r.w <= 1 || r.h <= 1) return;
 
       const pw = r.w * (a.w || 0.58);
-      const px = r.left + r.w * (a.x || 0.5) - pw / 2;
+      let px = r.left + r.w * (a.x || 0.5) - pw / 2;
       const py = r.top  + r.h * (a.y || 0.06) - pw * 0.40;
+
+      if (isFlipX(wrap) && r.wrapW > 1) {
+        px = r.wrapW - (px + pw);
+      }
 
       node.style.left = `${px}px`;
       node.style.top  = `${py}px`;
@@ -886,11 +907,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (!bornAt) return;
 
     const eq = state.equipped[String(bornAt)] || {};
-    if (eq.hat && ITEMS[eq.hat]) {
-      placeAcc(wrap, "hat", eq.hat);
-    } else {
-      removeAccSlot(wrap, "hat");
-    }
+    if (eq.hat && ITEMS[eq.hat]) placeAcc(wrap, "hat", eq.hat);
+    else removeAccSlot(wrap, "hat");
   }
 
   function applyEquipsAll() {
@@ -935,7 +953,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     state.equipped[id] = state.equipped[id] || {};
     delete state.equipped[id][slot];
-
     if (!Object.keys(state.equipped[id]).length) delete state.equipped[id];
 
     saveAll();
