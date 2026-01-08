@@ -83,9 +83,7 @@
     crown:    { slot: "hat",    label: "クラウン",         img: "./assets/isyou/crown.png",    price: 900 },
     ribbon:   { slot: "hat",    label: "リボン",           img: "./assets/isyou/ribbon.png",   price: 700 },
 
-    // --- outfit（例：必要なら増やしてOK）---
-    // outfit1:   { slot: "outfit", label: "お洋服A", img: "./assets/isyou/outfit1.png", price: 1200 },
-  };
+
 
   // 帽子位置（うさぎ画像に対する割合）
   const ANCHOR = {
