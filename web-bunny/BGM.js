@@ -1,11 +1,14 @@
 // BGM.js（非module / WB統合版）
+// ✅ FIX: 既存の WB.unlockAudioOnce があっても「連結」してBGMも解禁する
+// ✅ FIX: ハンバーガーUIを自動で出す（mountUIをbootで実行）
 // - クリック/タップでオーディオを解禁（autoplay制限対策）
 // - ハンバーガーから音量/ミュート調整
-// - 朝/昼/夜の自動切り替え（存在しないファイルは再生失敗するだけ）
+// - 朝/昼/夜の自動切り替え
 // - 特別BGM（旅立ち等）を再生/解除：WB.bgm.playSpecial / WB.bgm.clearSpecial
-// - ✅ WB.unlockAudioOnce を提供（他スクリプトから使える）
 
 (() => {
+  "use strict";
+
   const LS_KEY = "milkpop_bgm_settings_v1";
 
   const TRACKS = {
@@ -37,11 +40,12 @@
 
   let settings = loadSettings();
 
-  let unlocked = false;       // ユーザー操作で解禁済みか
-  let currentKey = null;      // 現在の通常BGMキー
-  let specialKey = null;      // 特別BGMキー（再生中なら通常BGMは止める）
+  // ✅ このBGM.jsの解禁フラグ
+  let unlocked = false;
+  let currentKey = null;
+  let specialKey = null;
 
-  let audio = null;           // Audio 要素（1つに統一）
+  let audio = null;
 
   // 既存WBと統合
   const WB = (window.WB = window.WB || {});
@@ -72,7 +76,6 @@
     ensureAudio();
     if (!src) return false;
 
-    // src更新が必要なら差し替え
     const nextHref = new URL(src, location.href).href;
     if (audio.src !== nextHref) {
       try { audio.pause(); } catch {}
@@ -99,7 +102,7 @@
   }
 
   function startNormalBgm(force = false) {
-    if (specialKey) return; // 特別BGM中は通常を鳴らさない
+    if (specialKey) return;
 
     const key = pickByTime();
     if (!force && key === currentKey) return;
@@ -110,43 +113,35 @@
     tryPlay(src);
   }
 
-  // ✅ 他スクリプトから呼べる「解禁」関数
-  // 既にWBにあれば上書きしない（好みで上書きしたいならifを外す）
-  if (typeof WB.unlockAudioOnce !== "function") {
-    WB.unlockAudioOnce = async () => {
-      if (unlocked) return;
-      unlocked = true;
+  // ✅ BGM側の解禁（内部）
+  async function unlockBgmOnce() {
+    if (unlocked) return;
+    unlocked = true;
 
-      // 解禁した瞬間に、いま鳴らすべきBGMを再生
-      if (specialKey) {
-        const src = TRACKS[specialKey];
-        if (src) await tryPlay(src);
-      } else {
-        startNormalBgm(true);
-      }
-    };
+    if (specialKey) {
+      const src = TRACKS[specialKey];
+      if (src) await tryPlay(src);
+    } else {
+      startNormalBgm(true);
+    }
   }
 
+  // ✅ FIX: 既存のWB.unlockAudioOnceがあっても「連結」してBGMも解禁
+  // - app.js がWB.unlockAudioOnceを作っている場合でも、こちらが確実に走る
+  const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
+  WB.unlockAudioOnce = async () => {
+    try { prevUnlock?.(); } catch {}
+    await unlockBgmOnce();
+  };
+
+  // ✅ クリック等で解禁（WB.unlockAudioOnce を呼ぶ）
   function setupAutoplayUnlock() {
-    const unlockOnce = async () => {
-      if (unlocked) return;
-      unlocked = true;
-
-      if (specialKey) {
-        await tryPlay(TRACKS[specialKey]);
-      } else {
-        startNormalBgm(true);
-      }
-
-      window.removeEventListener("pointerdown", unlockOnce);
-      window.removeEventListener("keydown", unlockOnce);
-      window.removeEventListener("touchstart", unlockOnce);
+    const handler = async () => {
+      await WB.unlockAudioOnce();
     };
-
-    // iOS/Safari対策で touchstart も付ける
-    window.addEventListener("pointerdown", unlockOnce, { once: false });
-    window.addEventListener("keydown", unlockOnce, { once: false });
-    window.addEventListener("touchstart", unlockOnce, { once: false });
+    window.addEventListener("pointerdown", handler, { passive: true });
+    window.addEventListener("keydown", handler, { passive: true });
+    window.addEventListener("touchstart", handler, { passive: true });
   }
 
   function startTimeWatcher() {
@@ -278,16 +273,15 @@
       panel.style.display = "none";
     });
 
-    toggle.addEventListener("click", () => {
+    toggle.addEventListener("click", async () => {
       settings.enabled = !settings.enabled;
       saveSettings(settings);
 
       if (!settings.enabled) stop();
       else {
-        if (unlocked) {
-          if (specialKey) tryPlay(TRACKS[specialKey]);
-          else startNormalBgm(true);
-        }
+        await WB.unlockAudioOnce();
+        if (specialKey) tryPlay(TRACKS[specialKey]);
+        else startNormalBgm(true);
       }
       refreshUI();
     });
@@ -299,19 +293,19 @@
       refreshUI();
     });
 
-    vol.addEventListener("input", () => {
+    vol.addEventListener("input", async () => {
       settings.volume = clamp(Number(vol.value) / 100, 0, 1);
       saveSettings(settings);
       applyVolume();
 
-      if (unlocked && settings.enabled) {
+      if (settings.enabled) {
+        await WB.unlockAudioOnce();
         if (specialKey) tryPlay(TRACKS[specialKey]);
         else startNormalBgm(false);
       }
       refreshUI();
     });
 
-    // 外側クリックで閉じる
     document.addEventListener("pointerdown", (e) => {
       if (panel.style.display !== "block") return;
       if (panel.contains(e.target) || btn.contains(e.target)) return;
@@ -329,10 +323,8 @@
     const src = TRACKS[keyOrSrc] || keyOrSrc;
     if (!src) return;
 
-    // key名でも、直接srcでもOK
     specialKey = TRACKS[keyOrSrc] ? keyOrSrc : "__custom__";
     ensureAudio();
-
     tryPlay(src);
   }
 
@@ -341,13 +333,8 @@
     startNormalBgm(true);
   }
 
-  function start() {
-    startNormalBgm(true);
-  }
-
-  function stopBgm() {
-    stop();
-  }
+  function start() { startNormalBgm(true); }
+  function stopBgm() { stop(); }
 
   WB.bgm = WB.bgm || {};
   WB.bgm.mountUI = mountUI;
@@ -365,7 +352,8 @@
     setupAutoplayUnlock();
     startNormalBgm(false);
     startTimeWatcher();
-    // UIを自動で出したいならここをON：
-    // mountUI({ position:"top-right", title:"BGM" });
+
+    // ✅ FIX: ハンバーガーUIを自動表示
+    mountUI({ position: "top-right", title: "BGM" });
   })();
 })();
