@@ -1,6 +1,7 @@
 // isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fit）完全版（FIX: 反転でも位置ズレない）
 // ✅ partyhat は「うさぎ同サイズ同位置」
-// ✅ FIX: .bunnyWrap を position:relative にして absolute の基準を固定（左上へ飛ぶズレ解消）
+// ✅ FIX: bunnyWrap の position を !important で上書きしない（うさぎ位置がズレる原因）
+// ✅ FIX: 必要時のみ（wrapがstaticの時だけ） wrap.style.position="relative" を付与
 // ✅ FIX: rect は getBoundingClientRect 差分で“見た目”基準（transform/flipでも安定）
 // ✅ FIX: wrap が反転していても、アクセ側を逆flipして座標系を戻し、画像だけ再flipして見た目一致
 
@@ -272,9 +273,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV17")) return;
+    if (document.getElementById("isyouStyleV18")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV17";
+    s.id = "isyouStyleV18";
     s.textContent = `
 #isyouBackdrop{
   position: fixed; inset:0;
@@ -389,13 +390,12 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   z-index: 2147482000;
 }
 
-/* ✅ 最重要：absolute の基準を bunnyWrap に固定（左上へ飛ぶのを防ぐ） */
+/* ✅ 重要：bunnyWrap の position は上書きしない（うさぎ位置が壊れる） */
 .bunnyWrap{
-  position: relative !important;
   overflow: visible !important;
 }
 
-/* アクセ最前面（座標系はここで作る） */
+/* アクセ最前面（座標系はJS側で安全に作る） */
 .bunnyWrap .isyouAcc{
   position:absolute !important;
   left:0 !important; top:0 !important;
@@ -773,8 +773,24 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     return false;
   }
 
+  // ✅ ここが“二度と同じミスをしない”ポイント：
+  // - wrapのpositionをCSSで上書きしない
+  // - wrapが static の時だけ inline style で relative にする（配置を壊さない）
+  function ensureSafePositioning(wrap) {
+    try {
+      const pos = getComputedStyle(wrap).position;
+      if (pos === "static") {
+        // 既存の absolute 配置を壊さない（staticの時だけ付ける）
+        wrap.style.position = "relative";
+      }
+    } catch {}
+  }
+
   function ensureAccContainer(wrap) {
     if (!wrap) return null;
+
+    ensureSafePositioning(wrap);
+
     let box = wrap.querySelector(":scope > .isyouAcc");
     if (!box) {
       box = document.createElement("div");
@@ -823,20 +839,18 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    const wrapFlip = isFlipX(wrap);
-
-    // ✅ 見た目ベースの矩形（transform/flipがあっても“画面上の見え方”に一致）
+    // ✅ “見た目”矩形（transform/flipがあっても画面上の位置に一致）
     function rectInWrap() {
       const br = bunnyImg.getBoundingClientRect();
       const wr = wrap.getBoundingClientRect();
-      const w = br.width;
-      const h = br.height;
-      const left = (br.left - wr.left);
-      const top  = (br.top  - wr.top);
-      return { w, h, left, top };
+      return {
+        w: br.width,
+        h: br.height,
+        left: br.left - wr.left,
+        top: br.top - wr.top
+      };
     }
 
-    // ✅ partyhat: うさぎ画像と完全一致（同サイズ・同位置）
     function fitFull() {
       const r = rectInWrap();
       if (r.w <= 1 || r.h <= 1) return;
@@ -847,7 +861,6 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       node.style.height = `${r.h}px`;
     }
 
-    // 通常帽子（耳間に置く）
     const a = ANCHOR[slot] || ANCHOR.hat;
     function fitAnchor() {
       const r = rectInWrap();
@@ -865,24 +878,27 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     const fit = (it.fit === "full") ? fitFull : fitAnchor;
 
+    function syncFlip() {
+      const nowFlip = isFlipX(wrap);
+      // 座標系は box が逆flip、見た目は img を再flip
+      box.style.transform = nowFlip ? "scaleX(-1)" : "none";
+      img.style.transform = nowFlip ? "scaleX(-1)" : "none";
+    }
+
     setSrcWithFallback(img, it.imgs, () => {
-      // ✅ 見た目はうさぎと同じ向きにしたいので、画像だけ反転
-      img.style.transform = wrapFlip ? "scaleX(-1)" : "none";
+      syncFlip();
       requestAnimationFrame(() => requestAnimationFrame(fit));
     });
 
-    img.style.transform = wrapFlip ? "scaleX(-1)" : "none";
+    syncFlip();
     requestAnimationFrame(() => requestAnimationFrame(fit));
 
     let n = 0;
     const timer = setInterval(() => {
       n++;
-      // flipが途中で変わっても追従
-      const nowFlip = isFlipX(wrap);
-      img.style.transform = nowFlip ? "scaleX(-1)" : "none";
-      box.style.transform = nowFlip ? "scaleX(-1)" : "none";
+      syncFlip();
       fit();
-      if (n >= 12) clearInterval(timer);
+      if (n >= 14) clearInterval(timer);
     }, 50);
   }
 
@@ -1032,6 +1048,79 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (window.WB) attach(window.WB);
     else waitFor(() => window.WB).then((wb) => attach(wb)).catch(() => attach(null));
   });
+
+  /* =========================
+   * Confirm bar（前回同等）
+   * ========================= */
+  let confirmBar = null;
+
+  function ensureConfirmBar() {
+    if (confirmBar && confirmBar.isConnected) return confirmBar;
+    confirmBar = document.createElement("div");
+    confirmBar.id = "isyouConfirmBar";
+    confirmBar.innerHTML = `
+      <div class="row">
+        <span class="t" id="isyouSelText">未選択</span>
+        <button class="primary" id="isyouDoBtn" type="button">決定</button>
+        <button class="danger" id="isyouRemoveBtn" type="button">外す決定</button>
+        <button id="isyouCancelBtn" type="button">キャンセル</button>
+        <button id="isyouOpenShopBtn" type="button">お洒落を開く</button>
+      </div>
+    `;
+    document.body.appendChild(confirmBar);
+
+    confirmBar.querySelector("#isyouCancelBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      cancelEquipMode();
+    });
+    confirmBar.querySelector("#isyouOpenShopBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      cancelEquipMode(false);
+      openModal();
+    });
+    confirmBar.querySelector("#isyouDoBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      confirmEquip();
+    });
+    confirmBar.querySelector("#isyouRemoveBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      confirmRemove();
+    });
+
+    return confirmBar;
+  }
+
+  function showConfirmBar() {
+    ensureConfirmBar();
+    updateConfirmBar();
+    confirmBar.style.display = "block";
+  }
+
+  function hideConfirmBar() {
+    if (!confirmBar) return;
+    confirmBar.style.display = "none";
+  }
+
+  function updateConfirmBar() {
+    ensureConfirmBar();
+    const t = confirmBar.querySelector("#isyouSelText");
+    const doBtn = confirmBar.querySelector("#isyouDoBtn");
+    const rmBtn = confirmBar.querySelector("#isyouRemoveBtn");
+
+    const it = state.selectedItem ? ITEMS[state.selectedItem] : null;
+    const sel = state.selectedBornAt ? `選択：${state.selectedBornAt}` : "未選択";
+
+    const modeText =
+      state.pendingAction === "equip"
+        ? `装着：${it ? it.label : "（未選択）"} / ${sel}`
+        : `外す：${state.removeSlot || "hat"} / ${sel}`;
+
+    if (t) t.textContent = modeText;
+
+    const hasTarget = !!state.selectedBornAt;
+    if (doBtn) doBtn.disabled = !(hasTarget && state.pendingAction === "equip" && !!it);
+    if (rmBtn) rmBtn.disabled = !(hasTarget && state.pendingAction === "remove");
+  }
 
   /* =========================
    * Debug / public
