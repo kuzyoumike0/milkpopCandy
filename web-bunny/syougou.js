@@ -12,6 +12,9 @@
 
 (() => {
   "use strict";
+window.WB?.on?.("sy:add", ({ key, n }) => {
+  try { window.SYOUGOU?.add?.(key, n); } catch {}
+});
 
   /* =========================
    * Wait for HUD / WB
