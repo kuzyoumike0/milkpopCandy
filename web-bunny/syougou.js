@@ -625,4 +625,13 @@
     getTitlesMaster,
     getNextMilestone,
   };
+    // ✅ syougou.js 起動前に積まれた add を消化
+  try {
+    const q = window.__syougouQueue || [];
+    window.__syougouQueue = [];
+    for (const [k, n] of q) {
+      try { add(k, n); } catch {}
+    }
+  } catch {}
+
 })();
