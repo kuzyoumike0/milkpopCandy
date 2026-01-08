@@ -170,8 +170,52 @@
   user-select:none;
   -webkit-user-drag:none;
   cursor:pointer;
-  filter: drop-shadow(0 8px 10px rgba(0,0,0,.20));
+
+  /* ベースの当たり感 */
+  filter:
+    drop-shadow(0 0 6px rgba(255, 220, 120, 0.7))
+    drop-shadow(0 8px 10px rgba(0,0,0,.20));
+
+  animation: ougonFloat 1.6s ease-in-out infinite;
 }
+
+/* ふわっと上下 */
+@keyframes ougonFloat {
+  0%   { transform: translateY(0); }
+  50%  { transform: translateY(-4px); }
+  100% { transform: translateY(0); }
+}
+
+/* キラッと光るオーラ */
+.ougonunchi::after{
+  content:"";
+  position:absolute;
+  inset:-6px;
+  border-radius:50%;
+  pointer-events:none;
+
+  background:
+    radial-gradient(
+      circle at 30% 30%,
+      rgba(255,255,255,0.9),
+      rgba(255,220,120,0.6) 25%,
+      rgba(255,200,80,0.35) 45%,
+      rgba(255,180,40,0.15) 60%,
+      rgba(255,180,40,0.0) 70%
+    );
+
+  opacity:0.0;
+  animation: ougonSparkle 1.2s ease-in-out infinite;
+}
+
+/* キラキラの明滅 */
+@keyframes ougonSparkle {
+  0%   { opacity:0.0; transform: scale(0.9) rotate(0deg); }
+  40%  { opacity:0.9; transform: scale(1.05) rotate(8deg); }
+  70%  { opacity:0.4; transform: scale(1.0) rotate(-6deg); }
+  100% { opacity:0.0; transform: scale(0.9) rotate(0deg); }
+}
+
 
 
       /* ✅ hart.png を小さく */
