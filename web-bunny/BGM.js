@@ -1,10 +1,10 @@
-// BGM.js（非module / WB統合版）
-// ✅ FIX: 既存の WB.unlockAudioOnce があっても「連結」してBGMも解禁する
-// ✅ FIX: ハンバーガーUIを自動で出す（mountUIをbootで実行）
-// - クリック/タップでオーディオを解禁（autoplay制限対策）
-// - ハンバーガーから音量/ミュート調整
+// BGM.js（非module / ✅WB差し替え耐性版）
+// ✅ FIX: app.js が window.WB を丸ごと再代入しても、一定時間監視して再パッチする
+// ✅ FIX: 既存の WB.unlockAudioOnce があっても連結してBGMも解禁
+// ✅ FIX: 初回クリックで「必ず一度」再生を試す（autoplay対策）
+// - ハンバーガーUIを自動で出す
 // - 朝/昼/夜の自動切り替え
-// - 特別BGM（旅立ち等）を再生/解除：WB.bgm.playSpecial / WB.bgm.clearSpecial
+// - 特別BGM：WB.bgm.playSpecial / clearSpecial
 
 (() => {
   "use strict";
@@ -40,15 +40,12 @@
 
   let settings = loadSettings();
 
-  // ✅ このBGM.jsの解禁フラグ
+  // BGM.js側の解禁フラグ
   let unlocked = false;
   let currentKey = null;
   let specialKey = null;
 
   let audio = null;
-
-  // 既存WBと統合
-  const WB = (window.WB = window.WB || {});
 
   function ensureAudio() {
     if (audio) return audio;
@@ -66,7 +63,6 @@
 
   function pickByTime() {
     const h = new Date().getHours();
-    // 朝 5-10 / 昼 11-17 / 夜 18-4
     if (h >= 5 && h <= 10) return "morning";
     if (h >= 11 && h <= 17) return "day";
     return "night";
@@ -91,7 +87,8 @@
     try {
       await audio.play();
       return true;
-    } catch {
+    } catch (e) {
+      // autoplay等で失敗することがある（ここは静かに失敗でOK）
       return false;
     }
   }
@@ -113,11 +110,11 @@
     tryPlay(src);
   }
 
-  // ✅ BGM側の解禁（内部）
   async function unlockBgmOnce() {
     if (unlocked) return;
     unlocked = true;
 
+    // ✅ unlock時に必ず一度再生を試す（クリック直後に走る想定）
     if (specialKey) {
       const src = TRACKS[specialKey];
       if (src) await tryPlay(src);
@@ -126,18 +123,75 @@
     }
   }
 
-  // ✅ FIX: 既存のWB.unlockAudioOnceがあっても「連結」してBGMも解禁
-  // - app.js がWB.unlockAudioOnceを作っている場合でも、こちらが確実に走る
-  const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
-  WB.unlockAudioOnce = async () => {
-    try { prevUnlock?.(); } catch {}
-    await unlockBgmOnce();
-  };
+  /* =========================
+   * ✅ WBパッチ（差し替え耐性）
+   * ========================= */
+  let lastWBRef = null;
 
-  // ✅ クリック等で解禁（WB.unlockAudioOnce を呼ぶ）
+  function patchWB(WB) {
+    if (!WB || typeof WB !== "object") return;
+
+    // 既に同じWBにパッチ済みなら何もしない
+    if (lastWBRef === WB && WB.__bgmPatchedV2) return;
+
+    // 新しいWBに切り替わった
+    lastWBRef = WB;
+
+    // 二重パッチ防止
+    if (!WB.__bgmPatchedV2) WB.__bgmPatchedV2 = { done: false };
+
+    const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
+
+    // ✅ 連結（上書きではなく「前→BGM解禁」）
+    WB.unlockAudioOnce = async () => {
+      try { prevUnlock?.(); } catch {}
+      await unlockBgmOnce();
+    };
+
+    // 公開API
+    WB.bgm = WB.bgm || {};
+    WB.bgm.mountUI = mountUI;
+    WB.bgm.playSpecial = playSpecial;
+    WB.bgm.clearSpecial = clearSpecial;
+    WB.bgm.start = () => startNormalBgm(true);
+    WB.bgm.stop = () => stop();
+    WB.bgm.TRACKS = TRACKS;
+
+    WB.__bgmPatchedV2.done = true;
+
+    // もし既にユーザーがクリック済みでunlockedになってるなら再開しておく
+    if (unlocked && settings.enabled) {
+      if (specialKey) {
+        const src = TRACKS[specialKey];
+        if (src) tryPlay(src);
+      } else {
+        startNormalBgm(true);
+      }
+    }
+  }
+
+  // ✅ window.WB が後から差し替わっても追従する監視
+  function startWBWatcher() {
+    // まず即時1回
+    patchWB(window.WB);
+
+    // その後しばらく監視（app.jsの読み込み順ゆらぎ対策）
+    const start = Date.now();
+    const watchMs = 15000; // 15秒監視（十分）
+    const t = setInterval(() => {
+      patchWB(window.WB);
+      if (Date.now() - start > watchMs) clearInterval(t);
+    }, 200);
+  }
+
+  /* =========================
+   * Autoplay unlock
+   * ========================= */
   function setupAutoplayUnlock() {
     const handler = async () => {
-      await WB.unlockAudioOnce();
+      // ✅ 「最新のWB」を必ずパッチしてから解禁を呼ぶ
+      patchWB(window.WB);
+      try { await window.WB?.unlockAudioOnce?.(); } catch {}
     };
     window.addEventListener("pointerdown", handler, { passive: true });
     window.addEventListener("keydown", handler, { passive: true });
@@ -269,9 +323,7 @@
       refreshUI();
     });
 
-    close.addEventListener("click", () => {
-      panel.style.display = "none";
-    });
+    close.addEventListener("click", () => { panel.style.display = "none"; });
 
     toggle.addEventListener("click", async () => {
       settings.enabled = !settings.enabled;
@@ -279,7 +331,8 @@
 
       if (!settings.enabled) stop();
       else {
-        await WB.unlockAudioOnce();
+        patchWB(window.WB);
+        try { await window.WB?.unlockAudioOnce?.(); } catch {}
         if (specialKey) tryPlay(TRACKS[specialKey]);
         else startNormalBgm(true);
       }
@@ -299,7 +352,8 @@
       applyVolume();
 
       if (settings.enabled) {
-        await WB.unlockAudioOnce();
+        patchWB(window.WB);
+        try { await window.WB?.unlockAudioOnce?.(); } catch {}
         if (specialKey) tryPlay(TRACKS[specialKey]);
         else startNormalBgm(false);
       }
@@ -317,7 +371,7 @@
   }
 
   /* =========================
-   * Public API（WBに公開）
+   * Public API
    * ========================= */
   function playSpecial(keyOrSrc) {
     const src = TRACKS[keyOrSrc] || keyOrSrc;
@@ -333,27 +387,17 @@
     startNormalBgm(true);
   }
 
-  function start() { startNormalBgm(true); }
-  function stopBgm() { stop(); }
-
-  WB.bgm = WB.bgm || {};
-  WB.bgm.mountUI = mountUI;
-  WB.bgm.playSpecial = playSpecial;
-  WB.bgm.clearSpecial = clearSpecial;
-  WB.bgm.start = start;
-  WB.bgm.stop = stopBgm;
-  WB.bgm.TRACKS = TRACKS;
-
   /* =========================
    * Boot
    * ========================= */
   (function boot() {
     ensureAudio();
-    setupAutoplayUnlock();
+    startWBWatcher();        // ✅ ここが重要：WB差し替え監視
+    setupAutoplayUnlock();   // ✅ クリックで確実にunlock
     startNormalBgm(false);
     startTimeWatcher();
 
-    // ✅ FIX: ハンバーガーUIを自動表示
+    // UI
     mountUI({ position: "top-right", title: "BGM" });
   })();
 })();
