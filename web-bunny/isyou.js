@@ -1,15 +1,16 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策“反転でズレない最終”＋fitToBunny強化）完全版
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版
 // ✅ #hud待機して「お洒落ボタン」が必ず出る
 // ✅ 購入→所持保存
 // ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
 // ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
 // ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
-// ✅ 赤枠は選択中だけz-indexを上げる（※帽子だけが他うさぎより前に出ない）
-// ✅ FIX：本体うさぎimgを“帽子imgと誤認しない”
-// ✅ FIX：matchBunny時、うさぎimgの transform / transform-origin をアクセ側にもコピー（flip/scaleでズレない）
-// ✅ NEW：ResizeObserver / MutationObserver で追従
+// ✅ 赤枠は選択中だけz-indexを上げる
+// ✅ FIX：アンカーはoffset系（transform/flipでもズレにくい）
+// ✅ NEW：fitToBunny（うさぎ画像と同じrectに重ね、autoズレ対策）
 // ✅ 重要：hat は「置き換え」（同時に1つだけ）
 // ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
+// ✅ FIX：assets構成に合わせて衣装画像パスを ./assets/isyou/* に修正（404解消）
+// ✅ 追加：画像404のときコンソールに原因を出す（デバッグしやすい）
 
 (() => {
   "use strict";
@@ -38,35 +39,78 @@
   const __syQueue = [];
   let __syRetryTimer = null;
 
-  function syAdd(key, n = 1) {
+  function __syCallAdd(key, n) {
     try {
-      if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
-    } catch {}
+      const S = window.SYOUGOU;
+      const fn =
+        (typeof S?.add === "function" && S.add) ||
+        (typeof S?.inc === "function" && S.inc) ||
+        (typeof S?.plus === "function" && S.plus);
 
+      if (!fn) return false;
+
+      // キー一覧がある実装なら存在チェック（ミスキー検知）
+      try {
+        const keys =
+          (Array.isArray(S.keys) && S.keys) ||
+          (Array.isArray(S.KEYS) && S.KEYS) ||
+          (S.map && typeof S.map === "object" ? Object.keys(S.map) : null) ||
+          (S.defs && typeof S.defs === "object" ? Object.keys(S.defs) : null);
+
+        if (keys && !keys.includes(key)) {
+          console.warn("[isyou][syougou] unknown key:", key, "available:", keys.slice(0, 80));
+          return false;
+        }
+      } catch {}
+
+      fn.call(S, key, n);
+
+      // 保存/再描画が必要な実装を吸収
+      try { S.save?.(); } catch {}
+      try { S.render?.(); } catch {}
+      try { S.update?.(); } catch {}
+      try { S.updateHud?.(); } catch {}
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function syAdd(key, n = 1) {
+    if (__syCallAdd(key, n)) return true;
+
+    // まだ無いならキューしてリトライ
     __syQueue.push([key, n]);
 
     if (!__syRetryTimer) {
       let tries = 0;
       __syRetryTimer = setInterval(() => {
         tries++;
-        if (window.SYOUGOU?.add) {
-          try {
-            while (__syQueue.length) {
-              const [k, a] = __syQueue.shift();
-              try { window.SYOUGOU.add(k, a); } catch {}
-            }
-          } finally {
-            clearInterval(__syRetryTimer);
-            __syRetryTimer = null;
+
+        for (let i = 0; i < __syQueue.length; i++) {
+          const [k, a] = __syQueue[i];
+          if (__syCallAdd(k, a)) {
+            __syQueue.splice(i, 1);
+            i--;
           }
+        }
+
+        if (__syQueue.length === 0) {
+          clearInterval(__syRetryTimer);
+          __syRetryTimer = null;
           return;
         }
-        if (tries >= 40) {
+
+        if (tries >= 300) { // 約60秒で諦め
+          console.warn("[isyou][syougou] retry timeout. remaining:", __syQueue);
           clearInterval(__syRetryTimer);
           __syRetryTimer = null;
         }
       }, 200);
     }
+
+    return false;
   }
 
   /* =========================
@@ -77,32 +121,34 @@
     equipped: "wb_isyou_equipped_v3", // { bornAt: { slotKey: itemKey } }
   };
 
-  // slot: "hat" は置き換え
+  // ✅ slot: "hat" は置き換え
+  // ✅ FIX：画像パスを ./assets/isyou/* に合わせる（あなたのassets構成）
   const ITEMS = {
     partyhat: { slot: "hat", label: "パーティーハット", img: "./assets/isyou/partyhat.png", price: 500 },
     crown:    { slot: "hat", label: "クラウン",         img: "./assets/isyou/crown.png",    price: 900 },
     ribbon:   { slot: "hat", label: "リボン",           img: "./assets/isyou/ribbon.png",   price: 700 },
-    aimasuku: { slot: "hat", label: "アイマスク",       img: "./assets/isyou/aimasuku.png", price: 400 },
-    ahiru:    { slot: "hat", label: "あひる",           img: "./assets/isyou/ahiru.png",    price: 450 },
   };
 
-  // ★今回は「うさぎ画像と完全一致」モード
+  // 帽子位置（うさぎ画像に対する割合）
+  // ※画像ごとに微調整したい場合はここだけ触ればOK
   const ANCHOR = {
-    hat: { matchBunny: true },
+    hat: {
+      x: 0.50,   // 横：中央
+      y: 0.06,   // 縦：上寄り（耳と耳の間の少し下〜上に合わせる）
+      w: 0.58,   // 幅：うさぎ画像幅に対する割合
+    },
   };
 
   /* =========================
    * State
    * ========================= */
   const state = {
-    owned: {},
-    equipped: {},
-
-    mode: "browse",         // "browse" | "equip"
-    selectedItem: null,     // itemKey
+    owned: {},          // itemKey -> count
+    equipped: {},       // bornAt -> { hat: itemKey }
+    mode: "browse",     // "browse" | "equip"
+    selectedItem: null, // itemKey
     pendingAction: "equip", // "equip" | "remove"
-
-    selectedWrap: null,     // .bunnyWrap
+    selectedWrap: null, // .bunnyWrap
     selectedBornAt: null,
     removeSlot: null,
   };
@@ -145,11 +191,15 @@
     const nv = Math.max(0, Math.floor(v));
     try {
       if (WB) {
-        if (typeof WB.coins === "number") WB.coins = nv;
+        // あなたの app.js は setter coins を実装してるので最優先
+        if ("coins" in WB) WB.coins = nv;
+        else if (typeof WB.coins === "number") WB.coins = nv;
+
         WB.saveCoins?.();
         WB.updateHud?.();
       }
     } catch {}
+
     const el = document.getElementById("coinValue");
     if (el) el.textContent = String(nv);
   }
@@ -179,9 +229,9 @@
    * Styles
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV12FlipExact")) return;
+    if (document.getElementById("isyouStyleV8")) return;
     const s = document.createElement("style");
-    s.id = "isyouStyleV12FlipExact";
+    s.id = "isyouStyleV8";
     s.textContent = `
 /* === modal === */
 #isyouBackdrop{
@@ -261,6 +311,7 @@
   background: rgba(0,0,0,.06);
   font-weight: 1000; font-size:12px;
 }
+#isyouModal .badge.on{ background: rgba(120,210,255,.22); }
 #isyouModal .badge.lock{ background: rgba(255,120,120,.18); }
 
 /* === equip confirm bar === */
@@ -289,38 +340,26 @@
 }
 #isyouConfirmBar button.primary{ background:#ffd6e7; }
 #isyouConfirmBar button.danger{ background: rgba(255,80,80,.12); }
-#isyouConfirmBar button:disabled{ opacity:.55; cursor:not-allowed; box-shadow:none; }
 
-/* === selection red outline === */
+/* === selection red outline (only in equip mode) === */
 body.isyouEquipMode .bunnyWrap{ outline: none; }
 body.isyouEquipMode .bunnyWrap.isyouSelected{
   outline: 4px solid rgba(255, 64, 64, .88);
   outline-offset: 3px;
   border-radius: 18px;
-  z-index: 10; /* ★上げるのはwrap */
+  z-index: 2147482000; /* 赤枠が埋もれない */
 }
 
-/* === accessory layer ===
-   ★帽子だけ他うさぎより上に来ない：wrap内で完結
-*/
-.bunnyWrap{
-  position: relative;
-  isolation: isolate;
-  z-index: 0;
-}
+/* === accessory layer === */
+.bunnyWrap{ position: relative; } /* 念のため */
 .bunnyWrap .isyouAcc{
-  position:absolute;
-  left:0; top:0; right:0; bottom:0;
-  pointer-events:none;
-  z-index: 2;
-  contain: layout paint;
-}
-.bunnyWrap .isyouAcc [data-slot]{
   position:absolute;
   left:0; top:0;
   pointer-events:none;
+  z-index: 5;
+  will-change: transform;
 }
-.bunnyWrap .isyouAcc img.isyouAccImg{
+.bunnyWrap .isyouAcc img{
   display:block;
   width:100%;
   height:100%;
@@ -332,7 +371,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Toast
+   * Toast (simple)
    * ========================= */
   function toast(text) {
     const t = String(text ?? "").trim();
@@ -387,24 +426,47 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       backdrop.appendChild(modal);
     }
 
+    // backdropクリック：browseなら閉じる / equip中はクリック透過したい
     backdrop.onclick = (e) => {
-      if (state.mode === "equip") { e.stopPropagation(); return; }
+      if (state.mode === "equip") {
+        // 装着モード中は field クリックを邪魔しないため「閉じない」
+        e.stopPropagation();
+        return;
+      }
       if (e.target === backdrop) closeModal();
     };
   }
 
-  function openModal() { ensureModal(); renderModal(); backdrop.style.display = "block"; }
-  function closeModal() { if (backdrop) backdrop.style.display = "none"; }
+  function openModal() {
+    ensureModal();
+    renderModal();
+    backdrop.style.display = "block";
+  }
 
-  function ownedCount(itemKey) { return Number(state.owned?.[itemKey] || 0); }
+  function closeModal() {
+    if (!backdrop) return;
+    backdrop.style.display = "none";
+  }
+
+  function ownedCount(itemKey) {
+    return Number(state.owned?.[itemKey] || 0);
+  }
 
   function buy(itemKey) {
     const it = ITEMS[itemKey];
     if (!it) return false;
-    if (!spendCoins(it.price)) { toast("コインが足りない…！"); return false; }
+
+    if (!spendCoins(it.price)) {
+      toast("コインが足りない…！");
+      return false;
+    }
+
     state.owned[itemKey] = ownedCount(itemKey) + 1;
     saveAll();
+
+    // ✅ 購入を称号カウント（必要ならキーを合わせて）
     syAdd("omukae", 1);
+
     toast(`🛍️ 購入：${it.label}`);
     renderModal();
     return true;
@@ -454,13 +516,15 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
         : `<span class="badge lock">未所持</span>`;
 
       const buyBtn = `<button class="btn ${can ? "primary" : ""}" data-buy="${escapeHtml(k)}" ${can ? "" : "disabled"}>購入</button>`;
+
       const equipBtn = owned > 0
         ? `<button class="btn" data-equip="${escapeHtml(k)}">装着モード</button>`
         : `<button class="btn" disabled>装着</button>`;
 
       return `
         <div class="card">
-          <img class="thumb" src="${escapeHtml(it.img)}" alt="${escapeHtml(it.label)}">
+          <img class="thumb" src="${escapeHtml(it.img)}" alt="${escapeHtml(it.label)}"
+               onerror="console.warn('[isyou] image 404:', this.src)">
           <div class="info">
             <div class="name">${escapeHtml(it.label)}</div>
             <div class="mini">スロット：${escapeHtml(it.slot)}</div>
@@ -501,27 +565,38 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       </div>
     `;
 
-    modal.querySelector("#isyouCloseBtn")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeModal(); });
-    modal.querySelector("#isyouRefresh")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); renderModal(); });
-    modal.querySelector("#isyouRemoveHat")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); setRemoveMode("hat"); });
+    modal.querySelector("#isyouCloseBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      closeModal();
+    });
+    modal.querySelector("#isyouRefresh")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      renderModal();
+    });
+    modal.querySelector("#isyouRemoveHat")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      setRemoveMode("hat");
+    });
 
     modal.querySelectorAll("[data-buy]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
-        buy(btn.getAttribute("data-buy"));
+        const k = btn.getAttribute("data-buy");
+        buy(k);
       });
     });
 
     modal.querySelectorAll("[data-equip]").forEach((btn) => {
       btn.addEventListener("click", (e) => {
         e.preventDefault(); e.stopPropagation();
-        setEquipItem(btn.getAttribute("data-equip"));
+        const k = btn.getAttribute("data-equip");
+        setEquipItem(k);
       });
     });
   }
 
   /* =========================
-   * Confirm bar
+   * Confirm bar (決定式)
    * ========================= */
   let confirmBar = null;
 
@@ -540,16 +615,40 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     `;
     document.body.appendChild(confirmBar);
 
-    confirmBar.querySelector("#isyouCancelBtn")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); cancelEquipMode(); });
-    confirmBar.querySelector("#isyouOpenShopBtn")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); cancelEquipMode(false); openModal(); });
-    confirmBar.querySelector("#isyouDoBtn")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); confirmEquip(); });
-    confirmBar.querySelector("#isyouRemoveBtn")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); confirmRemove(); });
+    confirmBar.querySelector("#isyouCancelBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      cancelEquipMode();
+    });
+
+    confirmBar.querySelector("#isyouOpenShopBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      cancelEquipMode(false);
+      openModal();
+    });
+
+    confirmBar.querySelector("#isyouDoBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      confirmEquip();
+    });
+
+    confirmBar.querySelector("#isyouRemoveBtn")?.addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      confirmRemove();
+    });
 
     return confirmBar;
   }
 
-  function showConfirmBar() { ensureConfirmBar(); updateConfirmBar(); confirmBar.style.display = "block"; }
-  function hideConfirmBar() { if (confirmBar) confirmBar.style.display = "none"; }
+  function showConfirmBar() {
+    ensureConfirmBar();
+    updateConfirmBar();
+    confirmBar.style.display = "block";
+  }
+
+  function hideConfirmBar() {
+    if (!confirmBar) return;
+    confirmBar.style.display = "none";
+  }
 
   function updateConfirmBar() {
     ensureConfirmBar();
@@ -573,7 +672,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   function clearSelection() {
-    try { document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected")); } catch {}
+    try {
+      document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected"));
+    } catch {}
     state.selectedWrap = null;
     state.selectedBornAt = null;
     updateConfirmBar();
@@ -591,27 +692,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * fitToBunny (flipでズレない)
+   * Accessory render (fitToBunny)
    * ========================= */
-
-  // ★本体うさぎimgを確実に取る（アクセのimgを絶対に拾わない）
   function getBunnyImg(wrap) {
     if (!wrap) return null;
-
-    const imgs = Array.from(wrap.querySelectorAll("img"))
-      .filter((img) => !img.closest(".isyouAcc"))
-      .filter((img) => !img.classList.contains("isyouAccImg"));
-
-    if (!imgs.length) return null;
-
-    const pick = (kw) => imgs.find((img) => (img.currentSrc || img.src || "").toLowerCase().includes(kw));
-    return (
-      pick("babybunny") ||
-      pick("reabunny") ||
-      pick("bunny.png") ||
-      pick("/bunny") ||
-      imgs[0]
-    );
+    return wrap.querySelector("img.bunny, img.bunnyImg, img, .bunny img") || null;
   }
 
   function ensureAccContainer(wrap) {
@@ -628,116 +713,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (!wrap) return;
     const box = ensureAccContainer(wrap);
     if (!box) return;
-    box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => { try { n.remove(); } catch {} });
-  }
-
-  // wrap基準の offsetLeft/Top を積み上げる
-  function relOffsetTo(el, ancestor) {
-    let x = 0, y = 0;
-    let cur = el;
-    while (cur && cur !== ancestor) {
-      x += cur.offsetLeft || 0;
-      y += cur.offsetTop || 0;
-      cur = cur.offsetParent;
-    }
-    if (cur !== ancestor) return null;
-    return { x, y };
-  }
-
-  // ★matchBunny時：位置/サイズだけでなく「transform」も本体からコピー
-  // （flipが img にだけ掛かる構造でも一致する）
-  function copyTransformFromBunny(bunnyImg, node) {
-    try {
-      const cs = getComputedStyle(bunnyImg);
-      const t = cs.transform;
-      if (t && t !== "none") {
-        node.style.transform = t;
-        node.style.transformOrigin = cs.transformOrigin || "50% 50%";
-      } else {
-        node.style.transform = "";
-        node.style.transformOrigin = "";
-      }
-    } catch {
-      node.style.transform = "";
-      node.style.transformOrigin = "";
-    }
-  }
-
-  function fitNodeToBunny(wrap, bunnyImg, node, slot) {
-    if (!wrap || !bunnyImg || !node) return;
-
-    const off = relOffsetTo(bunnyImg, wrap);
-    let left, top, w, h;
-
-    if (off) {
-      left = off.x;
-      top  = off.y;
-      w = bunnyImg.offsetWidth || bunnyImg.clientWidth || 0;
-      h = bunnyImg.offsetHeight || bunnyImg.clientHeight || 0;
-    } else {
-      // fallback（最終手段）
-      const br = bunnyImg.getBoundingClientRect();
-      const wr = wrap.getBoundingClientRect();
-      left = br.left - wr.left;
-      top  = br.top  - wr.top;
-      w = br.width;
-      h = br.height;
-    }
-
-    if (!(w > 0 && h > 0)) return;
-
-    const a = ANCHOR[slot] || {};
-    if (a.matchBunny) {
-      node.style.left = `${left}px`;
-      node.style.top = `${top}px`;
-      node.style.width = `${w}px`;
-      node.style.height = `${h}px`;
-
-      // ★ここが今回の“反転ズレ”修正の本丸
-      copyTransformFromBunny(bunnyImg, node);
-      return;
-    }
-  }
-
-  // 追従監視
-  const wrapWatch = new WeakMap();
-
-  function ensureFollow(wrap, bunnyImg) {
-    if (!wrap || !bunnyImg) return;
-    if (wrapWatch.has(wrap)) return;
-
-    let rafId = 0;
-    const schedule = () => {
-      if (rafId) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        try {
-          const box = wrap.querySelector(":scope > .isyouAcc");
-          if (!box) return;
-          box.querySelectorAll("[data-slot]").forEach((node) => {
-            const slot = node.getAttribute("data-slot") || "hat";
-            const b = getBunnyImg(wrap);
-            if (!b) return;
-            fitNodeToBunny(wrap, b, node, slot);
-          });
-        } catch {}
-      });
-    };
-
-    let ro = null;
-    try {
-      ro = new ResizeObserver(() => schedule());
-      ro.observe(bunnyImg);
-      ro.observe(wrap);
-    } catch {}
-
-    let mo = null;
-    try {
-      mo = new MutationObserver(() => schedule());
-      mo.observe(wrap, { attributes: true, childList: true, subtree: true });
-    } catch {}
-
-    wrapWatch.set(wrap, { ro, mo, schedule });
+    box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => {
+      try { n.remove(); } catch {}
+    });
   }
 
   function placeAcc(wrap, slot, imgSrc) {
@@ -747,29 +725,44 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const box = ensureAccContainer(wrap);
     if (!box || !bunnyImg) return;
 
+    // まず同スロットは置き換え
     removeAccSlot(wrap, slot);
 
     const node = document.createElement("div");
     node.dataset.slot = slot;
+    node.style.position = "absolute";
 
     const img = document.createElement("img");
-    img.className = "isyouAccImg"; // ★本体判定から除外する印
     img.src = imgSrc;
     img.alt = slot;
+    img.onerror = () => console.warn("[isyou] acc image 404:", imgSrc);
     node.appendChild(img);
 
     box.appendChild(node);
 
     const fit = () => {
-      const b = getBunnyImg(wrap);
-      if (!b) return;
-      fitNodeToBunny(wrap, b, node, slot);
+      const br = bunnyImg.getBoundingClientRect();
+      const wr = wrap.getBoundingClientRect();
+      const w = br.width;
+      const h = br.height;
+
+      const left = (br.left - wr.left);
+      const top  = (br.top  - wr.top);
+
+      const a = ANCHOR[slot] || ANCHOR.hat;
+
+      const pw = w * (a.w || 0.58);
+      const px = left + w * (a.x || 0.5) - pw / 2;
+      const py = top  + h * (a.y || 0.06) - pw * 0.40;
+
+      node.style.left = `${px}px`;
+      node.style.top  = `${py}px`;
+      node.style.width = `${pw}px`;
+      node.style.height = `${pw}px`;
     };
 
     requestAnimationFrame(() => requestAnimationFrame(fit));
     img.onload = () => requestAnimationFrame(() => requestAnimationFrame(fit));
-
-    ensureFollow(wrap, bunnyImg);
   }
 
   function applyEquipsForWrap(wrap) {
@@ -777,8 +770,11 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (!bornAt) return;
 
     const eq = state.equipped[String(bornAt)] || {};
-    if (eq.hat && ITEMS[eq.hat]) placeAcc(wrap, "hat", ITEMS[eq.hat].img);
-    else removeAccSlot(wrap, "hat");
+    if (eq.hat && ITEMS[eq.hat]) {
+      placeAcc(wrap, "hat", ITEMS[eq.hat].img);
+    } else {
+      removeAccSlot(wrap, "hat");
+    }
   }
 
   function applyEquipsAll() {
@@ -797,7 +793,10 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     const it = ITEMS[itemKey];
     if (!it) return;
 
-    if (ownedCount(itemKey) <= 0) { toast("未所持だよ…！"); return; }
+    if (ownedCount(itemKey) <= 0) {
+      toast("未所持だよ…！");
+      return;
+    }
 
     const id = String(bornAt);
     state.equipped[id] = state.equipped[id] || {};
@@ -820,6 +819,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     state.equipped[id] = state.equipped[id] || {};
     delete state.equipped[id][slot];
+
     if (!Object.keys(state.equipped[id]).length) delete state.equipped[id];
 
     saveAll();
@@ -830,7 +830,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * Selection
+   * Selection (red outline)
    * ========================= */
   function selectWrap(wrap) {
     if (!wrap) return;
@@ -845,6 +845,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     if (state.mode !== "equip") return;
     if (e.button != null && e.button !== 0) return;
 
+    // モーダル上のクリックは無視
     if (backdrop && backdrop.style.display !== "none") {
       const inModal = e.target?.closest?.("#isyouModal");
       if (inModal) return;
@@ -856,6 +857,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
+
     selectWrap(wrap);
   }
 
@@ -895,21 +897,12 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 
     document.addEventListener("pointerdown", onPointerDownCapture, true);
 
-    // spawn直後のサイズ確定待ち
-    setTimeout(applyEquipsAll, 200);
-    setTimeout(applyEquipsAll, 900);
-    setTimeout(applyEquipsAll, 1800);
+    setTimeout(applyEquipsAll, 400);
+    setTimeout(applyEquipsAll, 1400);
 
     try {
       WB?.on?.("bunnyCountChanged", () => setTimeout(applyEquipsAll, 50));
       WB?.on?.("bunnySpawned", () => setTimeout(applyEquipsAll, 50));
-    } catch {}
-
-    // DOM増減にも追従
-    try {
-      const layer = document.getElementById("bunnyLayer") || document.body;
-      const mo = new MutationObserver(() => setTimeout(applyEquipsAll, 30));
-      mo.observe(layer, { childList: true, subtree: true });
     } catch {}
   }
 
@@ -919,7 +912,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     injectHudButton();
 
     if (window.WB) attach(window.WB);
-    else waitFor(() => window.WB).then((wb) => attach(wb)).catch(() => attach(null));
+    else {
+      waitFor(() => window.WB).then((wb) => attach(wb)).catch(() => attach(null));
+    }
   });
 
   /* =========================
