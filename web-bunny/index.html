@@ -34,33 +34,16 @@
       <button id="resetBtn" type="button">リセット</button>
     </div>
 
-    <!-- ★称号の常時表示枠（syougou.js がここに表示する想定） -->
     <div id="title" aria-label="current-title"></div>
   </header>
 
   <!-- ===== メインフィールド ===== -->
   <main id="field">
-    <!-- ★ 背景色レイヤー（最背面） -->
     <div id="bgLayer"></div>
-
-    <!-- 天気 -->
     <div id="tenkiLayer"></div>
-
-    <!-- ゲーム要素 -->
     <div id="bunnyLayer"></div>
     <div id="coinLayer"></div>
   </main>
-
-  <!-- ===== BGM ===== -->
-  <script type="module">
-    import { bgmMountSettingsUI, bgmPlaySpecial, bgmClearSpecial } from "./BGM.js";
-    bgmMountSettingsUI({ position: "top-right", title: "BGM" });
-
-    window.BGM = {
-      playSpecial: bgmPlaySpecial,
-      clearSpecial: bgmClearSpecial
-    };
-  </script>
 
   <!-- ★ 背景（朝昼夜：色だけで判定） -->
   <script src="./bgcolor.js"></script>
@@ -74,19 +57,18 @@
   <!-- ===== コア（WBを作る） ===== -->
   <script src="./app.js"></script>
 
-  <!-- ===== 拡張（WB依存） ===== -->
+  <!-- ✅ BGM：必ず app.js の後（WBを上書きで消されないように） -->
+  <script src="./BGM.js"></script>
 
-  <!-- お洒落（衣装）※WB依存なので app.js の後に置く -->
+  <!-- ===== 拡張（WB依存） ===== -->
   <script src="./isyou.js"></script>
 
   <script src="./zisseki.js"></script>
   <script src="./syougou.js"></script>
   <script src="./omukae.js"></script>
 
-  <!-- 図鑑（実績/称号タブ付き） -->
   <script src="./zukan.js"></script>
 
-  <!-- 旅立ち & スロット（WB依存） -->
   <script src="./farewell_messages.js"></script>
   <script src="./tabidati.js"></script>
   <script src="./slot.js"></script>
