@@ -41,7 +41,6 @@
     try {
       if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
     } catch {}
-
     __syQueue.push([key, n]);
 
     if (!__syRetryTimer) {
@@ -60,7 +59,7 @@
           }
           return;
         }
-        if (tries >= 40) { // 約8秒で諦め
+        if (tries >= 40) {
           clearInterval(__syRetryTimer);
           __syRetryTimer = null;
         }
@@ -72,56 +71,26 @@
    * Config
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v3",       // { itemKey:number }
-    equipped: "wb_isyou_equipped_v3", // { bornAt: { slotKey: itemKey } }
+    owned: "wb_isyou_owned_v3",        // { itemKey:number }
+    equipped: "wb_isyou_equipped_v3",  // { bornAt: { slotKey: itemKey } }
   };
 
   // slot: "hat" は置き換え
   // ★追加：aimasuku / ahiru も hat に入れる（assets/isyou/ にある前提）
   const ITEMS = {
-  partyhat: {
-    slot: "hat",
-    label: "パーティーハット",
-    img: "./assets/isyou/partyhat.png",
-    price: 500,
-  },
-  crown: {
-    slot: "hat",
-    label: "クラウン",
-    img: "./assets/isyou/crown.png",
-    price: 900,
-  },
-  ribbon: {
-    slot: "hat",
-    label: "リボン",
-    img: "./assets/isyou/ribbon.png",
-    price: 700,
-  },
+    partyhat: { slot: "hat", label: "パーティーハット", img: "./assets/isyou/partyhat.png", price: 500 },
+    crown:    { slot: "hat", label: "クラウン",         img: "./assets/isyou/crown.png",    price: 900 },
+    ribbon:   { slot: "hat", label: "リボン",           img: "./assets/isyou/ribbon.png",   price: 700 },
 
-  // ★追加（hat）
-  aimasuku: {
-    slot: "hat",
-    label: "アイマスク",
-    img: "./assets/isyou/aimasuku.png",
-    price: 400,
-  },
-  ahiru: {
-    slot: "hat",
-    label: "あひる",
-    img: "./assets/isyou/ahiru.png",
-    price: 450,
-  },
-};
+    aimasuku: { slot: "hat", label: "アイマスク",       img: "./assets/isyou/aimasuku.png", price: 400 },
+    ahiru:    { slot: "hat", label: "あひる",           img: "./assets/isyou/ahiru.png",    price: 450 },
+  };
 
-  // 帽子位置（うさぎ画像に対する割合）
-  // 「うさぎ画像と完全一致」＝基準矩形(うさぎimg)と座標が一致するように計算（offset系）
+  // ★完全一致：うさぎ画像とアクセ矩形を一致させる
+  // matchBunny:true の slot は「うさぎimgの left/top/width/height = アクセ」になる
   const ANCHOR = {
-    const ANCHOR = {
-  hat: {
-    matchBunny: true, // ★追加：うさぎ画像と完全一致（位置/サイズ）
-  },
-};
-
+    hat: { matchBunny: true },
+  };
 
   /* =========================
    * State
@@ -130,11 +99,11 @@
     owned: {},
     equipped: {},
 
-    mode: "browse",        // "browse" | "equip"
-    selectedItem: null,    // itemKey
-    pendingAction: "equip",// "equip" | "remove"
+    mode: "browse",         // "browse" | "equip"
+    selectedItem: null,     // itemKey
+    pendingAction: "equip", // "equip" | "remove"
 
-    selectedWrap: null,    // .bunnyWrap
+    selectedWrap: null,     // .bunnyWrap
     selectedBornAt: null,
     removeSlot: null,
   };
@@ -293,7 +262,6 @@
   background: rgba(0,0,0,.06);
   font-weight: 1000; font-size:12px;
 }
-#isyouModal .badge.on{ background: rgba(120,210,255,.22); }
 #isyouModal .badge.lock{ background: rgba(255,120,120,.18); }
 
 /* === equip confirm bar === */
@@ -337,8 +305,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
 .bunnyWrap{ position: relative; }
 .bunnyWrap .isyouAcc{
   position:absolute;
-  left:0; top:0;
-  right:0; bottom:0;
+  left:0; top:0; right:0; bottom:0;
   pointer-events:none;
   z-index: 5;
   contain: layout paint;
@@ -447,12 +414,9 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       toast("コインが足りない…！");
       return false;
     }
-
     state.owned[itemKey] = ownedCount(itemKey) + 1;
     saveAll();
-
     syAdd("omukae", 1);
-
     toast(`🛍️ 購入：${it.label}`);
     renderModal();
     return true;
@@ -676,7 +640,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
   }
 
   /* =========================
-   * fitToBunny (perfect match using offset coords)
+   * fitToBunny (perfect match)
    * ========================= */
   function getBunnyImg(wrap) {
     if (!wrap) return null;
@@ -684,8 +648,8 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
     return (
       wrap.querySelector("img.bunny") ||
       wrap.querySelector("img.bunnyImg") ||
-      wrap.querySelector("img") ||
       wrap.querySelector(".bunny img") ||
+      wrap.querySelector("img") ||
       null
     );
   }
@@ -718,83 +682,71 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       y += cur.offsetTop || 0;
       cur = cur.offsetParent;
     }
-    // offsetParentがwrapに到達できない構造なら fallback
     if (cur !== ancestor) return null;
     return { x, y };
   }
 
   function fitNodeToBunny(wrap, bunnyImg, node, slot) {
-  if (!wrap || !bunnyImg || !node) return;
+    if (!wrap || !bunnyImg || !node) return;
 
-  // offset系で wrap 内の bunnyImg 矩形を取る（transform/flipに強い）
-  const off = relOffsetTo(bunnyImg, wrap);
-  let left, top, w, h;
+    // offset系で wrap 内の bunnyImg 矩形を取る（transform/flipに強い）
+    const off = relOffsetTo(bunnyImg, wrap);
+    let left, top, w, h;
 
-  if (off) {
-    left = off.x;
-    top  = off.y;
-    w = bunnyImg.offsetWidth || bunnyImg.clientWidth || 0;
-    h = bunnyImg.offsetHeight || bunnyImg.clientHeight || 0;
-  } else {
-    const br = bunnyImg.getBoundingClientRect();
-    const wr = wrap.getBoundingClientRect();
-    left = br.left - wr.left;
-    top  = br.top  - wr.top;
-    w = br.width;
-    h = br.height;
-  }
+    if (off) {
+      left = off.x;
+      top  = off.y;
+      w = bunnyImg.offsetWidth || bunnyImg.clientWidth || 0;
+      h = bunnyImg.offsetHeight || bunnyImg.clientHeight || 0;
+    } else {
+      // fallback
+      const br = bunnyImg.getBoundingClientRect();
+      const wr = wrap.getBoundingClientRect();
+      left = br.left - wr.left;
+      top  = br.top  - wr.top;
+      w = br.width;
+      h = br.height;
+    }
 
-  if (!(w > 0 && h > 0)) return;
+    if (!(w > 0 && h > 0)) return;
 
-  const a = ANCHOR[slot] || {};
+    const a = ANCHOR[slot] || {};
 
-  // ★完全一致モード：うさぎ画像の矩形 = アクセ矩形
-  if (a.matchBunny) {
+    // ★完全一致モード
+    if (a.matchBunny) {
+      node.style.left = `${left}px`;
+      node.style.top = `${top}px`;
+      node.style.width = `${w}px`;
+      node.style.height = `${h}px`;
+      return;
+    }
+
+    // ここは将来「頭に置く」モードに戻したい時用に残してある（今は未使用）
     node.style.left = `${left}px`;
     node.style.top = `${top}px`;
     node.style.width = `${w}px`;
     node.style.height = `${h}px`;
-    return;
   }
 
-  // （ここから下は“頭に置く”アンカーモード用：残しておくならこのまま）
-  const x = (a.x ?? 0.5);
-  const y = (a.y ?? 0.06);
-  const ww = (a.w ?? 0.58);
-  const lift = (a.lift ?? 0.40);
-
-  const pw = w * ww;
-  const px = left + w * x - pw / 2;
-  const py = top + h * y - pw * lift;
-
-  node.style.left = `${px}px`;
-  node.style.top = `${py}px`;
-  node.style.width = `${pw}px`;
-  node.style.height = `${pw}px`;
-}
-
-
-  // 追従用：wrapごとに監視（画像サイズ変化・src差し替え・DOM変化）
-  const wrapWatch = new WeakMap(); // wrap -> { ro, mo }
+  // 追従用：wrapごとに監視
+  const wrapWatch = new WeakMap(); // wrap -> { ro, mo, schedule }
 
   function ensureFollow(wrap, bunnyImg) {
     if (!wrap || !bunnyImg) return;
-
     if (wrapWatch.has(wrap)) return;
-    let rafId = 0;
 
+    let rafId = 0;
     const schedule = () => {
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = 0;
-        // 装着中の全slotを再fit
         try {
           const box = wrap.querySelector(":scope > .isyouAcc");
           if (!box) return;
+          const b = getBunnyImg(wrap);
+          if (!b) return;
           box.querySelectorAll("[data-slot]").forEach((node) => {
             const slot = node.getAttribute("data-slot") || "hat";
-            const b = getBunnyImg(wrap);
-            if (!b) return;
             fitNodeToBunny(wrap, b, node, slot);
           });
         } catch {}
@@ -843,7 +795,7 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       fitNodeToBunny(wrap, b, node, slot);
     };
 
-    // 2回かける（レイアウト確定用）
+    // 2回（レイアウト確定用）
     requestAnimationFrame(() => requestAnimationFrame(fit));
     img.onload = () => requestAnimationFrame(() => requestAnimationFrame(fit));
 
@@ -993,11 +945,10 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       WB?.on?.("bunnySpawned", () => setTimeout(applyEquipsAll, 50));
     } catch {}
 
-    // DOM増減にも追従（WBがイベント出さない環境向け）
+    // DOM増減にも追従
     try {
       const layer = document.getElementById("bunnyLayer") || document.body;
       const mo = new MutationObserver(() => {
-        // 短時間にまとめる
         setTimeout(applyEquipsAll, 30);
       });
       mo.observe(layer, { childList: true, subtree: true });
