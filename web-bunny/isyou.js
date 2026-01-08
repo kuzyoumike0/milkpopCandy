@@ -1,17 +1,16 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V30.1）
+// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flip完全対応＋SE）完全版（V30.4）
 // ✅ 修正点（重要）
-// 1) aimasuku 等のアクセが「前面のうさぎを貫通して最前に出る」問題を根絶
-//    → “グローバル最前面overlayにhatを描く”方式をやめ、各うさぎのwrap内にアクセを描画（同じスタッキングで重なり自然）
-// 2) ブラウザが重くなる原因を削減
-//    → applyEquipsAllで毎回全生成しない / rAF常時ループしない
-//    → 「アクセが存在する時だけ」軽い同期ループ（約12fps）を回し、rect計算を最小化
-// 3) 赤枠は引き続き確実に表示（グローバル選択枠DIV）
+// 1) hatが「他のうさぎより最前に出る」問題を根絶
+//    → bunnyWrap を isolation:isolate で必ずスタッキングコンテキスト化
+// 2) hat等は “実寸サイズ（natural）” のまま、耳と耳の間にフィット（naturalPoint）
+// 3) 重さ対策：アクセがある時だけ軽い同期ループ（~12fps）維持
+// 4) 赤枠はglobalで確実表示
 //
 // ★そのまま isyou.js をこれに差し替え★
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V30.1", Date.now());
+  console.log("[isyou.js] LOADED V30.4", Date.now());
 
   /* =========================
    * Wait
@@ -160,8 +159,8 @@
    * Config / Items
    * ========================= */
   const LS = {
-    owned: "wb_isyou_owned_v9",
-    equipped: "wb_isyou_equipped_v9",
+    owned: "wb_isyou_owned_v11",
+    equipped: "wb_isyou_equipped_v11",
   };
 
   function imgCandidates(name) {
@@ -173,13 +172,25 @@
     ].map(absUrl);
   }
 
-  const ITEMS = {
-    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500 },
-    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900 },
-    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
-    ahiru:    { slot: "hat", label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450 },
-    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
+  // ✅ 耳と耳の間に “実寸サイズ” で置く
+  // px/py は「うさぎ画像内のポイント」(0〜1)
+  const FIT = {
+    headBetweenEars: { mode: "naturalPoint", px: 0.50, py: 0.03, x: 0, y: -6, scale: 1 },
+    eyeMask:         { mode: "naturalPoint", px: 0.50, py: 0.43, x: 0, y:  0, scale: 1 },
   };
+
+  const ITEMS = {
+    partyhat: { slot: "hat", label: "パーティーハット", imgs: imgCandidates("partyhat.png"), price: 500, fit: FIT.headBetweenEars },
+    crown:    { slot: "hat", label: "クラウン",         imgs: imgCandidates("crown.png"),    price: 900, fit: FIT.headBetweenEars },
+    ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700, fit: FIT.headBetweenEars },
+    ahiru:    { slot: "hat", label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450, fit: { ...FIT.headBetweenEars, py: 0.05, y: -2 } },
+    aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650, fit: FIT.eyeMask },
+  };
+
+  function getItemFit(itemKey) {
+    const it = ITEMS[itemKey];
+    return it?.fit || null;
+  }
 
   /* =========================
    * State
@@ -306,11 +317,17 @@
    * Styles（アクセは各wrap内 / 赤枠はglobal box）
    * ========================= */
   function injectStyles() {
-    if (document.getElementById("isyouStyleV301")) return;
+    if (document.getElementById("isyouStyleV304")) return;
 
     const s = document.createElement("style");
-    s.id = "isyouStyleV301";
+    s.id = "isyouStyleV304";
     s.textContent = `
+/* ✅ bunnyWrap を必ずスタッキングコンテキスト化（帽子が他うさぎより前に出る問題の根治） */
+.bunnyWrap{
+  position: relative;
+  isolation: isolate;
+}
+
 #isyouBackdrop{
   position: fixed; inset:0;
   background: rgba(0,0,0,.36);
@@ -431,18 +448,17 @@
     0 14px 34px rgba(0,0,0,.22);
 }
 
-/* ✅ 各うさぎwrap内アクセ：同じスタッキングに乗せる（重なり自然） */
+/* ✅ 各うさぎwrap内アクセ：同じスタッキングで自然に重なる */
 .isyouAcc{
   position:absolute !important;
   left:0; top:0;
   width:0; height:0;
   pointer-events:none !important;
   overflow: visible !important;
-  z-index: 5 !important; /* うさぎ画像の上（同じwrap内） */
 }
 .isyouAcc .slot{
   position:absolute;
-  inset:0;
+  left:0; top:0;
   transform-origin: 50% 50%;
 }
 .isyouAcc img{
@@ -451,7 +467,6 @@
   display:block;
   object-fit: contain;
   pointer-events:none;
-  transform-origin: 50% 50%;
 }
 `;
     document.head.appendChild(s);
@@ -536,6 +551,14 @@
     } catch {}
   }
 
+  function ensureWrapStacking(wrap) {
+    if (!wrap) return;
+    // ✅ これが「他うさぎより帽子が前に出る」を根治する
+    try { wrap.style.isolation = "isolate"; } catch {}
+    ensureSafePositioning(wrap);
+    try { wrap.style.overflow = "visible"; } catch {}
+  }
+
   function getWrapFromBunnyImg(img) {
     if (!img) return null;
     return img.closest?.(".bunnyWrap") || img.parentElement || null;
@@ -543,10 +566,7 @@
 
   function ensureAccContainer(wrap) {
     if (!wrap) return null;
-    ensureSafePositioning(wrap);
-
-    // クリップされて消えるケースを潰す
-    try { wrap.style.overflow = "visible"; } catch {}
+    ensureWrapStacking(wrap);
 
     let box = wrap.querySelector(":scope > .isyouAcc");
     if (!box) {
@@ -554,7 +574,7 @@
       box.className = "isyouAcc";
       wrap.appendChild(box);
     } else {
-      // DOM順で画像より後に置き直し（上に出す）
+      // DOM順で画像より後に置き直し（同wrap内で確実に上に出す）
       try { wrap.appendChild(box); } catch {}
     }
     return box;
@@ -599,8 +619,43 @@
     }
   }
 
+  // ✅ fit（実寸 + 耳の間）を反映
+  function applyFitToNode(node, fit, accImg) {
+    const mode = String(fit?.mode || "ratio");
+
+    if (mode === "naturalPoint") {
+      const scale = Number(fit?.scale ?? 1) || 1;
+      const nw = (accImg?.naturalWidth  || 0);
+      const nh = (accImg?.naturalHeight || 0);
+
+      const wpx = Math.max(1, Math.round((nw || 64) * scale));
+      const hpx = Math.max(1, Math.round((nh || 64) * scale));
+
+      node.style.width  = `${wpx}px`;
+      node.style.height = `${hpx}px`;
+
+      const px = Math.min(1, Math.max(0, Number(fit?.px ?? 0.5)));
+      const py = Math.min(1, Math.max(0, Number(fit?.py ?? 0.0)));
+
+      const x = Number(fit?.x ?? 0) || 0;
+      const y = Number(fit?.y ?? 0) || 0;
+
+      node.style.left = `${px * 100}%`;
+      node.style.top  = `${py * 100}%`;
+      node.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+      return;
+    }
+
+    // fallback（使わない想定）
+    node.style.left = "0%";
+    node.style.top  = "0%";
+    node.style.width = "100%";
+    node.style.height = "100%";
+    node.style.transform = "";
+  }
+
   // アクセ要素の再利用（重くならない）
-  const liveAcc = new Map(); // key -> { img, wrap, box, slotNodes: Map(slot->node) }
+  const liveAcc = new Map(); // key -> { img, wrap, box, slotNodes: Map(slot->node), itemBySlot: Map(slot->itemKey) }
 
   function upsertAcc(img, slot, itemKey) {
     const key = getKeyFromImg(img);
@@ -615,7 +670,7 @@
     // entry
     let ent = liveAcc.get(String(key));
     if (!ent) {
-      ent = { img, wrap, box, slotNodes: new Map() };
+      ent = { img, wrap, box, slotNodes: new Map(), itemBySlot: new Map() };
       liveAcc.set(String(key), ent);
     } else {
       ent.img = img;
@@ -635,6 +690,8 @@
       try { ent.box.appendChild(node); } catch {}
     }
 
+    ent.itemBySlot.set(slot, itemKey);
+
     // img tag
     let accImg = node.querySelector("img");
     if (!accImg) {
@@ -643,16 +700,26 @@
       node.appendChild(accImg);
     }
 
-    // fill
     const it = ITEMS[itemKey];
     if (!it) return;
 
     // 反転追従（wrap単位の重なりなので自然）
     const wrapMir = isMirrored(wrap);
     const imgMir  = isMirrored(img);
-    node.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
+    // nodeのtransformは “fit” が使うので、反転は img側で行う
+    accImg.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
 
-    setSrcWithFallback(accImg, it.imgs, () => scheduleSyncLoop());
+    // src
+    setSrcWithFallback(accImg, it.imgs, () => {
+      // ✅ 読み込み後に実寸 fit を確定
+      const fit = getItemFit(itemKey);
+      if (fit) applyFitToNode(node, fit, accImg);
+      scheduleSyncLoop();
+    });
+
+    // 先に仮適用（naturalWidthまだ0なら64基準）
+    const fit = getItemFit(itemKey);
+    if (fit) applyFitToNode(node, fit, accImg);
 
     scheduleSyncLoop();
   }
@@ -663,6 +730,7 @@
       const node = ent.slotNodes.get(slot);
       if (node && node.isConnected) { try { node.remove(); } catch {} }
       ent.slotNodes.delete(slot);
+      ent.itemBySlot.delete(slot);
       if (ent.slotNodes.size === 0) liveAcc.delete(String(key));
     }
 
@@ -716,7 +784,6 @@
       syncSelectBoxToImg(state.selectedImg);
     }
 
-    // 同期ループは「アクセがある時だけ」
     scheduleSyncLoop();
   }
 
@@ -728,54 +795,60 @@
 
   function scheduleSyncLoop() {
     if (__syncRaf) return;
-    // アクセも選択枠も無ければ回さない
     if (liveAcc.size === 0 && !(state.mode === "equip" && state.selectedImg)) return;
-
     __syncRaf = requestAnimationFrame(syncTick);
   }
 
   function syncTick(ts) {
     __syncRaf = 0;
 
-    // 12fps程度に制限（重いのを止める）
     if (ts - __syncLast < 80) {
       scheduleSyncLoop();
       return;
     }
     __syncLast = ts;
 
-    // 選択枠追従
     if (state.mode === "equip" && state.selectedImg) {
       syncSelectBoxToImg(state.selectedImg);
     }
 
-    // アクセ追従（wrap内に座標同期）
     if (liveAcc.size > 0) {
       for (const [key, ent] of liveAcc) {
         const img = ent.img;
         if (!img || !img.isConnected) { liveAcc.delete(key); continue; }
+
         const wrap = getWrapFromBunnyImg(img);
         if (!wrap) { liveAcc.delete(key); continue; }
+        ensureWrapStacking(wrap);
+
         const box = ensureAccContainer(wrap);
         if (!box) { liveAcc.delete(key); continue; }
 
         ent.wrap = wrap;
         ent.box = box;
 
-        // 位置同期
         syncAccToImgRect(wrap, img, box);
 
-        // 反転同期（slotごと）
+        // fit/反転を維持
         const wrapMir = isMirrored(wrap);
         const imgMir  = isMirrored(img);
-        for (const node of ent.slotNodes.values()) {
+
+        for (const [slot, node] of ent.slotNodes.entries()) {
           if (!node || !node.isConnected) continue;
-          node.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
+
+          const itemKey = ent.itemBySlot.get(slot);
+          const it = itemKey ? ITEMS[itemKey] : null;
+          const accImg = node.querySelector("img");
+
+          if (it && accImg) {
+            const fit = getItemFit(itemKey);
+            if (fit) applyFitToNode(node, fit, accImg);
+            accImg.style.transform = (!wrapMir && imgMir) ? "scaleX(-1)" : "none";
+          }
         }
       }
     }
 
-    // まだ必要なら継続
     if (liveAcc.size > 0 || (state.mode === "equip" && state.selectedImg)) {
       scheduleSyncLoop();
     }
@@ -1086,7 +1159,6 @@
 
     saveAll();
 
-    // ここで差分だけ当てる（軽い）
     upsertAcc(img, it.slot, itemKey);
     scheduleSyncLoop();
 
@@ -1144,7 +1216,6 @@
     if (!e?.target) return;
     if (!isInsideBunnyLayer(e.target)) return;
 
-    // モーダル内は除外
     if (backdrop && backdrop.style.display !== "none") {
       const inModal = e.target?.closest?.("#isyouModal");
       if (inModal) return;
@@ -1207,24 +1278,20 @@
     ensureModal();
     ensureConfirmBar();
 
-    // ✅ captureで遮断（コイン根絶）
     document.addEventListener("pointerdown", onPointerDownCapture, true);
     document.addEventListener("pointerup", onPointerUpCapture, true);
     document.addEventListener("click", onClickCapture, true);
 
     preloadEquipSe();
 
-    // 初回＆遅延
     setTimeout(applyEquipsAll, 120);
     setTimeout(applyEquipsAll, 420);
     setTimeout(applyEquipsAll, 900);
     setTimeout(applyEquipsAll, 1600);
 
-    // resize系（軽い同期）
     window.addEventListener("resize", () => scheduleSyncLoop(), { passive: true });
     window.addEventListener("scroll",  () => scheduleSyncLoop(), { passive: true });
 
-    // DOM追加にも追従（ただし apply はまとめて）
     try {
       const layer = document.getElementById("bunnyLayer");
       if (layer) {
