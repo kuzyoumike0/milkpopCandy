@@ -1,4 +1,4 @@
-// tenki.js（UFOレア飛来つき）
+// tenki.js（UFOレア飛来 + 出現時SEつき）
 (() => {
   const FIELD_ID = "tenkiLayer";
   const HUD_ID = "hud";
@@ -21,7 +21,8 @@
   /* =========================
    * 👽 UFO（レアで左→右に画面外から画面外へ）
    * ========================= */
-  const UFO_SRC = "./assets/tenki/UFO.png";
+  const UFO_IMG_SRC = "./assets/tenki/UFO.png";
+  const UFO_SE_SRC  = "./assets/UFO.mp3";
 
   // レア確率：この間隔ごとに判定
   const UFO_CHECK_MS = 6000;
@@ -80,6 +81,53 @@
   };
 
   /* =========================
+   * Audio（UFO SE）
+   * - iOS等で自動再生ブロックがあるので「最初のタッチで解錠」してから鳴らす
+   * ========================= */
+  let audioUnlocked = false;
+  let ufoSe = null;
+
+  function unlockAudioOnce() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+
+    try {
+      ufoSe = new Audio(UFO_SE_SRC);
+      ufoSe.preload = "auto";
+      ufoSe.volume = 0.85;
+
+      // 解錠（無音→再生→停止）
+      ufoSe.muted = true;
+      ufoSe.currentTime = 0;
+      ufoSe.play()
+        .then(() => {
+          ufoSe.pause();
+          ufoSe.currentTime = 0;
+          ufoSe.muted = false;
+        })
+        .catch(() => {
+          // ブロックされても、次回ユーザー操作後に鳴る可能性は残す
+          try { ufoSe.muted = false; } catch {}
+        });
+    } catch {
+      ufoSe = null;
+    }
+  }
+
+  // どこでも最初の操作で解錠
+  window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
+
+  function playUfoSe() {
+    // まだ解錠されてない場合：ここでは強制解錠はせず、鳴らせる時だけ鳴らす
+    try {
+      if (!ufoSe) ufoSe = new Audio(UFO_SE_SRC);
+      ufoSe.currentTime = 0;
+      ufoSe.volume = 0.85;
+      ufoSe.play().catch(() => {});
+    } catch {}
+  }
+
+  /* =========================
      ☀️ 太陽（にじみ演出なし）
   ========================= */
   const sunny = document.createElement("img");
@@ -124,7 +172,7 @@
     Object.assign(cloud.style, {
       position: "absolute",
       left: "0px",
-      top: `${pickCloudYpx()}px`,          // ★HUDの下から出す
+      top: `${pickCloudYpx()}px`, // ★HUDの下から出す
       width: `${size}px`,
       pointerEvents: "none",
       zIndex: String(cloud._z),
@@ -147,17 +195,20 @@
   }, 7000);
 
   /* =========================
-   * 👽 UFO 生成（左画面外→右画面外）
+   * 👽 UFO 生成（左画面外→右画面外） + 出現時SE
    * ========================= */
   function spawnUFO() {
     if (ufoActive) return;
     ufoActive = true;
 
+    // ★出現時にSE
+    playUfoSe();
+
     const fr = fieldRect();
     const top = computeTopOffset();
 
     const ufo = document.createElement("img");
-    ufo.src = UFO_SRC;
+    ufo.src = UFO_IMG_SRC;
     ufo.draggable = false;
 
     const size = UFO_MIN_SIZE + Math.random() * (UFO_MAX_SIZE - UFO_MIN_SIZE);
@@ -174,7 +225,7 @@
     let x = -size - 40;
     const endX = fr.width + size + 60;
 
-    // z-index：雲のちょい上〜太陽より下/上は好み。ここは雲より上にして目立たせる
+    // z-index：雲より上にして目立たせる
     const z = 5;
 
     Object.assign(ufo.style, {
@@ -192,9 +243,6 @@
 
     field.appendChild(ufo);
 
-    const fadeInDur = 700;
-    const fadeOutDur = 700;
-
     let startedAt = performance.now();
     let lastTs = startedAt;
 
@@ -209,14 +257,13 @@
       const t = (ts - startedAt) / 1000;
       const bob = Math.sin(t * bobSpeed * Math.PI * 2) * bobAmp;
 
-      // フェード
-      const dist = endX - (-size - 40);
-      const p = clamp01((x - (-size - 40)) / Math.max(1, dist));
+      // フェード（入り/出）
+      const startX = -size - 40;
+      const dist = endX - startX;
+      const p = clamp01((x - startX) / Math.max(1, dist));
       let op = 1;
 
-      // 入り
       if (p < 0.12) op = p / 0.12;
-      // 出
       if (p > 0.88) op = (1 - p) / 0.12;
 
       ufo.style.opacity = String(clamp01(op));
@@ -227,7 +274,6 @@
         ufoActive = false;
         return;
       }
-
       requestAnimationFrame(step);
     }
 
@@ -257,7 +303,7 @@
 
       if (c._x > fr.width + 150) {
         c._x = -200;
-        c.style.top = `${pickCloudYpx()}px`;  // ★再出現もHUD下へ
+        c.style.top = `${pickCloudYpx()}px`; // ★再出現もHUD下へ
       }
       c.style.transform = `translateX(${c._x}px)`;
     });
