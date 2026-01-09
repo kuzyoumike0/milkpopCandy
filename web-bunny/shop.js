@@ -42,14 +42,11 @@
       return fallback;
     }
   }
-  function saveJson(key, v) {
-    try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
-  }
+  function saveJson(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
 
   let owned = loadJson(LS_OWNED, {});
   let state = loadJson(LS_STATE, { mirrorballEnabled: false }); // ★読めない時はOFFで安全
 
-  // ★JSONが壊れててもここで必ず復旧して保存し直す
   function normalizeAndPersist() {
     if (!owned || typeof owned !== "object") owned = {};
     if (!state || typeof state !== "object") state = { mirrorballEnabled: false };
@@ -303,7 +300,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     owned[ITEM.key] = true;
     saveJson(LS_OWNED, owned);
 
-    // ★購入直後はONにする（でも外せる）
+    // ★購入直後はON（でも外せる）
     setEnabled(true);
 
     return { ok: true, reason: "bought" };
@@ -426,7 +423,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       return;
     }
 
-    // captureで先に止める
     shopBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -434,7 +430,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       openModal();
     }, true);
 
-    // 初期通知
+    // 初期通知（購入済み/設置状態を bgcolor に渡す）
     notify();
   })();
 })();
