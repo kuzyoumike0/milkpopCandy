@@ -1,10 +1,14 @@
 // gameMenu.js（非module）
 // ✅ 右上にハンバーガーメニュー1個だけ作る
-// ✅ メニュー項目：🎀お洒落 / 📖図鑑 / 🎵BGM / 🛍️ショップ
-// ✅ それぞれ：ISYOU.openModal / WB.zukan.open / WB.bgm.openModal / shop（WB.shop.open or #shopBtn.click）
+// ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🛏️ベッド配置 / 📖図鑑 / 🎵BGM
+// ✅ 呼び出し：
+//   - shop   : WB.shop.open()
+//   - isyou  : ISYOU.openModal()
+//   - bed    : HAIKEI.openBedPlacer()（haikei.js V4+）
+//   - zukan  : WB.zukan.open("bunny")
+//   - bgm    : WB.bgm.openModal()
 // ✅ 他スクリプトより先に読み込まれてもOK（呼び出しはクリック時）
 // ✅ 外側クリックで閉じる
-// ✅ HUDから消しても動くように「shopBtnが無くてもWB.shop.open/SHOP.open」を優先
 
 (() => {
   "use strict";
@@ -44,7 +48,7 @@
 #${UI.panel}{
   position:fixed; top:62px; right:10px;
   z-index:2147483101;
-  width:min(260px, 92vw);
+  width:min(270px, 92vw);
   background:rgba(255,255,255,.98);
   border-radius:16px;
   box-shadow:0 18px 44px rgba(0,0,0,.22);
@@ -99,13 +103,15 @@
       panel.innerHTML = `
         <div class="ttl">🐰 Milkpop メニュー</div>
         <div class="list">
+          <button class="item" type="button" data-act="shop">🛒 ショップ</button>
           <button class="item" type="button" data-act="isyou">🎀 お洒落</button>
+          <button class="item" type="button" data-act="bed">🛏️ ベッド配置</button>
           <button class="item" type="button" data-act="zukan">📖 図鑑</button>
           <button class="item" type="button" data-act="bgm">🎵 BGM</button>
-          <button class="item" type="button" data-act="shop">🛍️ ショップ</button>
         </div>
         <div class="note">
-          ※ 画面クリックで音が解放されます（BGMは一度クリックが必要）
+          ※ 画面クリックで音が解放されます（BGMは一度クリックが必要）<br>
+          ※ ベッド配置：モードに入ったら「置きたい場所をクリック」で確定（Escで中止）
         </div>
       `;
       document.body.appendChild(panel);
@@ -114,9 +120,8 @@
     return { btn, panel };
   }
 
-  function closePanel(panel) {
-    panel.style.display = "none";
-  }
+  function openPanel(panel) { panel.style.display = "block"; }
+  function closePanel(panel) { panel.style.display = "none"; }
   function togglePanel(panel) {
     panel.style.display = (panel.style.display === "block") ? "none" : "block";
   }
@@ -126,24 +131,24 @@
     setTimeout(() => { try { fn(); } catch {} }, retryMs);
   }
 
-  // ✅ shop.js を「#shopBtn専用」にしていても開けるように
-  // 優先順位：
-  // 1) window.SHOP.open()（もし用意しているなら）
-  // 2) window.WB.shop.open()
-  // 3) #shopBtn.click()（DOMが残っていれば）
-  function openShop() {
-    safeCall(() => {
-      if (window.SHOP?.open) return window.SHOP.open();
-      if (window.WB?.shop?.open) return window.WB.shop.open();
-
-      const btn = document.getElementById("shopBtn");
-      if (btn) btn.click();
-    });
-  }
-
   function handleAction(act) {
+    if (act === "shop") {
+      // shop.js が WB.shop.open を提供
+      safeCall(() => window.WB?.shop?.open?.());
+      return;
+    }
     if (act === "isyou") {
       safeCall(() => window.ISYOU?.openModal?.());
+      return;
+    }
+    if (act === "bed") {
+      // haikei.js が HAIKEI.openBedPlacer を提供
+      safeCall(() => window.HAIKEI?.openBedPlacer?.());
+      // 互換（WBに生えてる場合）
+      setTimeout(() => {
+        if (window.HAIKEI?.openBedPlacer) return;
+        try { window.WB?.haikei?.openBedPlacer?.(); } catch {}
+      }, 0);
       return;
     }
     if (act === "zukan") {
@@ -151,18 +156,11 @@
       return;
     }
     if (act === "bgm") {
-      // ✅ BGM.js（モーダル版）で openModal を提供
       safeCall(() => window.WB?.bgm?.openModal?.());
-
-      // 互換：もし openModal が無い旧版なら mountUI を呼ぶ
       setTimeout(() => {
         if (window.WB?.bgm?.openModal) return;
         try { window.WB?.bgm?.mountUI?.({ position: "top-right", title: "BGM" }); } catch {}
       }, 0);
-      return;
-    }
-    if (act === "shop") {
-      openShop();
       return;
     }
   }
@@ -185,7 +183,6 @@
       handleAction(b.getAttribute("data-act"));
     });
 
-    // 外側クリックで閉じる
     document.addEventListener("pointerdown", (e) => {
       if (panel.style.display !== "block") return;
       if (panel.contains(e.target) || btn.contains(e.target)) return;
