@@ -1,106 +1,176 @@
-<!doctype html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <title>Milkpop牧場</title>
+/* =========================
+   RESET / BASE
+========================= */
+*{ box-sizing:border-box; }
+html,body{
+  margin:0;
+  padding:0;
+  background:#fff3f8;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow:hidden;
+}
 
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+/* =========================
+   HUD（最重要）
+========================= */
+#hud{
+  position:fixed;
+  top:8px;
+  left:50%;
+  transform:translateX(-50%);
+  display:flex;
+  gap:8px;
+  z-index:2147483647;
+  pointer-events:auto;
+  align-items:center;
+}
+#hudButtons{ display:flex; gap:8px; }
 
-  <link rel="manifest" href="./manifest.webmanifest" />
-  <meta name="theme-color" content="#ffd6e7" />
+#hud button{
+  padding:6px 10px;
+  border-radius:10px;
+  border:none;
+  background:#fff;
+  box-shadow:0 4px 12px rgba(0,0,0,.15);
+  cursor:pointer;
+  font-weight:800;
+}
 
-  <link rel="stylesheet" href="./style.css?v=20260109_2" />
+#coin{
+  padding:6px 12px;
+  background:#fff;
+  border-radius:12px;
+  box-shadow:0 4px 12px rgba(0,0,0,.15);
+  font-weight:900;
+}
 
-  <meta http-equiv="Content-Security-Policy"
-        content="
-          default-src 'self';
-          img-src 'self' data:;
-          media-src 'self';
-          style-src 'self' 'unsafe-inline';
-          script-src 'self' 'unsafe-inline';
-          font-src 'self' data:;
-        ">
-</head>
+/* =========================
+   FIELD
+========================= */
+#field{
+  position:fixed;
+  inset:0;
+  overflow:hidden;
 
-<body>
+  /* ★真っ黒事故の最後の砦：ここは黒固定にしない */
+  background:#fff3f8;
 
-  <!-- ===== HUD ===== -->
-  <header id="hud">
-    <div id="coin">🪙 <span id="coinValue">0</span></div>
+  z-index:0;
+}
 
-    <div id="hudButtons">
-      <!-- ✅ omukae と shop は別ボタン -->
-      <button id="omukaeBtn" type="button">お迎え</button>
-      <button id="shopBtn" type="button">ショップ</button>
+/* ✅ bgLayer は “背景専用の板” として必ず見えるようにする */
+#bgLayer{
+  position:absolute;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+}
 
-      <button id="slotBtn" type="button">スロット</button>
-      <button id="departBtn" type="button">旅立ち</button>
-      <button id="resetBtn" type="button">リセット</button>
-    </div>
+/* その上に天気 */
+#tenkiLayer{
+  position:absolute;
+  inset:0;
+  z-index:1;
+  pointer-events:none;
+}
 
-    <div id="title" aria-label="current-title"></div>
-  </header>
+/* さらに上に うさぎ/コイン */
+#bunnyLayer,
+#coinLayer{
+  position:absolute;
+  inset:0;
+  z-index:2;
+}
 
-  <!-- ===== メインフィールド ===== -->
-  <main id="field">
-    <!-- ✅ bgLayer は「背景専用」：ここにミラーボール/ディスコFXが乗る -->
-    <div id="bgLayer"></div>
+#coinLayer{ pointer-events:none; }
+.coin, .ougonunchi{ pointer-events:auto; }
 
-    <div id="tenkiLayer"></div>
-    <div id="bunnyLayer"></div>
-    <div id="coinLayer"></div>
-  </main>
+/* =========================
+   COIN
+========================= */
+.coin{
+  position:absolute;
+  width:66px;
+  height:66px;
+  user-select:none;
+  cursor:pointer;
+}
+.ougonunchi{
+  position:absolute;
+  width:26px;
+  height:auto;
+  cursor:pointer;
+  filter:drop-shadow(0 0 12px gold);
+}
 
-  <!-- ✅ WBを先に用意（WB not found を根絶） -->
-  <script src="./wb_boot.js?v=20260109_2"></script>
+/* =========================
+   BUNNY
+========================= */
+.bunnyWrap{
+  position:absolute;
+  width:140px;
+  height:140px;
+  pointer-events:auto;
+}
+.bunny{
+  position:absolute;
+  bottom:0;
+  left:0;
+  width:120px;
+  height:auto;
+  user-select:none;
+  pointer-events:none;
+}
+.bunnyWrap.flip .bunny{
+  transform:scaleX(-1);
+}
 
-  <!-- ✅ 背景（朝昼夜 + ミラーボール/ディスコ） -->
-  <script src="./bgcolor.js?v=20260109_2"></script>
+/* =========================
+   HEART（旧仕様が残っていてもOK）
+========================= */
+.bunnyHeart{
+  position:absolute;
+  top:-22px;
+  left:50%;
+  width:28px;
+  transform:translateX(-50%);
+  opacity:0;
+  pointer-events:none;
+}
+.bunnyHeart.show,
+.bunnyHeart.visible{
+  opacity:1;
+}
 
-  <!-- 天気 -->
-  <script src="./tenki.js?v=20260109_2"></script>
+/* =========================
+   MODAL
+========================= */
+.modalBackdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.45);
+  display:grid;
+  place-items:center;
+  z-index:100;
+}
+.modal{
+  width:min(92vw,520px);
+  max-height:88vh;
+  background:#fff;
+  border-radius:18px;
+  padding:14px;
+  box-shadow:0 20px 60px rgba(0,0,0,.3);
+  overflow:auto;
+}
 
-  <!-- 花火 -->
-  <script src="./hanabi.js?v=20260109_2"></script>
-
-  <!-- ===== コア（WBを作る） ===== -->
-  <script src="./app.js?v=20260109_2"></script>
-
-  <!-- ✅ BGM：必ず app.js の後 -->
-  <script src="./BGM.js?v=20260109_2"></script>
-
-  <!-- ✅ ショップ（ミラーボール購入＋設置ON/OFF） -->
-  <script src="./shop.js?v=20260109_2"></script>
-
-  <!-- ===== 拡張（WB依存） ===== -->
-  <script src="./isyou.js?v=20260109_2"></script>
-  <script src="./zisseki.js?v=20260109_2"></script>
-  <script src="./syougou.js?v=20260109_2"></script>
-
-  <!-- ✅ omukae は別ボタンで開く実装にしてね（omukae.js側対応） -->
-  <script src="./omukae.js?v=20260109_2"></script>
-
-  <script src="./zukan.js?v=20260109_2"></script>
-  <script src="./farewell_messages.js?v=20260109_2"></script>
-  <script src="./tabidati.js?v=20260109_2"></script>
-  <script src="./slot.js?v=20260109_2"></script>
-
-  <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
-  <script>
-    (function () {
-      const params = new URLSearchParams(location.search);
-      const noSw = params.get("nosw") === "1";
-
-      if (noSw) {
-        console.warn("[SW] disabled by ?nosw=1");
-        return;
-      }
-
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js").catch(() => {});
-      }
-    })();
-  </script>
-
-</body>
-</html>
+/* =========================
+   SAKU
+========================= */
+.saku{
+  position:fixed;
+  bottom:6px;
+  width:96px;
+  opacity:.9;
+  pointer-events:none;
+  z-index:4;
+}
