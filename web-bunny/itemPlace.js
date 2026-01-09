@@ -1,39 +1,40 @@
-// itemPlace.js（V4.2）
+// itemPlace.js（V5：実寸固定版）
 // ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う
 // ✅ ミラーボール(mirrorball)は配置しない（候補にも出さない）
 // ✅ 設置ON/OFFは itemPlace.js が管理（LS: milkpop_itemplace_enabled_v1）
-// ✅ 実寸サイズ：画像の naturalWidth/Height を読んでゴースト枠も実寸
-// ✅ 配置できない問題を根絶：座標基準を #field に固定（bgLayerが0サイズでもOK）
+// ✅ 実寸サイズ：画像の naturalWidth/Height を読んで “常に実寸” で表示（scale完全撤廃）
+// ✅ ゴースト枠も実寸
+// ✅ 座標基準は #field に固定（bgLayerが0サイズでもOK）
 // ✅ 配置モード：赤枠（透明）→ クリックで設置 → ドラッグ移動 → 完了
 // ✅ OFFにした瞬間に撤去（残骸ゼロ）
-// ✅ アイテム選択も itemPlace で完結：セレクト + 「配置物をクリックで選択」
-// ✅ 拡大縮小は不要：常に実寸表示（scale削除）
-// ✅ うさぎの裏に行く：wrap を #bunnyLayer の“直前”に差し込む + z-index低固定
-// ✅ クリックできない不具合根絶：編集中は“全アイテム”を pointer-events 有効にする
+// ✅ アイテム選択も itemPlace で完結（セレクト + 配置物クリックで選択）
+// ✅ うさぎの裏に行く：wrap を #bunnyLayer の直前に差し込む（DOM順）＋ z-index低固定
+// ✅ クリックできない問題根絶：編集中は wrap と obj を pointer-events:auto にする
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V4.2", Date.now());
+  console.log("[itemPlace] LOADED V5", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
-  const LS_STATE_KEY   = "milkpop_itemplace_v4";          // 位置/回転/placed（scaleなし）
-  const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // ON/OFF
+  const LS_STATE_KEY   = "milkpop_itemplace_v5";          // 位置/回転/placed（scaleなし）
+  const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // ON/OFF はここ
 
+  // ✅ クリック座標の基準は field
   const HOST_ID = "field";
 
-  const WRAP_ID  = "itemPlaceWrapV4";
-  const STYLE_ID = "itemPlaceStyleV4";
-  const PANEL_ID = "itemPlacePanelV4";
-  const GHOST_ID = "itemPlaceGhostV4";
+  const WRAP_ID  = "itemPlaceWrapV5";
+  const STYLE_ID = "itemPlaceStyleV5";
+  const PANEL_ID = "itemPlacePanelV5";
+  const GHOST_ID = "itemPlaceGhostV5";
   const TOAST_ID = "itemPlaceToastV1";
 
-  // ✅ 配置アイテム（mirrorballは入れない）
+  // ✅ 配置できる実体アイテムだけ（mirrorballは絶対入れない）
+  // 追加したい場合はここに増やす（keyは shop.js の owned と一致）
   const PLACE_ITEMS = {
     bed: {
       key: "bed",
       label: "ベッド",
       src: "./assets/bg/bed.png",
-      // “裏”にしたいので低め（ただし最終は wrap の z-index が支配）
       z: 1,
       default: { x: 180, y: 280, rot: 0, placed: false },
     },
@@ -64,14 +65,15 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     el.__t = setTimeout(() => { el.style.opacity = "0"; }, 1200);
   }
 
+  // ===== Owned =====
   function loadOwned() { return safeParse(localStorage.getItem(SHOP_OWNED_KEY)) || {}; }
 
   function isOwned(key) {
     try { if (window.WB?.shop?.isOwned) return !!window.WB.shop.isOwned(key); } catch {}
-    const o = loadOwned();
-    return !!o?.[key];
+    return !!loadOwned()?.[key];
   }
 
+  // ===== Enabled (ON/OFF) =====
   function loadEnabled() {
     const j = safeParse(localStorage.getItem(LS_ENABLED_KEY)) || {};
     const out = {};
@@ -81,30 +83,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     return out;
   }
   function saveEnabled(en) { try { localStorage.setItem(LS_ENABLED_KEY, JSON.stringify(en)); } catch {} }
+  function isEnabled(key) { return !!loadEnabled()?.[key]; }
 
-  function isEnabled(key) {
-    const en = loadEnabled();
-    if (key in en) return !!en[key];
-    return true;
-  }
-
-  function setEnabled(key, v) {
-    const en = loadEnabled();
-    en[key] = !!v;
-    saveEnabled(en);
-
-    // OFFにしたら即撤去（placedも落とす）
-    if (!en[key]) {
-      st[key] = st[key] || { ...PLACE_ITEMS[key].default };
-      st[key].placed = false;
-      saveState(st);
-      removeObj(key);
-    }
-
-    try { window.WB?.emit?.("itemplace:enabled_changed", { key, enabled: !!en[key] }); } catch {}
-  }
-
-  // ===== 状態（位置/回転/placed） =====
+  // ===== State (位置/回転/placed) =====
+  // 旧stateに scale が残っていても無視する（読み込みだけして捨てる）
   function loadState() {
     const j = safeParse(localStorage.getItem(LS_STATE_KEY)) || {};
     const out = {};
@@ -122,7 +104,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
   function saveState(st0) { try { localStorage.setItem(LS_STATE_KEY, JSON.stringify(st0)); } catch {} }
 
-  // ===== 画像実寸 =====
+  // ===== 画像実寸（naturalWidth/Height）=====
   const imgSize = {}; // { key: { w, h } }
 
   function preloadSize(key) {
@@ -149,7 +131,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     for (const k of Object.keys(PLACE_ITEMS)) await preloadSize(k);
   }
 
-  // ===== CSS / wrap =====
+  // ===== DOM/Layer =====
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
     const stEl = document.createElement("style");
@@ -160,14 +142,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   inset:0;
   overflow:visible;
 
-  /* ✅ 通常はクリックを邪魔しない */
+  /* 通常はクリックを邪魔しない */
   pointer-events:none;
 
-  /* ✅ “裏”に固定（とにかく低く） */
+  /* “裏”に固定（低め） */
   z-index:1;
 }
 
-/* 編集中だけ、配置物はクリック可能にする（選択できない不具合を潰す） */
 #${WRAP_ID}.ipEditing{
   pointer-events:auto;
 }
@@ -265,14 +246,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     return document.getElementById(HOST_ID) || document.body;
   }
 
-  // ✅ wrap を “bunnyLayer の直前” に差し込む（DOM順で裏）
+  // ✅ wrap を bunnyLayer の直前へ（DOM順で裏）
   function ensureWrap() {
     ensureStyle();
 
     const host = getHost();
     if (!host) return null;
 
-    // host が relative じゃないと inset:0 が効かない
+    // hostがrelativeじゃないと inset:0 が効かない
     try {
       const cs = getComputedStyle(host);
       if (cs.position === "static") host.style.position = "relative";
@@ -284,10 +265,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       wrap.id = WRAP_ID;
     }
 
-    // bunnyLayer が field 直下にいないケースもあるので、存在する親を優先
     const bunny = document.getElementById("bunnyLayer");
-
-    // 1) bunnyLayerが存在し、親がある → その親の直前に入れる
     if (bunny && bunny.parentElement) {
       const parent = bunny.parentElement;
       try {
@@ -298,15 +276,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         parent.insertBefore(wrap, bunny);
       }
     } else {
-      // 2) ないなら host の先頭へ（できるだけ裏）
       if (wrap.parentElement !== host || host.firstChild !== wrap) {
         host.insertBefore(wrap, host.firstChild);
       }
     }
 
-    // とにかく低く（うさぎの上に来る事故を減らす）
     wrap.style.zIndex = "1";
-
     return wrap;
   }
 
@@ -341,7 +316,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     g.style.transform = "translate3d(-9999px,-9999px,0)";
   }
 
-  // ===== 実体 =====
+  // ===== Object =====
   function ensureObj(key) {
     const it = PLACE_ITEMS[key];
     if (!it) return null;
@@ -358,10 +333,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       img.src = it.src;
       img.draggable = false;
       img.style.zIndex = String(it.z ?? 1);
+      img.dataset.ipKey = key;
       img.addEventListener("error", () => console.warn("[itemPlace] load failed:", it.src));
       wrap.appendChild(img);
-    } else if (img.getAttribute("src") !== it.src) {
-      img.src = it.src;
+    } else {
+      img.dataset.ipKey = key;
+      if (img.getAttribute("src") !== it.src) img.src = it.src;
     }
     return img;
   }
@@ -373,7 +350,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   function applyTransform(img, s) {
     img.style.left = `${Math.round(s.x)}px`;
     img.style.top  = `${Math.round(s.y)}px`;
-    img.style.transform = `rotate(${s.rot}deg)`; // ✅ 実寸固定
+    img.style.transform = `rotate(${s.rot}deg)`; // ✅ 実寸固定（scaleなし）
   }
 
   // ===== 編集モード =====
@@ -381,7 +358,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   let selectedKey = "bed";
   let st = loadState();
 
-  // 1本化ドラッグ
+  // ドラッグ（一本化）
   const drag = { active:false, key:"", startX:0, startY:0, baseX:0, baseY:0 };
 
   function ownedKeys() {
@@ -404,7 +381,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       <div class="hint" style="margin-top:6px;">
         透明赤枠の位置をクリックで設置。<br>
         設置後はドラッグで移動。<br>
-        <b>配置物をクリック</b>で選択できます。
+        <b>配置物をクリック</b>で選択できます。<br>
+        （サイズは常に<b>実寸</b>です）
       </div>
     </div>
 
@@ -553,7 +531,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const s = st[key];
     if (!it || !s) return;
 
-    // 未購入 / enabled OFF / 未配置 → 撤去
     if (!isOwned(key) || !isEnabled(key) || !s.placed) {
       removeObj(key);
       return;
@@ -566,16 +543,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     const isSel = editing && key === selectedKey;
     img.classList.toggle("selected", isSel);
-
-    // クリックで選択できるよう dataset を付ける（pointer-eventsはCSSで編集中に有効）
-    img.dataset.ipKey = key;
   }
 
   function syncAll() {
-    // wrapの編集モード反映
     const wrap = ensureWrap();
     if (wrap) wrap.classList.toggle("ipEditing", !!editing);
-
     for (const k of Object.keys(PLACE_ITEMS)) syncOne(k);
   }
 
@@ -595,12 +567,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     showGhostAt(e.clientX, e.clientY, selectedKey);
   }
 
-  // ✅ 置く：wrap/物体以外をクリックしても置ける（UI上は除外）
+  // ✅ 置く（空間クリック）：captureで拾う
   function onPlaceDownCapture(e) {
     if (!editing) return;
     if (isOverUI(e.target)) return;
 
-    // 配置物をクリックした場合は「選択＆ドラッグ開始」に回す（ここでは置かない）
+    // 物体クリックは別処理（選択/ドラッグ）
     const hit = e.target?.closest?.(".itemPlaceObj");
     if (hit && hit.dataset?.ipKey) return;
 
@@ -621,6 +593,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const s = st[selectedKey] || (st[selectedKey] = { ...PLACE_ITEMS[selectedKey].default });
     s.placed = true;
 
+    // ✅ 実寸で中心に置く
     const size = imgSize[selectedKey] || { w: 120, h: 90 };
     s.x = localX - size.w / 2;
     s.y = localY - size.h / 2;
@@ -633,7 +606,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     e.stopImmediatePropagation?.();
   }
 
-  // ✅ 物体をクリック：選択 + ドラッグ
+  // ✅ 物体クリック：選択 + ドラッグ開始
   function onObjDown(e) {
     if (!editing) return;
 
@@ -645,10 +618,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!isOwned(key)) return;
     if (!isEnabled(key)) return;
 
-    // まず選択
     if (key !== selectedKey) selectKey(key);
 
-    // ドラッグ開始
     const s = st[key];
     if (!s || !s.placed) return;
 
@@ -670,16 +641,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!editing) return;
     if (!drag.active) return;
 
-    const key = drag.key;
-    const s = st[key];
+    const s = st[drag.key];
     if (!s) return;
 
     const dx = e.clientX - drag.startX;
     const dy = e.clientY - drag.startY;
+
     s.x = drag.baseX + dx;
     s.y = drag.baseY + dy;
 
-    syncOne(key);
+    syncOne(drag.key);
   }
 
   function onObjUp() {
@@ -706,9 +677,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       ensureWrap()?.classList.add("ipEditing");
 
       document.addEventListener("pointermove", onMoveGhost, { passive: true });
-      document.addEventListener("pointerdown", onPlaceDownCapture, true); // 置く（capture）
+      document.addEventListener("pointerdown", onPlaceDownCapture, true);
 
-      // 物体操作（編集中のみ）
       document.addEventListener("pointerdown", onObjDown, true);
       document.addEventListener("pointermove", onObjMove, { passive: true });
       document.addEventListener("pointerup", onObjUp, { passive: true });
@@ -790,6 +760,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       _stateKey: LS_STATE_KEY,
     };
 
+    // WB互換
     try {
       window.WB = window.WB || {};
       window.WB.itemplace = window.WB.itemplace || {};
