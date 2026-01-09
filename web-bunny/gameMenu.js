@@ -4,7 +4,7 @@
 // ✅ 呼び出し：
 //   - shop     : WB.shop.open()
 //   - isyou    : ISYOU.openModal()
-//   - itemplace: ITEMPLACE.openModal()
+//   - itemplace: ITEMPLACE.open()   ← ★ここ重要（openModalじゃない）
 //   - zukan    : WB.zukan.open("bunny")
 //   - bgm      : WB.bgm.openModal()
 // ✅ 外側クリックで閉じる
@@ -108,7 +108,7 @@
         </div>
         <div class="note">
           ※ BGMは一度クリックが必要です。<br>
-          ※ アイテム配置：選んだアイテムが赤枠で出ます → 置きたい場所をクリックで確定。
+          ※ アイテム配置：選んだアイテムが透明赤枠で出ます → 置きたい場所をクリックで確定。
         </div>
       `;
       document.body.appendChild(panel);
@@ -137,10 +137,18 @@
       return;
     }
     if (act === "itemplace") {
-      safeCall(() => window.ITEMPLACE?.openModal?.());
+      // ✅ 正：ITEMPLACE.open()
+      safeCall(() => window.ITEMPLACE?.open?.());
+
+      // 互換：もし openModal を持つ版が来てもOK
+      setTimeout(() => {
+        if (window.ITEMPLACE?.open) return;
+        try { window.ITEMPLACE?.openModal?.(); } catch {}
+      }, 0);
+
       // 互換：WBに生えてる場合
       setTimeout(() => {
-        if (window.ITEMPLACE?.openModal) return;
+        try { window.WB?.itemplace?.open?.(); } catch {}
         try { window.WB?.itemplace?.openModal?.(); } catch {}
       }, 0);
       return;
