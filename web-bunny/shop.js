@@ -1,64 +1,68 @@
-// shop.js（購入専用：#shopBtn専用 → ✅ハンバーガーメニュー対応版 / 設置ON/OFF削除）
+// shop.js（購入＋設置 完結版：#shopBtn専用 → ✅ハンバーガーメニュー対応 / 設置ON/OFFも内包）
 // ✅ #shopBtn クリックは「メニューから呼ぶ」想定（index.htmlでは非表示でもOK）
 // ✅ ハンバーガーメニュー側が呼べるように window.SHOP.open() / WB.shop.open() を提供
 // ✅ もし #shopBtn が存在するなら従来通りクリックで開く（互換）
 // ✅ owned（購入済み）保存 & 即通知
-// ✅ 設置ON/OFFは一切持たない（itemPlace.js 側で管理）
+// ✅ 設置（placed）もこのファイルだけで完結（itemPlace.js 不要）
 // ✅ 二重起動・二重リスナー根絶
 
 (() => {
   "use strict";
 
   // 二重読み込み防止
-  if (window.__BGSHOP_BUYONLY_V1_INITED__) {
+  if (window.__BGSHOP_BUYPLACE_V2_INITED__) {
     console.warn("[shop.js] already inited; skip re-init");
     return;
   }
-  window.__BGSHOP_BUYONLY_V1_INITED__ = true;
+  window.__BGSHOP_BUYPLACE_V2_INITED__ = true;
 
-  const LS_OWNED = "milkpop_shop_owned_v1";
+  const LS_OWNED  = "milkpop_shop_owned_v1";     // { key:true }
+  const LS_PLACED = "milkpop_shop_placed_v1";    // { key:true }
 
-  // ✅ ショップで買える物（ON/OFFは持たない）
+  // ✅ ショップで買える物（設置可能な物は placeable:true）
   const ITEMS = {
     mirrorball: {
       key: "mirrorball",
       label: "ミラーボール",
-      desc: "（配置はしない）夜の演出は bgcolor.js が見る",
+      desc: "夜の演出は bgcolor.js が見る（設置不要）",
       price: 9000,
       img: "./assets/bg/mirrorball.png",
+      placeable: false,
     },
     bed: {
       key: "bed",
       label: "ベッド",
-      desc: "アイテム配置で置ける（itemPlace.js）",
+      desc: "購入後、ここから設置/撤去できる",
       price: 3500,
       img: "./assets/bg/bed.png",
+      placeable: true,
+      // デフォルト設置位置（% と px で雑に良い感じに）
+      place: { left: "50%", bottom: "10px", w: "260px", anchor: "bottomCenter" },
     },
-
-    // ✅ 追加：oak.png
-    oak: {
-      key: "oak",
-      label: "にんじんの木（オーク）",
-      desc: "アイテム配置で置ける（itemPlace.js）",
-      price: 6000,
-      img: "./assets/bg/oak.png",
-    },
+    // ここに増やすときは placeable と place を追加すればOK
+    // oak: { key:"oak", label:"オーク", desc:"木だよ", price:1200, img:"./assets/bg/oak.png", placeable:true, place:{left:"14%", bottom:"8px", w:"160px"} },
   };
 
   const UI = {
-    style: "bgShopStyleV1",
-    backdrop: "bgShopBackdropV1",
-    modal: "bgShopModalV1",
-    toast: "bgShopToastV1",
+    style: "bgShopStyleV2",
+    backdrop: "bgShopBackdropV2",
+    modal: "bgShopModalV2",
+    toast: "bgShopToastV2",
+    decorLayer: "bgDecorLayerV1",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
 
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
-  function loadOwned() { return safeParse(localStorage.getItem(LS_OWNED)) || {}; }
+
+  function loadOwned()  { return safeParse(localStorage.getItem(LS_OWNED)) || {}; }
   function saveOwned(o) { try { localStorage.setItem(LS_OWNED, JSON.stringify(o)); } catch {} }
 
-  let owned = loadOwned();
+  function loadPlaced()  { return safeParse(localStorage.getItem(LS_PLACED)) || {}; }
+  function savePlaced(p) { try { localStorage.setItem(LS_PLACED, JSON.stringify(p)); } catch {} }
+
+  let owned  = loadOwned();
+  let placed = loadPlaced();
 
   function getCoinsWB() {
     const WB = window.WB;
@@ -77,7 +81,7 @@
     if (!a) return true;
 
     try {
-      if (WB?.spendCoin) return !!WB.spendCoin(a);
+      if (WB?.spendCoin)  return !!WB.spendCoin(a);
       if (WB?.spendCoins) return !!WB.spendCoins(a);
 
       if (typeof WB?.coins === "number") {
@@ -118,6 +122,133 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     clearTimeout(el.__t);
     el.__t = setTimeout(() => { el.style.opacity = "0"; }, 1200);
   }
+
+  /* =========================
+   * Decor placement (完結)
+   * ========================= */
+
+  function getFieldRoot() {
+    // #field があればそこに、無ければ body 直下
+    return document.getElementById("field") || document.body;
+  }
+
+  function ensureDecorLayer() {
+    const root = getFieldRoot();
+
+    let layer = document.getElementById(UI.decorLayer);
+    if (layer && layer.parentElement !== root) {
+      try { layer.remove(); } catch {}
+      layer = null;
+    }
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.id = UI.decorLayer;
+
+      // field 配下なら absolute で貼れるようにしておく（position:relativeが無い場合に備える）
+      // 既存CSSを壊さないため、rootがfieldの時だけ軽く補助
+      if (root.id === "field") {
+        const cs = getComputedStyle(root);
+        if (cs.position === "static") root.style.position = "relative";
+      }
+
+      layer.style.cssText = `
+position:absolute; inset:0;
+pointer-events:none;
+z-index:30; /* 背景寄り（うさぎ/コインより下にしたいなら app側に合わせて調整OK） */
+`;
+      root.appendChild(layer);
+    }
+    return layer;
+  }
+
+  function makeDecorEl(it) {
+    const el = document.createElement("div");
+    el.dataset.decor = it.key;
+
+    const img = document.createElement("img");
+    img.src = it.img;
+    img.alt = it.key;
+    img.draggable = false;
+
+    el.appendChild(img);
+
+    // 画像の見え方
+    el.style.cssText = `
+position:absolute;
+pointer-events:none;
+filter: drop-shadow(0 12px 18px rgba(0,0,0,.20));
+`;
+    img.style.cssText = `
+width:100%;
+height:auto;
+display:block;
+object-fit:contain;
+`;
+
+    // 位置
+    const p = it.place || {};
+    const w = p.w || "220px";
+
+    el.style.width = w;
+
+    // anchor: bottomCenter の場合 left:50% を transform で中央寄せ
+    if ((p.anchor || "") === "bottomCenter") {
+      el.style.left = p.left || "50%";
+      el.style.bottom = p.bottom || "8px";
+      el.style.transform = "translateX(-50%)";
+    } else {
+      if (p.left != null) el.style.left = p.left;
+      if (p.right != null) el.style.right = p.right;
+      if (p.top != null) el.style.top = p.top;
+      if (p.bottom != null) el.style.bottom = p.bottom;
+    }
+    return el;
+  }
+
+  function applyPlacedState() {
+    placed = loadPlaced();
+    const layer = ensureDecorLayer();
+
+    // 既存を整理（placedじゃないものは消す）
+    layer.querySelectorAll("[data-decor]").forEach(el => {
+      const key = el.getAttribute("data-decor");
+      if (!placed[key]) el.remove();
+    });
+
+    // placedのものを生成
+    Object.keys(placed).forEach(key => {
+      if (!placed[key]) return;
+      const it = ITEMS[key];
+      if (!it || !it.placeable) return;
+      if (!owned[key]) return; // 念のため（未購入は置かない）
+
+      const exists = layer.querySelector(`[data-decor="${CSS.escape(key)}"]`);
+      if (exists) return;
+
+      layer.appendChild(makeDecorEl(it));
+    });
+  }
+
+  function setPlaced(key, on) {
+    const it = ITEMS[key];
+    if (!it || !it.placeable) return false;
+    owned = loadOwned();
+    if (!owned[key]) return false;
+
+    placed = loadPlaced();
+    placed[key] = !!on;
+    // false は掃除
+    if (!placed[key]) delete placed[key];
+    savePlaced(placed);
+
+    applyPlacedState();
+    emitChanged(key);
+    return true;
+  }
+
+  /* =========================
+   * UI
+   * ========================= */
 
   function ensureStyle() {
     if (document.getElementById(UI.style)) return;
@@ -186,6 +317,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   display:flex; gap:8px; flex-wrap:wrap;
   align-items:center; justify-content:flex-end;
 }
+#${UI.modal} .btn.place{ background:#d7f6ff; }
+#${UI.modal} .btn.remove{ background:#ffe0e0; }
 `;
     document.head.appendChild(st);
   }
@@ -212,22 +345,23 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
   function closeModal() {
     const bd = document.getElementById(UI.backdrop);
-    const m = document.getElementById(UI.modal);
+    const m  = document.getElementById(UI.modal);
     if (bd) bd.style.display = "none";
-    if (m) m.style.display = "none";
+    if (m)  m.style.display = "none";
   }
 
   function openModal() {
     const { backdrop, modal } = ensureUI();
 
-    owned = loadOwned();
+    owned  = loadOwned();
+    placed = loadPlaced();
     const c = getCoinsWB();
 
     modal.innerHTML = `
 <div class="row">
   <div>
     <div class="ttl">ショップ</div>
-    <div class="sub">背景アイテムを購入できます（設置ON/OFFは別メニュー）</div>
+    <div class="sub">購入と設置がここだけで完結</div>
   </div>
   <button class="btn ghost" id="bgShopCloseX" type="button">×</button>
 </div>
@@ -244,6 +378,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 <div class="grid">
   ${Object.values(ITEMS).map(it => {
     const own = !!owned[it.key];
+    const plc = !!placed[it.key];
+    const canPlace = !!it.placeable && own;
+
     return `
     <div class="item">
       <div class="thumb"><img src="${it.img}" alt="${it.key}"></div>
@@ -252,9 +389,19 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         <div class="meta">${it.desc}</div>
         <div class="meta">価格：<b>${it.price}🪙</b></div>
       </div>
+
       <div class="right">
         <div class="tag">${own ? "購入済み" : "未購入"}</div>
-        <button class="btn" data-buy="${it.key}" ${own ? "disabled" : ""}>購入</button>
+        ${it.placeable ? `<div class="tag">${plc ? "設置中" : "未設置"}</div>` : ``}
+
+        ${own
+          ? (it.placeable
+              ? (plc
+                  ? `<button class="btn remove" data-remove="${it.key}">撤去</button>`
+                  : `<button class="btn place"  data-place="${it.key}">設置</button>`)
+              : `<button class="btn" disabled>購入済み</button>`)
+          : `<button class="btn" data-buy="${it.key}">購入</button>`
+        }
       </div>
     </div>`;
   }).join("")}
@@ -267,6 +414,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     $("#bgShopCloseX", modal)?.addEventListener("click", closeModal);
     backdrop.onclick = (e) => { if (e.target === backdrop) closeModal(); };
 
+    // 購入
     modal.querySelectorAll("[data-buy]").forEach(btn => {
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -274,7 +422,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         const it = ITEMS[key];
         if (!it) return;
 
+        owned = loadOwned();
         if (owned[key]) return;
+
         const have = getCoinsWB();
         if (have < it.price) { toast(`🪙 足りない！ ${have} / ${it.price}`); openModal(); return; }
         if (!spendCoinsWB(it.price)) { toast("購入できませんでした"); openModal(); return; }
@@ -282,8 +432,32 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         owned[key] = true;
         saveOwned(owned);
 
+        // 購入しただけ通知（mirrorball等）
         emitChanged(key);
+
         toast(`✅ ${it.label} 購入！ -${it.price}🪙`);
+        openModal();
+      });
+    });
+
+    // 設置
+    modal.querySelectorAll("[data-place]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const key = btn.getAttribute("data-place");
+        if (!setPlaced(key, true)) { toast("設置できませんでした"); return; }
+        toast("✅ 設置した！");
+        openModal();
+      });
+    });
+
+    // 撤去
+    modal.querySelectorAll("[data-remove]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const key = btn.getAttribute("data-remove");
+        if (!setPlaced(key, false)) { toast("撤去できませんでした"); return; }
+        toast("✅ 撤去した！");
         openModal();
       });
     });
@@ -295,19 +469,35 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     }, { once: true });
   }
 
-  // ✅ ownedだけ通知（enabledは出さない）
-  function emitChanged(key) {
-    try {
-      window.WB?.emit?.("shop:changed", { key, owned: !!owned[key] });
+  /* =========================
+   * Notify
+   * ========================= */
 
+  function emitChanged(key) {
+    owned  = loadOwned();
+    placed = loadPlaced();
+
+    try {
+      // 汎用
+      window.WB?.emit?.("shop:changed", {
+        key,
+        owned:  !!owned[key],
+        placed: !!placed[key],
+      });
+
+      // mirrorball は bgcolor.js が owned を見る
       if (key === "mirrorball") {
         window.WB?.emit?.("bg:mirrorball_changed", { owned: !!owned.mirrorball });
       }
-      if (key === "bed") {
-        window.WB?.emit?.("itemplace:owned_changed", { key: "bed", owned: !!owned.bed });
-      }
-      if (key === "oak") {
-        window.WB?.emit?.("itemplace:owned_changed", { key: "oak", owned: !!owned.oak });
+
+      // placeable系（必要なら専用イベントも）
+      const it = ITEMS[key];
+      if (it?.placeable) {
+        window.WB?.emit?.("item:placed_changed", {
+          key,
+          owned:  !!owned[key],
+          placed: !!placed[key],
+        });
       }
     } catch {}
   }
@@ -317,8 +507,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!WB || typeof WB !== "object") return;
 
     WB.shop = WB.shop || {};
-    WB.shop.isOwned = (key) => !!(loadOwned()?.[key]);
-    WB.shop.open = () => openModal();
+
+    WB.shop.isOwned  = (key) => !!(loadOwned()?.[key]);
+    WB.shop.isPlaced = (key) => !!(loadPlaced()?.[key]);
+
+    WB.shop.open  = () => openModal();
+    WB.shop.close = () => closeModal();
+
+    WB.shop.place   = (key) => setPlaced(key, true);
+    WB.shop.remove  = (key) => setPlaced(key, false);
+    WB.shop.toggle  = (key) => setPlaced(key, !loadPlaced()?.[key]);
   }
 
   function waitForElm(getter, timeoutMs = 12000) {
@@ -345,10 +543,21 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     // ✅ グローバルAPI
     window.SHOP = {
-      open: () => openModal(),
+      open:  () => openModal(),
       close: () => closeModal(),
-      isOwned: (k) => !!loadOwned()?.[k],
-      owned: () => loadOwned(),
+
+      isOwned:  (k) => !!loadOwned()?.[k],
+      isPlaced: (k) => !!loadPlaced()?.[k],
+
+      owned:  () => loadOwned(),
+      placed: () => loadPlaced(),
+
+      place:  (k) => setPlaced(k, true),
+      remove: (k) => setPlaced(k, false),
+      toggle: (k) => setPlaced(k, !loadPlaced()?.[k]),
+
+      // 強制再適用
+      apply: () => applyPlacedState(),
     };
 
     // ✅ #shopBtn 互換
@@ -367,11 +576,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       console.warn("[shop.js] #shopBtn not found (menu-open only)");
     }
 
-    // 初期通知（購入済みだけ）
-    owned = loadOwned();
-    if (owned.mirrorball) emitChanged("mirrorball");
-    if (owned.bed) emitChanged("bed");
-    if (owned.oak) emitChanged("oak");
+    // 初期：購入/設置の反映
+    owned  = loadOwned();
+    placed = loadPlaced();
+
+    // 設置反映（bedなど）
+    applyPlacedState();
+
+    // 初期通知
+    Object.keys(owned).forEach(k => { if (owned[k]) emitChanged(k); });
+    Object.keys(placed).forEach(k => { if (placed[k]) emitChanged(k); });
   }
 
   boot().catch(() => {});
