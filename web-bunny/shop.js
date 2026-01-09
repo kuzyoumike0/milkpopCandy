@@ -1,18 +1,18 @@
-// shop.js（非module）
+// shop.js（非module）V4
 // ✅ HUDの「ショップ」(#shopBtn) で開く（omukaeとは別）
-// ✅ ミラーボール購入 + 設置ON/OFF切替
-// ✅ ベッド（haikei.js の /bg/bed.png）購入
-// ✅ 購入状態: milkpop_shop_owned_v1 に保存（{ mirrorball:true, bed:true }）
-// ✅ ミラーボールON/OFF: milkpop_shop_state_v1 に保存（{ mirrorballEnabled:true/false }）
-// ✅ WB.shop.isMirrorballEnabled / setMirrorballEnabled / isOwned を公開
-// ✅ 変更時 WB.emit(...) で bgcolor.js / haikei.js へ即通知
+// ✅ ミラーボール購入 + 設置ON/OFF
+// ✅ ベッド購入 + 設置ON/OFF
+// ✅ owned: milkpop_shop_owned_v1  -> { mirrorball:true, bed:true }
+// ✅ state: milkpop_shop_state_v1  -> { mirrorballEnabled:true/false, bedEnabled:true/false }
+// ✅ WB.shop.isMirrorballEnabled / setMirrorballEnabled / isBedEnabled / setBedEnabled / isOwned を公開
+// ✅ 変更時 emit：bgcolor.js / haikei.js へ即通知
 // ✅ クリック伝播をcaptureで止めて omukae 委譲を根絶
 
 (() => {
   "use strict";
 
-  const LS_KEY_OWNED = "milkpop_shop_owned_v1";   // { mirrorball:true, bed:true }
-  const LS_KEY_STATE = "milkpop_shop_state_v1";   // { mirrorballEnabled:true/false }
+  const LS_KEY_OWNED = "milkpop_shop_owned_v1";
+  const LS_KEY_STATE = "milkpop_shop_state_v1";
 
   const ITEMS = [
     {
@@ -21,23 +21,23 @@
       desc: "設置ONでスポットライトが出る",
       price: 9000,
       img: "./assets/bg/mirrorball.png",
-      type: "toggle", // 設置ON/OFFあり
+      type: "toggle",
     },
     {
       key: "bed",
       label: "ベッド（背景）",
-      desc: "購入すると背景に置ける（haikei.js）",
+      desc: "設置ONで背景に置ける（haikei.js）",
       price: 6000,
       img: "/bg/bed.png",
-      type: "buyonly", // 買うだけ
+      type: "toggle",
     },
   ];
 
   const UI = {
-    style: "milkpopShopStyleV3",
-    backdrop: "milkpopShopBackdropV3",
-    modal: "milkpopShopModalV3",
-    toast: "milkpopShopToastV3",
+    style: "milkpopShopStyleV4",
+    backdrop: "milkpopShopBackdropV4",
+    modal: "milkpopShopModalV4",
+    toast: "milkpopShopToastV4",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
@@ -58,15 +58,15 @@
   function loadState() {
     try {
       const raw = localStorage.getItem(LS_KEY_STATE);
-      if (!raw) return { mirrorballEnabled: true };
+      if (!raw) return { mirrorballEnabled: true, bedEnabled: true };
       const j = JSON.parse(raw);
+      const obj = (j && typeof j === "object") ? j : {};
       return {
-        mirrorballEnabled: (j && typeof j === "object" && "mirrorballEnabled" in j)
-          ? !!j.mirrorballEnabled
-          : true,
+        mirrorballEnabled: ("mirrorballEnabled" in obj) ? !!obj.mirrorballEnabled : true,
+        bedEnabled:        ("bedEnabled"        in obj) ? !!obj.bedEnabled        : true,
       };
     } catch {
-      return { mirrorballEnabled: true };
+      return { mirrorballEnabled: true, bedEnabled: true };
     }
   }
   function saveState(s) { try { localStorage.setItem(LS_KEY_STATE, JSON.stringify(s)); } catch {} }
@@ -75,13 +75,24 @@
   let state = loadState();
 
   function isOwned(key) { return !!owned?.[key]; }
+
   function isMirrorballEnabled() { return !!state?.mirrorballEnabled; }
+  function isBedEnabled() { return !!state?.bedEnabled; }
 
   function setMirrorballEnabled(next) {
     state.mirrorballEnabled = !!next;
     saveState(state);
     try { window.WB?.emit?.("bg:mirrorball_toggle", { enabled: !!next }); } catch {}
     try { window.WB?.emit?.("bg:mirrorball_changed", { owned: isOwned("mirrorball"), enabled: !!next }); } catch {}
+    refresh();
+    return true;
+  }
+
+  function setBedEnabled(next) {
+    state.bedEnabled = !!next;
+    saveState(state);
+    try { window.WB?.emit?.("haikei:toggle", { key: "bed", enabled: !!next }); } catch {}
+    try { window.WB?.emit?.("haikei:changed", { key: "bed", owned: isOwned("bed"), enabled: !!next }); } catch {}
     refresh();
     return true;
   }
@@ -259,11 +270,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     <div class="right">
       <div class="tag" id="${ownedId}">未購入</div>
       <button class="btn" id="${buyId}" type="button">購入</button>
-      ${
-        item.type === "toggle"
-          ? `<button class="btn ghost" id="${togId}" type="button">設置ON</button>`
-          : ``
-      }
+      <button class="btn ghost" id="${togId}" type="button">設置ON</button>
     </div>
   </div>`;
   }
@@ -291,14 +298,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     <div class="ttl">ショップ</div>
     <div class="sub">アイテムを購入 / 設置できます</div>
   </div>
-  <button class="btn ghost" id="shopCloseModalV3" type="button">×</button>
+  <button class="btn ghost" id="shopCloseModalV4" type="button">×</button>
 </div>
 
 <div class="sep"></div>
 
 <div class="row">
-  <div class="tag" id="shopCoinTagV3">🪙 0</div>
-  <div class="tag" id="shopHintTagV3">ショップボタンで開く</div>
+  <div class="tag" id="shopCoinTagV4">🪙 0</div>
+  <div class="tag" id="shopHintTagV4">ショップボタンで開く</div>
 </div>
 
 <div class="sep"></div>
@@ -341,18 +348,18 @@ ${itemsHtml}
     owned[itemKey] = true;
     saveOwned(owned);
 
-    // ミラーボールは購入直後に設置ONにする（好み）
+    // 購入直後は設置ON（状態もONへ）
     if (itemKey === "mirrorball") {
       state.mirrorballEnabled = true;
       saveState(state);
       try { window.WB?.emit?.("bg:mirrorball_changed", { owned: true, enabled: true }); } catch {}
       try { window.WB?.emit?.("bg:mirrorball_toggle",  { enabled: true }); } catch {}
     }
-
-    // ベッド購入通知（haikei.jsへ）
     if (itemKey === "bed") {
-      try { window.WB?.emit?.("haikei:changed", { key: "bed", owned: true }); } catch {}
-      try { window.WB?.emit?.("shop:changed", { key: "bed", owned: true }); } catch {}
+      state.bedEnabled = true;
+      saveState(state);
+      try { window.WB?.emit?.("haikei:changed", { key: "bed", owned: true, enabled: true }); } catch {}
+      try { window.WB?.emit?.("haikei:toggle",  { key: "bed", enabled: true }); } catch {}
     }
 
     return { ok: true, reason: "bought", price: item.price, label: item.label };
@@ -362,7 +369,7 @@ ${itemsHtml}
     const modal = document.getElementById(UI.modal);
     if (!modal) return;
 
-    const coinTag  = $("#shopCoinTagV3", modal);
+    const coinTag  = $("#shopCoinTagV4", modal);
     const c = getCoinsWB();
     if (coinTag) coinTag.textContent = `🪙 ${c}`;
 
@@ -379,9 +386,14 @@ ${itemsHtml}
         buyBtn.textContent = own ? "OK" : "購入";
       }
 
-      if (item.type === "toggle" && togBtn) {
+      if (togBtn) {
         togBtn.disabled = !own;
-        const en = isMirrorballEnabled();
+
+        let en = true;
+        if (item.key === "mirrorball") en = isMirrorballEnabled();
+        if (item.key === "bed") en = isBedEnabled();
+
+        // 表示は「設置ON / 設置OFF」(現在状態)
         togBtn.textContent = en ? "設置ON" : "設置OFF";
         togBtn.style.opacity = own ? "1" : "0.55";
       }
@@ -393,13 +405,15 @@ ${itemsHtml}
     const backdrop = document.getElementById(UI.backdrop);
     if (!modal || !backdrop) return;
 
-    const closeBtn = $("#shopCloseModalV3", modal);
+    const closeBtn = $("#shopCloseModalV4", modal);
     closeBtn?.addEventListener("click", (e) => { e.stopPropagation(); closeModal(); });
     backdrop.addEventListener("click", closeModal);
 
-    // 購入ボタン
+    // 購入ボタン / トグル
     ITEMS.forEach(item => {
       const buyBtn = $(`#shopBuy_${item.key}`, modal);
+      const togBtn = $(`#shopTog_${item.key}`, modal);
+
       buyBtn?.addEventListener("click", (e) => {
         e.stopPropagation();
         const r = buyItem(item.key);
@@ -414,18 +428,22 @@ ${itemsHtml}
         refresh();
       });
 
-      // トグル（ミラーボールのみ）
-      if (item.type === "toggle") {
-        const togBtn = $(`#shopTog_${item.key}`, modal);
-        togBtn?.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (!isOwned(item.key)) return;
+      togBtn?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (!isOwned(item.key)) return;
+
+        if (item.key === "mirrorball") {
           const next = !isMirrorballEnabled();
           setMirrorballEnabled(next);
           toast(next ? "🪩 ミラーボール設置ON" : "🪩 ミラーボール設置OFF");
-          refresh();
-        });
-      }
+        } else if (item.key === "bed") {
+          const next = !isBedEnabled();
+          setBedEnabled(next);
+          toast(next ? "🛏️ ベッド設置ON" : "🛏️ ベッド設置OFF");
+        }
+
+        refresh();
+      });
     });
 
     window.addEventListener("keydown", (e) => {
@@ -444,11 +462,12 @@ ${itemsHtml}
 
     WB.shop.isOwned = (key) => isOwned(key);
 
-    // mirrorball
     WB.shop.isMirrorballEnabled = () => isMirrorballEnabled();
     WB.shop.setMirrorballEnabled = (v) => setMirrorballEnabled(v);
 
-    // UI / actions
+    WB.shop.isBedEnabled = () => isBedEnabled();
+    WB.shop.setBedEnabled = (v) => setBedEnabled(v);
+
     WB.shop.open = openModal;
     WB.shop.buy = (key) => buyItem(String(key || ""));
   }
@@ -469,7 +488,6 @@ ${itemsHtml}
     ensureUI();
     bindModalEvents();
 
-    // WB公開（後から来ても拾う）
     patchWB();
     const start = Date.now();
     const t = setInterval(() => {
@@ -477,7 +495,7 @@ ${itemsHtml}
       if (Date.now() - start > 15000) clearInterval(t);
     }, 200);
 
-    // ✅ HUDの「ショップ」ボタンにのみ紐付ける
+    // HUDの「ショップ」ボタンにのみ紐付け
     let shopBtn = null;
     try {
       shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
@@ -486,7 +504,6 @@ ${itemsHtml}
       return;
     }
 
-    // ✅ omukae のイベント委譲に負けない：captureで先に止める
     shopBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -494,13 +511,14 @@ ${itemsHtml}
       openModal();
     }, true);
 
-    // 初期反映通知
+    // 初期通知（購入済みなら状態も反映）
     if (isOwned("mirrorball")) {
       try { window.WB?.emit?.("bg:mirrorball_changed", { owned: true, enabled: isMirrorballEnabled() }); } catch {}
       try { window.WB?.emit?.("bg:mirrorball_toggle",  { enabled: isMirrorballEnabled() }); } catch {}
     }
     if (isOwned("bed")) {
-      try { window.WB?.emit?.("haikei:changed", { key: "bed", owned: true }); } catch {}
+      try { window.WB?.emit?.("haikei:changed", { key: "bed", owned: true, enabled: isBedEnabled() }); } catch {}
+      try { window.WB?.emit?.("haikei:toggle",  { key: "bed", enabled: isBedEnabled() }); } catch {}
     }
   })();
 })();
