@@ -1,28 +1,31 @@
 // shop.js（非module）
 // ✅ HUDの「ショップ」(#shopBtn) を押すとモーダル表示（omukaeとは別）
 // ✅ モーダルでミラーボール（assets/bg/mirrorball.png）を購入できる
+// ✅ 購入後「設置/外す」トグルが出る（外しても購入状態は維持）
+// ✅ 状態はlocalStorageに保存（リロード耐性）
 // ✅ WB coin API 互換 + #coinValue fallback
-// ✅ 購入後に WB.emit("bg:mirrorball_changed") で bgcolor.js 即反映
+// ✅ 購入/設置切替後に WB.emit("bg:mirrorball_changed") で bgcolor.js 即反映
 // ✅ FIX: クリック伝播をcaptureで止めて omukae の委譲クリックを根絶
 
 (() => {
   "use strict";
 
-  const LS_KEY_OWNED = "milkpop_shop_owned_v1";
+  const LS_KEY_OWNED  = "milkpop_shop_owned_v1";        // { mirrorball:true }
+  const LS_KEY_STATE  = "milkpop_shop_state_v1";        // { mirrorballEnabled:true/false }
 
   const ITEM = {
     key: "mirrorball",
     label: "ミラーボール",
-    desc: "背景が虹色にキラキラ（設置時のみ）",
+    desc: "背景がディスコっぽくなる（設置中のみ）",
     price: 9000,
-    img: "./assets/bg/mirrorball.png", // ✅ 指定どおり
+    img: "./assets/bg/mirrorball.png",
   };
 
   const UI = {
-    style: "milkpopShopStyleV1",
-    backdrop: "milkpopShopBackdropV1",
-    modal: "milkpopShopModalV1",
-    toast: "milkpopShopToastV1",
+    style: "milkpopShopStyleV2",
+    backdrop: "milkpopShopBackdropV2",
+    modal: "milkpopShopModalV2",
+    toast: "milkpopShopToastV2",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
@@ -30,20 +33,36 @@
   /* =========================
    * storage
    * ========================= */
-  function loadOwned() {
+  function loadJson(key, fallback) {
     try {
-      const raw = localStorage.getItem(LS_KEY_OWNED);
-      if (!raw) return {};
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
       const j = JSON.parse(raw);
-      return (j && typeof j === "object") ? j : {};
+      return (j && typeof j === "object") ? j : fallback;
     } catch {
-      return {};
+      return fallback;
     }
   }
-  function saveOwned(o) { try { localStorage.setItem(LS_KEY_OWNED, JSON.stringify(o)); } catch {} }
+  function saveJson(key, obj) { try { localStorage.setItem(key, JSON.stringify(obj)); } catch {} }
 
-  let owned = loadOwned();
+  let owned = loadJson(LS_KEY_OWNED, {});
+  let state = loadJson(LS_KEY_STATE, { mirrorballEnabled: true });
+
   function isOwned(key) { return !!owned?.[key]; }
+  function isEnabled() { return !!state?.mirrorballEnabled; }
+  function setEnabled(v) {
+    state.mirrorballEnabled = !!v;
+    saveJson(LS_KEY_STATE, state);
+  }
+
+  function emitBgChange() {
+    try {
+      window.WB?.emit?.("bg:mirrorball_changed", {
+        owned: isOwned(ITEM.key),
+        enabled: isOwned(ITEM.key) ? isEnabled() : false,
+      });
+    } catch {}
+  }
 
   /* =========================
    * WB coin compat
@@ -129,7 +148,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   /* =========================
-   * UI style
+   * UI
    * ========================= */
   function ensureStyle() {
     if (document.getElementById(UI.style)) return;
@@ -175,7 +194,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 }
 #${UI.modal} .btn.ghost{ background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08); }
 #${UI.modal} .btn[disabled]{ opacity:.55; cursor:not-allowed; }
-#${UI.modal} .grid{ display:grid; grid-template-columns: 1fr; gap:10px; }
+
 #${UI.modal} .item{
   display:flex; gap:12px; align-items:center;
   padding:12px;
@@ -197,6 +216,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   margin-left:auto;
   display:flex; gap:8px; flex-wrap:wrap;
   align-items:center; justify-content:flex-end;
+}
+#shopToggleBtnV2.active{
+  background:#333 !important;
+  color:#fff !important;
 }
 `;
     document.head.appendChild(st);
@@ -220,32 +243,31 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 <div class="row">
   <div>
     <div class="ttl">ショップ</div>
-    <div class="sub">アイテムを購入できます</div>
+    <div class="sub">アイテムを購入・設置できます</div>
   </div>
-  <button class="btn ghost" id="shopCloseModalV1" type="button">×</button>
+  <button class="btn ghost" id="shopCloseModalV2" type="button">×</button>
 </div>
 
 <div class="sep"></div>
 
 <div class="row">
-  <div class="tag" id="shopCoinTagV1">🪙 0</div>
-  <div class="tag" id="shopHintTagV1">ショップボタンで開く</div>
+  <div class="tag" id="shopCoinTagV2">🪙 0</div>
+  <div class="tag" id="shopHintTagV2">ショップボタンで開く</div>
 </div>
 
 <div class="sep"></div>
 
-<div class="grid">
-  <div class="item">
-    <div class="thumb"><img src="${ITEM.img}" alt="mirrorball"></div>
-    <div style="min-width:0;">
-      <div class="name">${ITEM.label}</div>
-      <div class="meta">${ITEM.desc}</div>
-      <div class="meta">価格：<b>${ITEM.price}🪙</b></div>
-    </div>
-    <div class="right">
-      <div class="tag" id="shopOwnedTagV1">未購入</div>
-      <button class="btn" id="shopBuyBtnV1" type="button">購入</button>
-    </div>
+<div class="item">
+  <div class="thumb"><img src="${ITEM.img}" alt="mirrorball"></div>
+  <div style="min-width:0;">
+    <div class="name">${ITEM.label}</div>
+    <div class="meta">${ITEM.desc}</div>
+    <div class="meta">価格：<b>${ITEM.price}🪙</b></div>
+  </div>
+  <div class="right">
+    <div class="tag" id="shopOwnedTagV2">未購入</div>
+    <button class="btn" id="shopBuyBtnV2" type="button">購入</button>
+    <button class="btn ghost" id="shopToggleBtnV2" type="button">設置</button>
   </div>
 </div>
 `;
@@ -269,6 +291,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     if (modal) modal.style.display = "none";
   }
 
+  /* =========================
+   * actions
+   * ========================= */
   function buyMirrorball() {
     if (isOwned(ITEM.key)) return { ok: true, reason: "already" };
 
@@ -279,28 +304,54 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     if (!ok) return { ok: false, reason: "coins_api" };
 
     owned[ITEM.key] = true;
-    saveOwned(owned);
+    saveJson(LS_KEY_OWNED, owned);
 
-    try { window.WB?.emit?.("bg:mirrorball_changed", { owned: true }); } catch {}
+    // 購入直後は「設置ON」にしておく（好みで false でもOK）
+    setEnabled(true);
+
+    emitBgChange();
     return { ok: true, reason: "bought" };
   }
 
+  function toggleMirrorball() {
+    if (!isOwned(ITEM.key)) return { ok: false, reason: "not_owned" };
+    const next = !isEnabled();
+    setEnabled(next);
+    emitBgChange();
+    return { ok: true, enabled: next };
+  }
+
+  /* =========================
+   * refresh / bind
+   * ========================= */
   function refresh() {
     const modal = document.getElementById(UI.modal);
     if (!modal) return;
 
-    const coinTag = $("#shopCoinTagV1", modal);
-    const ownedTag = $("#shopOwnedTagV1", modal);
-    const buyBtn = $("#shopBuyBtnV1", modal);
+    const coinTag  = $("#shopCoinTagV2", modal);
+    const ownedTag = $("#shopOwnedTagV2", modal);
+    const buyBtn   = $("#shopBuyBtnV2", modal);
+    const togBtn   = $("#shopToggleBtnV2", modal);
 
     const c = getCoinsWB();
     if (coinTag) coinTag.textContent = `🪙 ${c}`;
 
     const own = isOwned(ITEM.key);
+    const en  = own ? isEnabled() : false;
+
     if (ownedTag) ownedTag.textContent = own ? "購入済み" : "未購入";
+
     if (buyBtn) {
       buyBtn.disabled = own || (c < ITEM.price);
       buyBtn.textContent = own ? "OK" : "購入";
+    }
+
+    if (togBtn) {
+      togBtn.disabled = !own;
+      togBtn.classList.toggle("active", en);
+      togBtn.textContent = en ? "外す" : "設置";
+      togBtn.title = own ? (en ? "設置を解除します" : "設置します") : "購入すると使えます";
+      togBtn.style.opacity = own ? "1" : "0.6";
     }
   }
 
@@ -309,8 +360,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const backdrop = document.getElementById(UI.backdrop);
     if (!modal || !backdrop) return;
 
-    const closeBtn = $("#shopCloseModalV1", modal);
-    const buyBtn = $("#shopBuyBtnV1", modal);
+    const closeBtn = $("#shopCloseModalV2", modal);
+    const buyBtn = $("#shopBuyBtnV2", modal);
+    const togBtn = $("#shopToggleBtnV2", modal);
 
     closeBtn?.addEventListener("click", (e) => { e.stopPropagation(); closeModal(); });
     backdrop.addEventListener("click", closeModal);
@@ -324,6 +376,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       } else {
         toast(`✅ ${ITEM.label} 購入！ -${ITEM.price}🪙`);
       }
+      refresh();
+    });
+
+    togBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const r = toggleMirrorball();
+      if (!r.ok) toast("未購入です");
+      else toast(r.enabled ? "🪩 ミラーボール設置！" : "🧹 ミラーボールを外した");
       refresh();
     });
 
@@ -341,8 +401,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     if (!WB || typeof WB !== "object") return;
     WB.shop = WB.shop || {};
     WB.shop.isOwned = (key) => isOwned(key);
+    WB.shop.isMirrorballEnabled = () => (isOwned(ITEM.key) ? isEnabled() : false);
+    WB.shop.setMirrorballEnabled = (v) => {
+      if (!isOwned(ITEM.key)) return false;
+      setEnabled(!!v);
+      emitBgChange();
+      return true;
+    };
     WB.shop.open = openModal;
     WB.shop.buyMirrorball = buyMirrorball;
+    WB.shop.toggleMirrorball = toggleMirrorball;
   }
 
   function waitForElm(getter, timeoutMs = 12000) {
@@ -357,12 +425,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   (async function boot() {
-    // UIを先に作れる状況なら作る
     try { await waitForElm(() => document.body, 8000); } catch {}
     ensureUI();
     bindModalEvents();
 
-    // WB公開（後から来ても拾う）
     patchWB();
     const start = Date.now();
     const t = setInterval(() => {
@@ -370,7 +436,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       if (Date.now() - start > 15000) clearInterval(t);
     }, 200);
 
-    // ✅ HUDの「ショップ」ボタンにのみ紐付ける
     let shopBtn = null;
     try {
       shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
@@ -385,11 +450,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       e.stopPropagation();
       if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
       openModal();
-    }, true); // ★ capture=true
+    }, true);
 
-    // 初期反映（購入済みならbgcolorへ通知しておく）
-    if (isOwned(ITEM.key)) {
-      try { window.WB?.emit?.("bg:mirrorball_changed", { owned: true }); } catch {}
-    }
+    // 初期反映（購入済みなら「設置ON/OFF状態」をbgcolorへ通知）
+    emitBgChange();
   })();
 })();
