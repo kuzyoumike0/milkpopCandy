@@ -1,10 +1,20 @@
-// shop.js（背景ショップ：#shopBtn専用）
-// ✅ #shopBtn = 「ショップ」→ 背景ショップ（ミラーボール/ベッド）を開く
-// ✅ #omukaeBtn には触らない
+// shop.js（背景ショップ：#shopBtn専用 → ✅ハンバーガーメニュー対応版）
+// ✅ #shopBtn クリックは「メニューから呼ぶ」想定（index.htmlでは非表示でもOK）
+// ✅ ハンバーガーメニュー側が呼べるように window.SHOP.open() / WB.shop.open() を提供
+// ✅ もし #shopBtn が存在するなら従来通りクリックで開く（互換）
 // ✅ owned/state 保存 & 即通知
+// ✅ 二重起動・二重リスナー根絶
 
 (() => {
   "use strict";
+
+  // 二重読み込み防止
+  if (window.__BGSHOP_V1_INITED__) {
+    console.warn("[shop.js] already inited; skip re-init");
+    try { window.SHOP?.open?.(); } catch {}
+    return;
+  }
+  window.__BGSHOP_V1_INITED__ = true;
 
   const LS_OWNED = "milkpop_shop_owned_v1";
   const LS_STATE = "milkpop_shop_state_v1";
@@ -22,7 +32,7 @@
       label: "ベッド",
       desc: "うさぎの後ろに配置できる背景アイテム",
       price: 3500,
-      img: "/assets/bg/bed.png",
+      img: "./assets/bg/bed.png", // ← パス統一（先頭/無しで404りやすいので ./assets に）
     },
   };
 
@@ -228,7 +238,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
 <div class="row">
   <div class="tag">🪙 ${c}</div>
-  <div class="tag">#shopBtn で開く</div>
+  <div class="tag">メニューから開ける</div>
 </div>
 
 <div class="sep"></div>
@@ -328,13 +338,15 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!WB || typeof WB !== "object") return;
 
     WB.shop = WB.shop || {};
-    WB.shop.isOwned = (key) => !!loadOwned()?.[key];
+    WB.shop.isOwned = (key) => !!(loadOwned()?.[key]);
 
     WB.shop.isMirrorballEnabled = () => !!loadState().mirrorballEnabled;
     WB.shop.setMirrorballEnabled = (v) => {
       const st = loadState();
       st.mirrorballEnabled = !!v;
       saveState(st);
+      owned = loadOwned();
+      state = st;
       emitChanged("mirrorball");
       return true;
     };
@@ -344,6 +356,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       const st = loadState();
       st.bedEnabled = !!v;
       saveState(st);
+      owned = loadOwned();
+      state = st;
       emitChanged("bed");
       return true;
     };
@@ -362,38 +376,48 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     });
   }
 
-  (async function boot() {
+  async function boot() {
     ensureStyle();
     patchWB();
 
-    // WB後追い
+    // WB後追い（遅延ロードでも追いつく）
     const start = Date.now();
     const wbTimer = setInterval(() => {
       patchWB();
       if (Date.now() - start > 15000) clearInterval(wbTimer);
     }, 200);
 
-    // ✅ #shopBtn にだけ紐付ける（omukaeとは分離）
-    let shopBtn = null;
-    try {
-      shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
-    } catch {
-      console.warn("[shop.js] #shopBtn not found");
-      return;
-    }
+    // ✅ グローバルAPI（ハンバーガーメニューから呼べる）
+    window.SHOP = {
+      open: () => openModal(),
+      close: () => closeModal(),
+      isOwned: (k) => !!loadOwned()?.[k],
+      state: () => loadState(),
+    };
 
-    // ✅ captureで先に取って shop を開く（omukaeへ行かせない）
-    shopBtn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
-      openModal();
-    }, true);
+    // ✅ #shopBtn が存在する時だけ、従来通り click で開く（互換）
+    try {
+      const shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
+      if (shopBtn && !shopBtn.__bgshopBound) {
+        shopBtn.__bgshopBound = true;
+        shopBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          openModal();
+        }, true);
+      }
+    } catch {
+      // いまは #shopBtn を消してる/隠してる構成でもOK（メニューから window.SHOP.open() で開く）
+      console.warn("[shop.js] #shopBtn not found (menu-open only)");
+    }
 
     // 初期通知
     owned = loadOwned();
     state = loadState();
     if (owned.mirrorball) emitChanged("mirrorball");
     if (owned.bed) emitChanged("bed");
-  })();
+  }
+
+  boot().catch(() => {});
 })();
