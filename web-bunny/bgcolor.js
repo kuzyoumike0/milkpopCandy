@@ -2,6 +2,8 @@
 // 朝・昼・夜を「日本時間(JST)」で判定して #bgLayer に直接適用（確実）
 // reset後に背景が黒くなる対策：イベントでも再適用
 // ✅ mirrorball（購入済み）なら「上中央に設置」＋「ディスコ背景」ON（回転ライト＋走るビーム＋キラ粒＋中央上スポットライト）
+// ✅ FIX: bgLayer のサイズ/position を強制して「見えない」を根絶
+// ✅ FIX: shop状態(mirrorballEnabled) を確実に参照して「外す」を反映
 
 (() => {
   "use strict";
@@ -9,6 +11,30 @@
   const bgLayer = document.getElementById("bgLayer");
   const field = document.getElementById("field");
   if (!bgLayer) return;
+
+  /* =========================
+   * ensure bgLayer is visible area
+   * ========================= */
+  function ensureBgLayerBox() {
+    try {
+      // #bgLayer が空divでCSSが効いてない環境でも確実に「画面いっぱい」にする
+      const st = bgLayer.style;
+      if (!st.position || st.position === "static") st.position = "absolute";
+      if (!st.inset) st.inset = "0";
+      if (!st.width) st.width = "100%";
+      if (!st.height) st.height = "100%";
+      if (!st.overflow) st.overflow = "hidden";
+      if (!st.pointerEvents) st.pointerEvents = "none";
+
+      // field側も黒落ち防止
+      if (field) {
+        const fs = field.style;
+        if (!fs.position || fs.position === "static") fs.position = "relative";
+        if (!fs.overflow) fs.overflow = "hidden";
+      }
+    } catch {}
+  }
+  ensureBgLayerBox();
 
   /* =========================
    * Time themes (JST)
@@ -38,12 +64,14 @@
   }
 
   /* =========================
-   * Mirrorball owned? / enabled?
+   * Mirrorball owned / enabled
    * ========================= */
   function hasMirrorballOwned() {
+    // WB優先
     try {
       if (window.WB?.shop?.isOwned?.("mirrorball")) return true;
     } catch {}
+    // LSフォールバック
     try {
       const raw = localStorage.getItem("milkpop_shop_owned_v1");
       if (!raw) return false;
@@ -55,20 +83,20 @@
   }
 
   function isMirrorballEnabled() {
-    // 1) shop.js がWBに提供していればそれ優先
+    // WB優先
     try {
       const v = window.WB?.shop?.isMirrorballEnabled?.();
       if (typeof v === "boolean") return v;
     } catch {}
 
-    // 2) 状態ストレージ（shop.js側）
+    // LSフォールバック
     try {
       const raw = localStorage.getItem("milkpop_shop_state_v1");
       const j = raw ? JSON.parse(raw) : null;
       if (j && typeof j.mirrorballEnabled === "boolean") return j.mirrorballEnabled;
     } catch {}
 
-    // 既定：ON
+    // 既定ON
     return true;
   }
 
@@ -76,12 +104,12 @@
    * Mirrorball image placement
    * ========================= */
   const MIRROR = {
-    id: "mirrorballImgV1",
-    styleId: "mirrorballImgStyleV1",
+    id: "mirrorballImgV2",
+    styleId: "mirrorballImgStyleV2",
     src: "./assets/bg/mirrorball.png",
     top: 8,
     size: 140,
-    z: 8, // ディスコ光より少し上
+    z: 20, // 光より上
   };
 
   function ensureMirrorballStyle() {
@@ -100,15 +128,14 @@
   pointer-events:none;
   user-select:none;
   -webkit-user-drag:none;
-  filter: drop-shadow(0 16px 30px rgba(0,0,0,.28));
+  filter: drop-shadow(0 16px 30px rgba(0,0,0,.32));
 }
 `;
     document.head.appendChild(st);
   }
 
   function ensureMirrorball(on) {
-    const cs = getComputedStyle(bgLayer);
-    if (cs.position === "static") bgLayer.style.position = "relative";
+    ensureBgLayerBox();
     ensureMirrorballStyle();
 
     const old = document.getElementById(MIRROR.id);
@@ -123,9 +150,8 @@
       img.id = MIRROR.id;
       img.alt = "mirrorball";
       img.src = MIRROR.src;
-      img.addEventListener("error", () => {
-        console.warn("[bgcolor] mirrorball load failed:", MIRROR.src);
-      });
+      img.draggable = false;
+      img.addEventListener("error", () => console.warn("[bgcolor] mirrorball load failed:", MIRROR.src));
       bgLayer.appendChild(img);
     } else {
       if (img.getAttribute("src") !== MIRROR.src) img.src = MIRROR.src;
@@ -133,16 +159,16 @@
   }
 
   /* =========================
-   * Disco overlay layers (inside bgLayer)
+   * Disco overlay layers
    * ========================= */
   const DISCO = {
-    styleId: "mirrorballDiscoStyleV2",
-    wrapId: "mirrorballDiscoWrapV2",
-    spotId: "mirrorballDiscoSpotV2", // ★中央上スポットライト
-    spinId: "mirrorballDiscoSpinV2", // 回転する色光
-    beamsId: "mirrorballDiscoBeamsV2", // 走るビーム
-    dustId: "mirrorballDiscoDustV2", // キラ粒
-    z: 6,
+    styleId: "mirrorballDiscoStyleV3",
+    wrapId: "mirrorballDiscoWrapV3",
+    spotId: "mirrorballDiscoSpotV3",   // ★スポットライト
+    spinId: "mirrorballDiscoSpinV3",   // 回転ライト
+    beamsId: "mirrorballDiscoBeamsV3", // 走るビーム
+    dustId: "mirrorballDiscoDustV3",   // キラ粒
+    z: 10, // bgLayer内
   };
 
   function ensureDiscoStyle() {
@@ -151,32 +177,30 @@
     const st = document.createElement("style");
     st.id = DISCO.styleId;
     st.textContent = `
-@keyframes mbSpinHueV2 {
-  0%   { transform: rotate(0deg) scale(1.05); filter: hue-rotate(0deg) saturate(1.6) brightness(1.15); }
-  100% { transform: rotate(360deg) scale(1.05); filter: hue-rotate(360deg) saturate(1.6) brightness(1.15); }
+@keyframes mbSpinHueV3 {
+  0%   { transform: rotate(0deg) scale(1.05); filter: hue-rotate(0deg) saturate(1.8) brightness(1.18); }
+  100% { transform: rotate(360deg) scale(1.05); filter: hue-rotate(360deg) saturate(1.8) brightness(1.18); }
 }
-@keyframes mbBeamSweepV2 {
-  0%   { transform: translate3d(-40%, -20%, 0) rotate(22deg); opacity: .12; }
-  25%  { opacity: .35; }
-  50%  { transform: translate3d( 40%,  10%, 0) rotate(22deg); opacity: .18; }
-  75%  { opacity: .38; }
-  100% { transform: translate3d(-40%, -20%, 0) rotate(22deg); opacity: .12; }
+@keyframes mbBeamSweepV3 {
+  0%   { transform: translate3d(-40%, -20%, 0) rotate(22deg); opacity: .18; }
+  25%  { opacity: .52; }
+  50%  { transform: translate3d( 40%,  10%, 0) rotate(22deg); opacity: .24; }
+  75%  { opacity: .58; }
+  100% { transform: translate3d(-40%, -20%, 0) rotate(22deg); opacity: .18; }
 }
-@keyframes mbDustDriftV2 {
-  0%   { transform: translate3d(-2%, -1%, 0); opacity: .25; }
-  50%  { transform: translate3d( 2%,  1%, 0); opacity: .45; }
-  100% { transform: translate3d(-2%, -1%, 0); opacity: .25; }
+@keyframes mbDustDriftV3 {
+  0%   { transform: translate3d(-2%, -1%, 0); opacity: .30; }
+  50%  { transform: translate3d( 2%,  1%, 0); opacity: .60; }
+  100% { transform: translate3d(-2%, -1%, 0); opacity: .30; }
 }
-
-/* ★スポットライト（中央上から注ぐ光） */
-@keyframes mbSpotPulseV2 {
-  0%,100% { opacity: .42; transform: translateX(-50%) scaleY(1); }
-  50%     { opacity: .62; transform: translateX(-50%) scaleY(1.04); }
+@keyframes mbSpotPulseV3 {
+  0%,100% { opacity: .55; transform: translateX(-50%) scaleY(1); }
+  50%     { opacity: .85; transform: translateX(-50%) scaleY(1.05); }
 }
-@keyframes mbSpotSweepV2 {
-  0%   { transform: translateX(-50%) rotate(-4deg); }
-  50%  { transform: translateX(-50%) rotate( 4deg); }
-  100% { transform: translateX(-50%) rotate(-4deg); }
+@keyframes mbSpotSweepV3 {
+  0%   { transform: translateX(-50%) rotate(-5deg); }
+  50%  { transform: translateX(-50%) rotate( 5deg); }
+  100% { transform: translateX(-50%) rotate(-5deg); }
 }
 
 #${DISCO.wrapId}{
@@ -189,73 +213,78 @@
   transition: opacity .25s ease;
 }
 
-/* ★中央上スポットライト円錐 */
+/* ★中央上スポットライト：clip-path + フォールバック(ぼかし円錐) */
 #${DISCO.spotId}{
   position:absolute;
   left:50%;
-  top:-18px;
-  width:120vmin;
-  height:120vmin;
+  top:-22px;
+  width:140vmin;
+  height:140vmin;
   transform: translateX(-50%);
   transform-origin: 50% 0%;
   pointer-events:none;
-  mix-blend-mode: screen;
 
+  /* clip-path が効かない環境対策 */
+  -webkit-clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
   clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
 
+  /* 目に見える強さ（昼でも出るように濃いめ） */
   background:
     radial-gradient(circle at 50% 6%,
-      rgba(255,255,255,.65) 0%,
-      rgba(255,255,255,.22) 18%,
-      rgba(255,255,255,.10) 38%,
+      rgba(255,255,255,.95) 0%,
+      rgba(255,255,255,.45) 16%,
+      rgba(255,255,255,.18) 36%,
       rgba(255,255,255,0) 72%
     ),
-    conic-gradient(from 180deg at 50% 10%,
-      rgba(255,  0,160,.14),
-      rgba(255,180,  0,.14),
-      rgba(255,255,  0,.14),
-      rgba(  0,255,180,.14),
-      rgba(  0,180,255,.14),
-      rgba(140,  0,255,.14),
-      rgba(255,  0,160,.14)
+    conic-gradient(from 180deg at 50% 12%,
+      rgba(255,  0,160,.18),
+      rgba(255,180,  0,.18),
+      rgba(255,255,  0,.18),
+      rgba(  0,255,180,.18),
+      rgba(  0,180,255,.18),
+      rgba(140,  0,255,.18),
+      rgba(255,  0,160,.18)
     );
 
-  filter: blur(.5px) saturate(1.3);
-  opacity:1; /* ★見えない時はまずここ */
+  /* blend を screen + 通常見えるように少しだけ足す */
+  mix-blend-mode: screen;
+  filter: blur(.2px) saturate(1.4) brightness(1.15);
+  opacity: 1;
+
   animation:
-    mbSpotPulseV2 1.8s ease-in-out infinite,
-    mbSpotSweepV2 2.6s ease-in-out infinite;
+    mbSpotPulseV3 1.7s ease-in-out infinite,
+    mbSpotSweepV3 2.8s ease-in-out infinite;
   will-change: transform, opacity;
 }
 
-/* 回転するディスコライト（中心がミラーボールっぽい） */
+/* 回転するディスコライト */
 #${DISCO.spinId}{
   position:absolute;
   left:50%;
   top:0;
-  width:140vmax;
-  height:140vmax;
+  width:160vmax;
+  height:160vmax;
   transform: translateX(-50%);
   transform-origin: 50% 18%;
   mix-blend-mode: screen;
-  opacity:.55;
+  opacity:.62;
 
   background:
-    radial-gradient(circle at 50% 12%, rgba(255,255,255,.55) 0 12%, rgba(255,255,255,0) 35%),
+    radial-gradient(circle at 50% 12%, rgba(255,255,255,.65) 0 12%, rgba(255,255,255,0) 38%),
     conic-gradient(from 0deg,
-      rgba(255,  0,160,.22),
-      rgba(255,180,  0,.22),
-      rgba(255,255,  0,.22),
-      rgba(  0,255,180,.22),
-      rgba(  0,180,255,.22),
-      rgba(140,  0,255,.22),
-      rgba(255,  0,160,.22)
+      rgba(255,  0,160,.26),
+      rgba(255,180,  0,.26),
+      rgba(255,255,  0,.26),
+      rgba(  0,255,180,.26),
+      rgba(  0,180,255,.26),
+      rgba(140,  0,255,.26),
+      rgba(255,  0,160,.26)
     );
-  animation: mbSpinHueV2 5.2s linear infinite;
+  animation: mbSpinHueV3 4.8s linear infinite;
   will-change: transform, filter;
 }
 
-/* 走るビーム（斜めスポット） */
+/* 走るビーム */
 #${DISCO.beamsId}{
   position:absolute;
   inset:-30%;
@@ -264,28 +293,28 @@
     repeating-linear-gradient(
       115deg,
       rgba(255,255,255,0) 0px,
-      rgba(255,255,255,0) 24px,
-      rgba(255,255,255,.18) 34px,
+      rgba(255,255,255,0) 22px,
+      rgba(255,255,255,.22) 34px,
       rgba(255,255,255,0) 52px,
-      rgba(255,255,255,0) 74px
+      rgba(255,255,255,0) 76px
     );
-  filter: saturate(1.3) contrast(1.05);
-  animation: mbBeamSweepV2 2.8s ease-in-out infinite;
+  filter: saturate(1.35) contrast(1.08);
+  animation: mbBeamSweepV3 2.6s ease-in-out infinite;
   will-change: transform, opacity;
 }
 
-/* キラ粒（細かい反射） */
+/* キラ粒 */
 #${DISCO.dustId}{
   position:absolute;
   inset:-12%;
   mix-blend-mode: screen;
   background:
-    radial-gradient(circle at 20% 18%, rgba(255,255,255,.55) 0 2px, rgba(255,255,255,0) 3px) 0 0 / 120px 120px,
-    radial-gradient(circle at 65% 52%, rgba(255,255,255,.38) 0 1.5px, rgba(255,255,255,0) 3px) 0 0 / 160px 160px,
-    radial-gradient(circle at 45% 78%, rgba(255,255,255,.35) 0 1.5px, rgba(255,255,255,0) 3px) 0 0 / 140px 140px,
-    radial-gradient(circle at 80% 30%, rgba(255,255,255,.30) 0 1.2px, rgba(255,255,255,0) 3px) 0 0 / 180px 180px;
-  filter: hue-rotate(0deg) saturate(1.4);
-  animation: mbDustDriftV2 1.7s ease-in-out infinite;
+    radial-gradient(circle at 20% 18%, rgba(255,255,255,.70) 0 2px, rgba(255,255,255,0) 3px) 0 0 / 120px 120px,
+    radial-gradient(circle at 65% 52%, rgba(255,255,255,.48) 0 1.5px, rgba(255,255,255,0) 3px) 0 0 / 160px 160px,
+    radial-gradient(circle at 45% 78%, rgba(255,255,255,.42) 0 1.5px, rgba(255,255,255,0) 3px) 0 0 / 140px 140px,
+    radial-gradient(circle at 80% 30%, rgba(255,255,255,.36) 0 1.2px, rgba(255,255,255,0) 3px) 0 0 / 180px 180px;
+  filter: saturate(1.4);
+  animation: mbDustDriftV3 1.5s ease-in-out infinite;
   will-change: transform, opacity;
 }
 `;
@@ -293,10 +322,8 @@
   }
 
   function ensureDiscoLayers() {
+    ensureBgLayerBox();
     ensureDiscoStyle();
-
-    const cs = getComputedStyle(bgLayer);
-    if (cs.position === "static") bgLayer.style.position = "relative";
 
     let wrap = document.getElementById(DISCO.wrapId);
     if (!wrap) {
@@ -315,13 +342,11 @@
       const dust = document.createElement("div");
       dust.id = DISCO.dustId;
 
-      // 追加順：スポット → 回転 → ビーム → 粒（おすすめ）
       wrap.appendChild(spot);
       wrap.appendChild(spin);
       wrap.appendChild(beams);
       wrap.appendChild(dust);
 
-      // bgLayerの先頭（後ろ）に入れる
       bgLayer.insertBefore(wrap, bgLayer.firstChild);
     }
     return wrap;
@@ -337,15 +362,15 @@
    * ========================= */
   let lastPhase = "";
   function apply(force = false) {
+    ensureBgLayerBox();
+
     const h = getJSTHour();
     const phase = getPhaseByHour(h);
 
     if (force || phase !== lastPhase) {
       lastPhase = phase;
-
       bgLayer.style.background = THEMES[phase];
       if (field) field.style.background = THEMES[phase];
-
       window.WB?.emit?.("bg:changed", { phase, hour: h });
     }
 
@@ -360,7 +385,7 @@
   // 初回
   apply(true);
 
-  // 1分ごと（時間帯反映）
+  // 1分ごと
   setInterval(() => apply(false), 60 * 1000);
 
   /* =========================
