@@ -2,7 +2,8 @@
 // ✅ 朝昼夜(JST)で背景色
 // ✅ mirrorball 購入済み + 設置ON のときだけ：
 //    - 上中央に mirrorball.png を表示
-//    - 中央上スポットライト（太め）だけON（ディスコ回転色やビームや粒は無し）
+//    - スポットライトを「ゆらゆら」揺らす
+//    - スポットライト色が「虹色に変化」する（背景の回転ディスコ色は無し）
 // ✅ 背景黒化を避ける（bgLayer/field 両方に適用）
 
 (() => {
@@ -51,7 +52,7 @@
     } catch { return false; }
   }
 
-  // 壊れてる/無い時はOFF（勝手にONへ戻さない）
+  // 無い/壊れてる時はOFF
   function isMirrorballEnabled() {
     try {
       const v = window.WB?.shop?.isMirrorballEnabled?.();
@@ -77,12 +78,12 @@
    * Mirrorball image
    * ========================= */
   const MIRROR = {
-    id: "mirrorballImgV3",
-    styleId: "mirrorballImgStyleV3",
+    id: "mirrorballImgV4",
+    styleId: "mirrorballImgStyleV4",
     src: "./assets/bg/mirrorball.png",
     top: 8,
     size: 140,
-    z: 5, // spotlightより上にしたいなら大きく
+    z: 6, // スポットより上
   };
 
   function ensureMirrorStyle() {
@@ -130,13 +131,18 @@
   }
 
   /* =========================
-   * Spotlight only (NO disco color)
+   * Spotlight (Sway + Rainbow)
    * ========================= */
   const SPOT = {
-    styleId: "mirrorballSpotStyleV3",
-    id: "mirrorballSpotV3",
-    z: 4, // bgLayer内：ミラーボール画像より下
-    width: 980, // ★幅（大きくしたいならここ）
+    styleId: "mirrorballSpotStyleV4",
+    id: "mirrorballSpotV4",
+    z: 5,                 // ミラーボールより下
+    width: 1200,          // ★幅（大きめ）
+    heightVh: 92,         // 高さ
+    swayDeg: 10,          // 左右に揺れる角度
+    swaySec: 3.4,         // 揺れ周期
+    hueSec: 6.2,          // 虹変化周期
+    baseOpacity: 0.62,    // 基本の濃さ
   };
 
   function ensureSpotStyle() {
@@ -144,9 +150,18 @@
     const st = document.createElement("style");
     st.id = SPOT.styleId;
     st.textContent = `
-@keyframes mbSpotPulseOnlyV3 {
-  0%,100% { opacity:.35; }
-  50%     { opacity:.70; }
+@keyframes mbSpotSwayV4 {
+  0%   { transform: translateX(-50%) rotate(-${SPOT.swayDeg}deg); }
+  50%  { transform: translateX(-50%) rotate(${SPOT.swayDeg}deg); }
+  100% { transform: translateX(-50%) rotate(-${SPOT.swayDeg}deg); }
+}
+@keyframes mbSpotPulseV4 {
+  0%,100% { opacity: ${Math.max(0, SPOT.baseOpacity - 0.18)}; }
+  50%     { opacity: ${Math.min(1, SPOT.baseOpacity + 0.18)}; }
+}
+@keyframes mbSpotHueV4 {
+  0%   { filter: hue-rotate(0deg)   saturate(1.8) brightness(1.2); }
+  100% { filter: hue-rotate(360deg) saturate(1.8) brightness(1.2); }
 }
 
 #${SPOT.id}{
@@ -155,29 +170,37 @@
   top:-10px;
 
   width:min(${SPOT.width}px, 98vw);
-  height:92vh;
+  height:${SPOT.heightVh}vh;
 
-  transform: translateX(-50%);
+  transform-origin: 50% 6%;
   z-index:${SPOT.z};
   pointer-events:none;
 
-  /* ★白いスポットライトだけ */
+  /* ★スポットライト本体（白ベース） */
   background:
     radial-gradient(circle at 50% 0%,
-      rgba(255,255,255,.85) 0%,
-      rgba(255,255,255,.45) 18%,
-      rgba(255,255,255,.18) 46%,
-      rgba(255,255,255,0) 74%
+      rgba(255,255,255,.92) 0%,
+      rgba(255,255,255,.55) 18%,
+      rgba(255,255,255,.22) 46%,
+      rgba(255,255,255,0) 76%
     );
 
   /* ★光の形（上が細く、下が広い） */
-  clip-path: polygon(50% 0%, 86% 100%, 14% 100%);
+  clip-path: polygon(50% 0%, 88% 100%, 12% 100%);
 
+  /* ★虹っぽく見せる（hue-rotateが効くようにscreen合成） */
   mix-blend-mode: screen;
-  filter: blur(1px);
+
+  /* ふんわり */
+  filter: blur(1.2px);
   opacity:0;
-  animation: mbSpotPulseOnlyV3 2.4s ease-in-out infinite;
-  will-change: opacity;
+
+  animation:
+    mbSpotSwayV4 ${SPOT.swaySec}s ease-in-out infinite,
+    mbSpotPulseV4 2.6s ease-in-out infinite,
+    mbSpotHueV4 ${SPOT.hueSec}s linear infinite;
+
+  will-change: transform, opacity, filter;
 }
 `;
     document.head.appendChild(st);
@@ -190,7 +213,7 @@
     if (!el) {
       el = document.createElement("div");
       el.id = SPOT.id;
-      // ★ミラーボール画像より後ろにしたいので先頭に
+      // bgLayerの後ろ側へ（先頭に）
       bgLayer.insertBefore(el, bgLayer.firstChild);
     }
     return el;
@@ -222,7 +245,6 @@
     }
 
     const on = hasMirrorballOwned() && isMirrorballEnabled();
-
     setMirrorVisible(on);
     setSpotEnabled(on);
   }
