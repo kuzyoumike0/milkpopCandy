@@ -20,9 +20,9 @@
 
   // ✅ 通常BGM（時間帯で自動）
   const BASE_TRACKS = {
-    morning: "./assets/bgm_morning.mp3",
-    day:     "./assets/bgm_day.mp3",
-    night:   "./assets/bgm_night.mp3",
+    morning: "./assets/bgm/bgm_morning.mp3",
+    day:     "./assets/bgm/bgm_day.mp3",
+    night:   "./assets/bgm/bgm_night.mp3",
   };
 
   // ✅ 特別（演出用に呼び出す用：任意）
