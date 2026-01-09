@@ -6,7 +6,11 @@
 // - 当たり（特大）：外部イベント/slot連携で発火
 // - うさぎ・コインは邪魔しない（pointer-events:none / 低z-index）
 //
-// ✅ 重要
+// ✅ HUD残留ポリシー
+//   ・花火ボタンは「#hudButtons」に必ず追加（ハンバーガーに入れない）
+//   ・#hudButtons が未生成の瞬間があっても wait してから追加（body誤配置防止）
+//
+// ✅ 実績/称号
 //   ・成功時に必ず WB.emit("sy:add",{key:"hanabi", n:1}) を投げる
 //   ・WB が無い/遅い環境でも retry で SYOUGOU に加算
 //   ・zisseki.js は sy:add を拾って進捗に反映（推奨）
@@ -48,6 +52,33 @@
   const JACKPOT_MULT_MAX = 3.0;
 
   const $ = (q, p = document) => p.querySelector(q);
+
+  /* =========================
+   * Tiny toast（alert廃止で軽量）
+   * ========================= */
+  const TOAST_ID = "hanabiToastV1";
+  function toast(msg) {
+    try {
+      let el = document.getElementById(TOAST_ID);
+      if (!el) {
+        el = document.createElement("div");
+        el.id = TOAST_ID;
+        el.style.cssText = `
+position:fixed; left:50%; top:64px; transform:translateX(-50%);
+z-index:2147483647;
+background:rgba(0,0,0,.78); color:#fff;
+padding:10px 12px; border-radius:14px;
+font-weight:900; font-size:13px;
+box-shadow:0 14px 40px rgba(0,0,0,.25);
+pointer-events:none; opacity:0; transition:opacity .18s ease;`;
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      el.style.opacity = "1";
+      clearTimeout(el.__t);
+      el.__t = setTimeout(() => { el.style.opacity = "0"; }, 1100);
+    } catch {}
+  }
 
   /* =========================
    * SYOUGOU Safe Add（retry）
@@ -136,13 +167,16 @@
   function spendCoin(amount) {
     amount = Math.floor(Number(amount) || 0);
     if (amount <= 0) return true;
+
     try {
       if (typeof window.WB?.spendCoin === "function") {
         return !!window.WB.spendCoin(amount);
       }
     } catch {}
+
     const have = getCoin();
     if (have < amount) return false;
+
     try { window.WB.coins = have - amount; } catch {}
     const el = $("#coinValue");
     if (el) el.textContent = String(have - amount);
@@ -275,7 +309,7 @@
     const { multiplier = 1, forceBig = false, costCoin = false } = opts;
 
     if (costCoin && !spendCoin(COST)) {
-      alert("コインが足りない…！");
+      toast("🪙 コインが足りない…！");
       return false;
     }
 
@@ -320,19 +354,39 @@
   }
 
   /* =========================
-   * Button
+   * Wait helpers（hudButtons生成待ち）
    * ========================= */
-  function ensureButton() {
+  function waitForElm(getter, timeoutMs = 12000) {
+    const start = Date.now();
+    return new Promise((resolve, reject) => {
+      const t = setInterval(() => {
+        const v = getter();
+        if (v) { clearInterval(t); resolve(v); return; }
+        if (Date.now() - start > timeoutMs) { clearInterval(t); reject(new Error("timeout")); }
+      }, 50);
+    });
+  }
+
+  /* =========================
+   * Button（HUDに固定・二重bind防止）
+   * ========================= */
+  function ensureButton(parent) {
     let btn = document.getElementById(BTN_ID);
     if (!btn) {
       btn = document.createElement("button");
       btn.type = "button";
       btn.id = BTN_ID;
       btn.textContent = `🎆 花火（-${COST}）`;
-      (document.getElementById("hudButtons") || document.getElementById("hud") || document.body).appendChild(btn);
+      parent.appendChild(btn);
+    } else {
+      // ✅ もし別の場所に居たら HUD側へ戻す（body誤配置の回収）
+      if (btn.parentElement !== parent) parent.appendChild(btn);
     }
 
-    btn.onclick = null;
+    // ✅ 二重にイベントが増殖しないようにガード
+    if (btn.__hanabiBound) return;
+    btn.__hanabiBound = true;
+
     btn.addEventListener("click", () => {
       const now = Date.now();
       const mult = calcTapMultiplier(now);
@@ -361,9 +415,23 @@
   /* =========================
    * Boot
    * ========================= */
-  window.addEventListener("load", () => {
+  async function boot() {
     injectStyles();
-    ensureButton();
     preloadAll().catch(() => {});
-  });
+
+    // ✅ 必ずHUD側に出す
+    let parent = null;
+    try {
+      parent = await waitForElm(() => document.getElementById("hudButtons"), 12000);
+    } catch {
+      parent = document.getElementById("hud") || document.body;
+    }
+    ensureButton(parent);
+  }
+
+  if (document.readyState === "complete" || document.readyState === "interactive") {
+    boot();
+  } else {
+    window.addEventListener("load", boot, { once: true });
+  }
 })();
