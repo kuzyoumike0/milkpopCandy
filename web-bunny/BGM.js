@@ -1,7 +1,7 @@
 // BGM.js（非module / ✅朝昼夜は自動 + ✅購入曲を好きな時に流す / ✅ハンバーガー廃止→モーダル化）
 // ✅ 修正：404根絶（assets/BGM/ に合わせる / 大文字小文字一致）
 // ✅ 修正：日本語ファイル名を encodeURI して確実に読み込む
-// ✅ 通常BGM：朝/昼/夜 は時間帯で自動（買ってれば自動で鳴る）
+// ✅ 通常BGM：朝/昼/夜 は時間帯で自動（★朝昼夜は無料で鳴る：購入不要）
 // ✅ いつでもBGM：Stream / おもしろすぎてどっかん / Cocktail_Glass を購入して任意に選択して流せる
 // ✅ 「いつでもBGM」を選択中は、時間帯切替より優先
 // ✅ 自動に戻すあり
@@ -38,9 +38,11 @@
   const TRACKS = { ...BASE_TRACKS, ...SPECIAL_TRACKS, ...ANYTIME_TRACKS };
 
   const PRICES = {
+    // ※朝昼夜は無料運用に変更（UI上FREE表示・購入不可にする）
     morning: 3000,
     day:     3000,
     night:   3000,
+
     depart:  8000,
     stream:   12000,
     dokkan:   15000,
@@ -56,6 +58,9 @@
     dokkan:   "おもしろすぎてどっかん（いつでも）",
     cocktail: "Cocktail_Glass（いつでも）",
   };
+
+  // ✅ 無料で使えるBGM（最初から鳴る）
+  const FREE_TRACKS = new Set(["morning", "day", "night"]);
 
   const UI = {
     style: "bgmStyleModalV1",
@@ -150,7 +155,10 @@
     return "night";
   }
 
-  function isOwned(key) { return !!owned?.[key]; }
+  function isOwned(key) {
+    if (FREE_TRACKS.has(key)) return true;
+    return !!owned?.[key];
+  }
 
   function resolveKeyBySrc(src) {
     for (const k of Object.keys(TRACKS)) if (TRACKS[k] === src) return k;
@@ -266,13 +274,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const sk = selected?.selectedKey ?? null;
     if (sk && TRACKS[sk] && isOwned(sk)) return sk;
 
+    // ✅ 時間帯は無料で鳴る（owned不要）
     const t = pickByTime();
-    if (isOwned(t)) return t;
-
-    return Object.keys(BASE_TRACKS).find(isOwned) ||
-           Object.keys(ANYTIME_TRACKS).find(isOwned) ||
-           Object.keys(SPECIAL_TRACKS).find(isOwned) ||
-           null;
+    return t;
   }
 
   function startBgm(force = false) {
@@ -291,6 +295,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   function buyBgm(key) {
     if (!TRACKS[key] || !PRICES[key]) return { ok: false, reason: "unknown" };
+
+    // ✅ 無料は購入不可（常にOK扱い）
+    if (FREE_TRACKS.has(key)) return { ok: true, reason: "free" };
+
     if (isOwned(key)) return { ok: true, reason: "already" };
 
     const price = PRICES[key];
@@ -560,6 +568,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     for (const k of Object.keys(PRICES)) {
       const own = isOwned(k);
       const price = PRICES[k];
+      const free = FREE_TRACKS.has(k);
 
       const priceTag = $(`#bgmPrice_${k}`, modal);
       const buyBtn = $(`#bgmBuy_${k}`, modal);
@@ -567,9 +576,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
       if (!priceTag || !buyBtn || !selBtn) continue;
 
-      priceTag.textContent = own ? "購入済み" : `${price}🪙`;
-      buyBtn.disabled = own || (c < price);
-      buyBtn.textContent = own ? "OK" : "購入";
+      priceTag.textContent = free ? "FREE" : (own ? "購入済み" : `${price}🪙`);
+
+      buyBtn.disabled = free || own || (c < price);
+      buyBtn.textContent = free ? "FREE" : (own ? "OK" : "購入");
 
       selBtn.disabled = !own;
       selBtn.classList.toggle("active", sel === k);
@@ -607,7 +617,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   </div>
 
   <div id="bgmShopModal">
-    <div class="sectionTitle">▼ 通常BGM（朝昼夜：自動）</div>
+    <div class="sectionTitle">▼ 通常BGM（朝昼夜：自動 / FREE）</div>
     ${renderItem("morning", LABELS.morning, "朝の時間帯（5-10時）")}
     ${renderItem("day",     LABELS.day,     "昼の時間帯（10-17時）")}
     ${renderItem("night",   LABELS.night,   "夜の時間帯（それ以外）")}
@@ -669,6 +679,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       $(`#bgmBuy_${k}`, modal)?.addEventListener("click", async () => {
         patchWB(window.WB);
         try { await window.WB?.unlockAudioOnce?.(); } catch {}
+
+        if (FREE_TRACKS.has(k)) {
+          toast("✅ FREEです");
+          selectBgm(k);
+          refreshUI();
+          return;
+        }
+
         const r = buyBgm(k);
         if (!r.ok) {
           if (r.reason === "coins") toast(`🪙 足りない！ ${r.have} / ${r.need}`);
@@ -701,6 +719,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const { backdrop } = ensureModalUI();
     buildUI();
     backdrop.style.display = "block";
+
+    // ✅ モーダルを開いたら一度アンロックを試す（1クリック後に確実に鳴る）
+    try { window.WB?.unlockAudioOnce?.(); } catch {}
+
     refreshUI();
   }
 
