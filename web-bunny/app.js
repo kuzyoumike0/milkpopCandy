@@ -155,7 +155,7 @@
         width:22px !important;
         height:22px !important;
       }
-      .wbChargeHart {
+           .wbChargeHart {
         position:absolute;
         z-index:9999;
         pointer-events:none;
@@ -164,9 +164,10 @@
         transform: translate(-50%, -50%);
         animation: wbHartBob 1.05s ease-in-out infinite;
         filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
-        width:40px;
-        height:40px;
+        width:26px;   /* ← 小さく */
+        height:26px;  /* ← 小さく */
       }
+
       @keyframes wbHartBob {
         0%   { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
         50%  { transform: translate(-50%, -50%) translateY(-7px) rotate(3deg) scale(1.03); }
