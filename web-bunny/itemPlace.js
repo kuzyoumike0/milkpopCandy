@@ -1,39 +1,46 @@
-// itemPlace.js（V7：固定スケール版＝「うさぎより少し大きい」）
+// itemPlace.js（V8：bed/oak は “うさぎと同じくらい” スケール）
 // ✅ アイテム配置は itemPlace のみで行う（shop.js は購入のみ）
 // ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う（mirrorballは除外）
 // ✅ oak.png などアイテムが増えても自動対応：SHOP.items() / WB.shop.items() / fallback の順で吸収
 // ✅ 設置ON/OFFは itemPlace.js が管理（LS: milkpop_itemplace_enabled_v1）
-// ✅ サイズはユーザー操作で拡大縮小しない（UI無し）
-// ✅ ただし表示サイズは「うさぎより少し大きい」くらいに固定倍率で拡大（DISPLAY_SCALE）
-// ✅ ゴースト枠も同じ倍率
-// ✅ 座標基準は #field に固定（bgLayerが0サイズでもOK）
+// ✅ 拡大縮小UIは無し
+// ✅ 表示倍率は固定：デフォは少し大きめ、ただし bed/oak は “うさぎと同じくらい” に上書き
+// ✅ ゴースト枠も同倍率
+// ✅ 座標基準は #field
 // ✅ 配置モード：赤枠（透明）→ クリックで設置 → ドラッグ移動 → 完了
 // ✅ OFFにした瞬間に撤去（残骸ゼロ）
 // ✅ アイテム選択も itemPlace で完結（セレクト + 配置物クリックで選択）
-// ✅ うさぎの裏に行く：wrap を #bunnyLayer の直前に差し込む（DOM順）＋ z-index低固定
-// ✅ クリックできない問題根絶：編集中は wrap と obj を pointer-events:auto にする
+// ✅ うさぎの裏：wrap を #bunnyLayer の直前へ（DOM順）＋低z-index
+// ✅ クリックできない問題根絶：編集中だけ pointer-events:auto
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V7", Date.now());
+  console.log("[itemPlace] LOADED V8", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
-  const LS_STATE_KEY   = "milkpop_itemplace_v7";          // { key:{x,y,rot,placed} } ※stateにscaleは持たない
+  const LS_STATE_KEY   = "milkpop_itemplace_v8";          // { key:{x,y,rot,placed} }
   const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // { key:boolean }
 
   const HOST_ID  = "field";
 
-  const WRAP_ID  = "itemPlaceWrapV7";
-  const STYLE_ID = "itemPlaceStyleV7";
-  const PANEL_ID = "itemPlacePanelV7";
-  const GHOST_ID = "itemPlaceGhostV7";
+  const WRAP_ID  = "itemPlaceWrapV8";
+  const STYLE_ID = "itemPlaceStyleV8";
+  const PANEL_ID = "itemPlacePanelV8";
+  const GHOST_ID = "itemPlaceGhostV8";
   const TOAST_ID = "itemPlaceToastV1";
 
-  // ✅ うさぎより少し大きいくらい（必要ならここだけ調整）
-  // 例：1.12〜1.25 あたりで好み調整
-  const DISPLAY_SCALE = 1.18;
+  // ✅ 基本は少し大きめ（他アイテム用）
+  const DISPLAY_SCALE_DEFAULT = 1.18;
+
+  // ✅ bed / oak は “うさぎと同じくらい” に固定（ここだけ調整）
+  // だいたい同じなら 1.00、少しだけ小さめなら 0.95〜0.98
+  const ITEM_SCALE_OVERRIDE = {
+    bed: 1.00,
+    oak: 1.00,
+  };
 
   const $ = (q, p = document) => p.querySelector(q);
+  const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
 
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
 
@@ -62,7 +69,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
    * Items source (増えても追従)
    * ========================= */
 
-  // ✅ 既定（SHOP.items が無い時の保険）
+  // ✅ SHOP.items が無いときの保険（最低限）
   const FALLBACK_ITEMS = [
     { key: "bed", label: "ベッド", img: "./assets/bg/bed.png", placeable: true },
     { key: "oak", label: "オーク", img: "./assets/bg/oak.png", placeable: true },
@@ -75,12 +82,18 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const label = String(it?.label ?? key);
     const src = String(it?.img ?? it?.src ?? "");
 
-    // shop.jsがもし per-item 表示倍率を渡すなら拾えるように（任意）
-    // 例: { displayScale: 1.2 } など
+    // shop.js が displayScale を渡す可能性にも対応（任意）
     const ds = Number(it?.displayScale);
-    const displayScale = Number.isFinite(ds) && ds > 0 ? ds : DISPLAY_SCALE;
+    const displayScaleFromShop =
+      Number.isFinite(ds) && ds > 0 ? ds : null;
 
-    return { key, label, src, placeable: !!it?.placeable, displayScale };
+    return {
+      key,
+      label,
+      src,
+      placeable: !!it?.placeable,
+      displayScaleFromShop,
+    };
   }
 
   function readShopItemsMap() {
@@ -92,6 +105,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       }
     } catch {}
     return null;
+  }
+
+  function getDefaultForKey(key) {
+    // itemごとの初期座標（必要ならキーで調整できる）
+    // ここは「増えてもOK」方針なので、基本同じ
+    return { x: 180, y: 280, rot: 0, placed: false };
   }
 
   function buildPlaceItems() {
@@ -110,7 +129,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
           label: x.label,
           img: x.img,
           placeable: x.placeable,
-          displayScale: DISPLAY_SCALE,
         });
         if (n) items.push(n);
       }
@@ -126,9 +144,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         key: it.key,
         label: it.label,
         src: it.src,
-        z: 1, // “うさぎの裏”固定
-        displayScale: it.displayScale, // ✅ 表示倍率（固定）
-        default: { x: 180, y: 280, rot: 0, placed: false },
+        z: 1, // “うさぎの裏”
+        default: getDefaultForKey(it.key),
+        // まず shop.js 指定があればそれ、無ければ override、無ければ default
+        displayScale:
+          it.displayScaleFromShop ??
+          (Number.isFinite(+ITEM_SCALE_OVERRIDE[it.key]) ? +ITEM_SCALE_OVERRIDE[it.key] : DISPLAY_SCALE_DEFAULT),
       };
     }
 
@@ -171,7 +192,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const out = { ...j };
 
     for (const k of Object.keys(PLACE_ITEMS)) {
-      if (typeof out[k] !== "boolean") out[k] = true;
+      if (typeof out[k] !== "boolean") out[k] = true; // default ON
     }
     for (const k of Object.keys(out)) {
       if (!(k in PLACE_ITEMS)) delete out[k];
@@ -254,7 +275,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const it = PLACE_ITEMS[key];
     const ds = Number(it?.displayScale);
     if (Number.isFinite(ds) && ds > 0) return ds;
-    return DISPLAY_SCALE;
+    return DISPLAY_SCALE_DEFAULT;
   }
 
   /* =========================
@@ -472,7 +493,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const ds = getDisplayScale(key);
     img.style.left = `${Math.round(s.x)}px`;
     img.style.top  = `${Math.round(s.y)}px`;
-    // ✅ 固定倍率で「少し大きい」＋回転
     img.style.transform = `scale(${ds}) rotate(${s.rot}deg)`;
   }
 
@@ -512,7 +532,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         透明赤枠の位置をクリックで設置。<br>
         設置後はドラッグで移動。<br>
         <b>配置物をクリック</b>で選択できます。<br>
-        （サイズは<b>固定で少し大きい</b>）
+        （bed / oak は <b>うさぎと同じくらい</b>）
       </div>
     </div>
 
@@ -638,7 +658,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       const it = PLACE_ITEMS[k];
       const en = isEnabled(k);
       const mark = en ? "" : "（OFF）";
-      return `<option value="${k}">${it?.label || k}${mark}</option>`;
+      return `<option value="${esc(k)}">${it?.label || k}${mark}</option>`;
     }).join("");
 
     if (!owned.includes(selectedKey)) selectedKey = owned[0];
@@ -687,6 +707,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const wrap = ensureWrap();
     if (wrap) wrap.classList.toggle("ipEditing", !!editing);
 
+    // もう存在しないキーの残骸を掃除
     document.querySelectorAll(`[id^="itemPlace_"]`).forEach(el => {
       const key = el.id.replace(/^itemPlace_/, "");
       if (!(key in PLACE_ITEMS)) {
@@ -713,7 +734,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     showGhostAt(e.clientX, e.clientY, selectedKey);
   }
 
-  // 置く（空間クリック）
   function onPlaceDownCapture(e) {
     if (!editing) return;
     if (isOverUI(e.target)) return;
@@ -738,7 +758,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const s = st[selectedKey] || (st[selectedKey] = { ...PLACE_ITEMS[selectedKey].default });
     s.placed = true;
 
-    // ✅ 固定倍率込みで中心に置く
     const base = imgSize[selectedKey] || { w: 120, h: 90 };
     const ds = getDisplayScale(selectedKey);
     const w = base.w * ds;
@@ -755,7 +774,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     e.stopImmediatePropagation?.();
   }
 
-  // 物体クリック：選択 + ドラッグ開始
   function onObjDown(e) {
     if (!editing) return;
 
@@ -925,20 +943,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       close,
       select: (key) => selectKey(key),
       refresh: reSync,
-      setScale: (v) => { // 任意：外から倍率を変えたい時用（UIは無い）
-        const n = Number(v);
-        if (!Number.isFinite(n) || n <= 0) return;
-        // グローバル定数は変えられないので、各アイテムに反映
-        for (const k of Object.keys(PLACE_ITEMS)) {
-          PLACE_ITEMS[k].displayScale = n;
-        }
-        syncAll();
-      },
       _getItems: () => ({ ...PLACE_ITEMS }),
       _order: () => PLACE_ORDER.slice(),
       _enabledKey: LS_ENABLED_KEY,
       _stateKey: LS_STATE_KEY,
-      _displayScaleDefault: DISPLAY_SCALE,
+      _scaleDefault: DISPLAY_SCALE_DEFAULT,
+      _scaleOverride: { ...ITEM_SCALE_OVERRIDE },
     };
 
     try {
