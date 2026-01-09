@@ -2,7 +2,8 @@
 // ✔ 朝昼夜(JST)で背景色
 // ✔ mirrorball 購入＋設置ON時のみ：
 //    - 上中央にミラーボール
-//    - 左右2本の虹スポットライト（ゆらゆら＋色相回転）
+//    - ミラーボール位置（中央上）から左右2本スポットライト
+//    - スポットは虹色（hue-rotate）＆ゆらゆら揺れる
 //    - スポットは bunnyLayer 上に乗るので、うさぎが入ると少し明るく見える
 // ✔ 夜だけスポット強化（太く・明るく・濃く）
 // ✖ 背景が回転するディスコ色は出さない
@@ -75,7 +76,7 @@
     bgLayer.style.inset = "0";
     bgLayer.style.pointerEvents = "none";
 
-    // bunnyLayerは照明レイヤを載せるので absolute/relative を確保
+    // bunnyLayerに照明を載せるので absolute を確保
     if (getComputedStyle(bunnyLayer).position === "static") {
       bunnyLayer.style.position = "absolute";
       bunnyLayer.style.inset = "0";
@@ -85,20 +86,28 @@
   /* =========================
    * ミラーボール画像（bgLayer）
    * ========================= */
-  const MIRROR_ID = "mirrorballImgFinalV3";
+  const MIRROR = {
+    id: "mirrorballImgFinalV4",
+    styleId: "mirrorballStyleFinalV4",
+    src: "./assets/bg/mirrorball.png",
+    top: 8,
+    size: 140,
+    z: 6,
+  };
 
-  if (!document.getElementById("mirrorballStyleFinalV3")) {
+  function ensureMirrorStyle() {
+    if (document.getElementById(MIRROR.styleId)) return;
     const st = document.createElement("style");
-    st.id = "mirrorballStyleFinalV3";
+    st.id = MIRROR.styleId;
     st.textContent = `
-#${MIRROR_ID}{
+#${MIRROR.id}{
   position:absolute;
   left:50%;
-  top:8px;
+  top:${MIRROR.top}px;
   transform:translateX(-50%);
-  width:140px;
+  width:${MIRROR.size}px;
   height:auto;
-  z-index:6;
+  z-index:${MIRROR.z};
   pointer-events:none;
   user-select:none;
   -webkit-user-drag:none;
@@ -109,12 +118,15 @@
 
   function setMirror(on) {
     ensureBase();
-    let el = document.getElementById(MIRROR_ID);
+    ensureMirrorStyle();
+
+    let el = document.getElementById(MIRROR.id);
     if (!on) { el?.remove(); return; }
+
     if (!el) {
       el = document.createElement("img");
-      el.id = MIRROR_ID;
-      el.src = "./assets/bg/mirrorball.png";
+      el.id = MIRROR.id;
+      el.src = MIRROR.src;
       el.alt = "mirrorball";
       el.addEventListener("error", () => console.warn("[bgcolor] mirrorball load failed"));
       bgLayer.appendChild(el);
@@ -122,62 +134,81 @@
   }
 
   /* =========================
-   * 虹スポットライト（左右2本 / bunnyLayer上）
+   * スポットライト（ミラーボール位置から出る）
+   * - anchor(50%, top+size*0.62) を光源として、左右に扇形
+   * - 2本（左右）でライブ会場感
    * ========================= */
-  const SPOT_WRAP = "mirrorballSpotWrapV1";
-  const SPOT_L    = "mirrorballSpotL_V1";
-  const SPOT_R    = "mirrorballSpotR_V1";
+  const SPOT = {
+    styleId: "mirrorballSpotFromCenterStyleV1",
+    wrapId:  "mirrorballSpotFromCenterWrapV1",
+    leftId:  "mirrorballSpotFromCenterL_V1",
+    rightId: "mirrorballSpotFromCenterR_V1",
+    z: 2147480000, // bunnyより上、HUDより下
+  };
 
-  if (!document.getElementById("spot2StyleV1")) {
+  function ensureSpotStyle() {
+    if (document.getElementById(SPOT.styleId)) return;
     const st = document.createElement("style");
-    st.id = "spot2StyleV1";
+    st.id = SPOT.styleId;
     st.textContent = `
-@keyframes spotHue2V1 {
-  0%   { filter: hue-rotate(0deg)   saturate(2.15) brightness(var(--spot-bright,1.15)); }
-  100% { filter: hue-rotate(360deg) saturate(2.15) brightness(var(--spot-bright,1.15)); }
-}
-/* 左右で揺れを逆にして“ライブ感” */
-@keyframes spotSwayLeftV1 {
-  0%   { transform: translateX(-50%) rotate(-16deg) scaleY(1.00); }
-  50%  { transform: translateX(-50%) rotate( -6deg) scaleY(1.03); }
-  100% { transform: translateX(-50%) rotate(-16deg) scaleY(1.00); }
-}
-@keyframes spotSwayRightV1 {
-  0%   { transform: translateX(-50%) rotate( 16deg) scaleY(1.00); }
-  50%  { transform: translateX(-50%) rotate(  6deg) scaleY(1.03); }
-  100% { transform: translateX(-50%) rotate( 16deg) scaleY(1.00); }
+@keyframes mbHueSpotV3 {
+  0%   { filter: hue-rotate(0deg)   saturate(2.2) brightness(var(--spot-bright,1.15)); }
+  100% { filter: hue-rotate(360deg) saturate(2.2) brightness(var(--spot-bright,1.15)); }
 }
 
-/* ラップ（ON/OFFはここで一括） */
-#${SPOT_WRAP}{
+/* 揺れ（左右で逆位相） */
+@keyframes mbSwayLeftV3 {
+  0%   { transform: translateX(-50%) rotate(calc(var(--spot-angle, -14deg) - 7deg)); }
+  50%  { transform: translateX(-50%) rotate(calc(var(--spot-angle, -14deg) + 7deg)); }
+  100% { transform: translateX(-50%) rotate(calc(var(--spot-angle, -14deg) - 7deg)); }
+}
+@keyframes mbSwayRightV3 {
+  0%   { transform: translateX(-50%) rotate(calc(var(--spot-angle,  14deg) + 7deg)); }
+  50%  { transform: translateX(-50%) rotate(calc(var(--spot-angle,  14deg) - 7deg)); }
+  100% { transform: translateX(-50%) rotate(calc(var(--spot-angle,  14deg) + 7deg)); }
+}
+
+#${SPOT.wrapId}{
   position:absolute;
   inset:0;
   pointer-events:none;
-  z-index:2147480000; /* bunnyより上、HUDより下 */
+  z-index:${SPOT.z};
   opacity:0;
   transition: opacity .22s ease;
 }
 
-/* 共通スポット */
-#${SPOT_WRAP} .spot{
-  --spot-width: 1200px;   /* JSで調整 */
-  --spot-opacity: .42;    /* JSで調整 */
-  --spot-bright: 1.15;    /* JSで調整 */
+/* “光源（ミラーボール）から伸びる扇” */
+#${SPOT.wrapId} .spot{
+  /* JSでセット */
+  --spot-origin-x: 50%;
+  --spot-origin-y: 92px;   /* ミラーボール中心付近 */
+  --spot-width: 1600px;
+  --spot-height: 95vh;
+  --spot-opacity: .44;
+  --spot-bright: 1.15;
+  --spot-angle: 0deg;
 
   position:absolute;
-  top:-14px;
-  width: var(--spot-width);
-  height: 92vh;
 
-  transform-origin:50% 6%;
-  clip-path: polygon(50% 0%, 88% 100%, 12% 100%);
+  /* 光源を基準に置く：left/top が origin */
+  left: var(--spot-origin-x);
+  top:  var(--spot-origin-y);
+
+  width: var(--spot-width);
+  height: var(--spot-height);
+
+  transform-origin: 50% 0%;
+  clip-path: polygon(50% 0%, 90% 100%, 10% 100%);
+
+  mix-blend-mode: screen; /* ★うさぎが入ると明るく見える */
+  opacity: var(--spot-opacity);
   pointer-events:none;
 
   background:
     radial-gradient(circle at 50% 0%,
       rgba(255,255,255,.92) 0%,
-      rgba(255,255,255,.45) 18%,
-      rgba(255,255,255,0) 58%
+      rgba(255,255,255,.46) 18%,
+      rgba(255,255,255,0) 60%
     ),
     linear-gradient(90deg,
       rgba(255,  0,160,.55),
@@ -189,80 +220,92 @@
       rgba(255,  0,160,.55)
     );
 
-  mix-blend-mode: screen; /* ★うさぎがスポット内で明るく見える */
-  opacity: var(--spot-opacity);
-  filter: blur(1.35px);
-
-  animation:
-    spotHue2V1 6.2s linear infinite;
+  filter: blur(1.4px);
   will-change: transform, filter, opacity;
 }
 
-/* 左右配置 */
-#${SPOT_L}{
-  left:38%;
+#${SPOT.leftId}{
   animation:
-    spotSwayLeftV1  3.2s ease-in-out infinite,
-    spotHue2V1      6.2s linear infinite;
+    mbHueSpotV3 6.2s linear infinite,
+    mbSwayLeftV3 3.1s ease-in-out infinite;
 }
-#${SPOT_R}{
-  left:62%;
+#${SPOT.rightId}{
   animation:
-    spotSwayRightV1 3.2s ease-in-out infinite,
-    spotHue2V1      6.2s linear infinite;
+    mbHueSpotV3 6.2s linear infinite,
+    mbSwayRightV3 3.1s ease-in-out infinite;
 }
 `;
     document.head.appendChild(st);
   }
 
-  function ensureSpot2() {
-    let wrap = document.getElementById(SPOT_WRAP);
+  function ensureSpots() {
+    ensureBase();
+    ensureSpotStyle();
+
+    let wrap = document.getElementById(SPOT.wrapId);
     if (!wrap) {
       wrap = document.createElement("div");
-      wrap.id = SPOT_WRAP;
+      wrap.id = SPOT.wrapId;
 
       const l = document.createElement("div");
-      l.id = SPOT_L;
+      l.id = SPOT.leftId;
       l.className = "spot";
 
       const r = document.createElement("div");
-      r.id = SPOT_R;
+      r.id = SPOT.rightId;
       r.className = "spot";
 
       wrap.appendChild(l);
       wrap.appendChild(r);
 
-      // bunnyLayerの上に重ねる（うさぎが照らされる）
+      // bunnyLayerに載せる（うさぎが照らされる）
       bunnyLayer.appendChild(wrap);
     }
     return wrap;
   }
 
-  function setSpot2(on, phase) {
-    const wrap = ensureSpot2();
+  function calcSpotOriginY() {
+    // ミラーボール中心少し下を光源にする（見た目が自然）
+    // top(8px) + size(140) * 0.62 ≒ 95px
+    return Math.round(MIRROR.top + MIRROR.size * 0.62);
+  }
+
+  function setSpots(on, phase) {
+    const wrap = ensureSpots();
+    const l = document.getElementById(SPOT.leftId);
+    const r = document.getElementById(SPOT.rightId);
+
     if (!on) {
       wrap.style.opacity = "0";
       return;
     }
 
+    const originY = calcSpotOriginY();
     const night = (phase === "night");
-    const w = night ? "1500px" : "1200px";
-    const op = night ? "0.62" : "0.42";
-    const br = night ? "1.35" : "1.15";
 
-    const l = document.getElementById(SPOT_L);
-    const r = document.getElementById(SPOT_R);
-    if (l) {
-      l.style.setProperty("--spot-width", w);
-      l.style.setProperty("--spot-opacity", op);
-      l.style.setProperty("--spot-bright", br);
-    }
-    if (r) {
-      r.style.setProperty("--spot-width", w);
-      r.style.setProperty("--spot-opacity", op);
-      r.style.setProperty("--spot-bright", br);
-    }
+    // ★夜強化
+    const width  = night ? "1900px" : "1600px";
+    const height = night ? "98vh"   : "92vh";
+    const op     = night ? "0.68"   : "0.44";
+    const bright = night ? "1.40"   : "1.15";
 
+    // ★左右の開き角（ここで“ライブ感”調整）
+    const angleL = night ? "-18deg" : "-14deg";
+    const angleR = night ? "18deg"  : "14deg";
+
+    for (const el of [l, r]) {
+      if (!el) continue;
+      el.style.setProperty("--spot-origin-x", "50%");
+      el.style.setProperty("--spot-origin-y", `${originY}px`);
+      el.style.setProperty("--spot-width", width);
+      el.style.setProperty("--spot-height", height);
+      el.style.setProperty("--spot-opacity", op);
+      el.style.setProperty("--spot-bright", bright);
+    }
+    if (l) l.style.setProperty("--spot-angle", angleL);
+    if (r) r.style.setProperty("--spot-angle", angleR);
+
+    // 透明→表示
     wrap.style.opacity = "1";
   }
 
@@ -284,7 +327,7 @@
     // ★ミラーボールを設置していない時はスポットを出さない
     const on = isOwned() && isEnabled();
     setMirror(on);
-    setSpot2(on, phase);
+    setSpots(on, phase);
   }
 
   apply(true);
@@ -296,7 +339,7 @@
     window.WB.on("core:ready", () => apply(true));
     window.WB.on("core:reset_partial", () => apply(true));
     window.WB.on("bg:mirrorball_changed", () => apply(true));
-    window.WB.on("shop:mirrorball_toggle", () => apply(true)); // shop.js側でemitしてもOK
+    window.WB.on("shop:mirrorball_toggle", () => apply(true));
     return true;
   };
   hook();
