@@ -3,18 +3,14 @@
 // ✅ 修正：日本語ファイル名を encodeURI して確実に読み込む
 // ✅ 通常BGM：朝/昼/夜 は時間帯で自動（★朝昼夜は無料で鳴る：購入不要）
 // ✅ いつでもBGM：Stream / おもしろすぎてどっかん / Cocktail_Glass を購入して任意に選択して流せる
-// ✅ 「いつでもBGM」を選択中は、時間帯切替より優先
-// ✅ 自動に戻すあり
+// ✅ 「いつでもBGM」を選択中は、時間帯切替より優先 / 自動に戻すあり
 // ✅ UIは“モーダル”のみ（ハンバーガーボタンは作らない）
 // ✅ WB差し替え耐性 / unlockAudioOnce 連結
 // ✅ 外部：WB.bgm.openModal() / closeModal() を提供（gameMenu.jsから呼ぶ）
 //
-// ★追加：SE音量スライダー（UFO SE含む全SEに適用）
-// - LS: milkpop_se_volume_v1 (0..1)
-// - window.__milkpopSeVolume 公開
-// - WB.getSEVolume / WB.setSEVolume / WB.playSE を提供
-// - ループSE管理：WB.se.loop(key, src) / WB.se.stop(key)
-//   → tenki.jsで UFO が出たら WB.se.loop("ufo","./assets/UFO.mp3") を呼ぶと、SE音量で下げられる
+// ★追加：SE音量スライダー（UFOなど含むSE全般）
+// - localStorage: milkpop_se_volume_v1（0..1）
+// - WB.getSEVolume()/setSEVolume() / WB.se.oneShot()/loop()/stop()/stopAll()
 
 (() => {
   "use strict";
@@ -24,7 +20,7 @@
   const LS_KEY_SELECT   = "milkpop_bgm_selected_v2";
 
   // ★SE音量
-  const LS_KEY_SE_VOL   = "milkpop_se_volume_v1"; // 0..1
+  const LS_KEY_SE_VOL   = "milkpop_se_volume_v1"; // number 0..1
 
   /* =========================
    * Tracks（✅ assets/BGM/ に統一）
@@ -48,6 +44,7 @@
   const TRACKS = { ...BASE_TRACKS, ...SPECIAL_TRACKS, ...ANYTIME_TRACKS };
 
   const PRICES = {
+    // ※朝昼夜は無料運用に変更（UI上FREE表示・購入不可にする）
     morning: 3000,
     day:     3000,
     night:   3000,
@@ -68,10 +65,11 @@
     cocktail: "Cocktail_Glass（いつでも）",
   };
 
+  // ✅ 無料で使えるBGM（最初から鳴る）
   const FREE_TRACKS = new Set(["morning", "day", "night"]);
 
   const UI = {
-    style: "bgmStyleModalV2",
+    style: "bgmStyleModalV1",
     backdrop: "bgmBackdropModalV1",
     modal: "bgmModalModalV1",
     toast: "bgmToastModalV1",
@@ -118,11 +116,10 @@
   }
   function saveSelected(sel) { try { localStorage.setItem(LS_KEY_SELECT, JSON.stringify(sel)); } catch {} }
 
-  // ★SE音量（0..1）
   function loadSEVolume() {
     try {
       const raw = localStorage.getItem(LS_KEY_SE_VOL);
-      if (raw == null) return 0.85;
+      if (raw == null) return 0.85; // デフォ（少し小さめ）
       const v = Number(raw);
       return clamp(Number.isFinite(v) ? v : 0.85, 0, 1);
     } catch {
@@ -138,7 +135,7 @@
   let selected = loadSelected();
   let seVolume = loadSEVolume();
 
-  // 公開（app.jsなどが参照）
+  // ★外部が直読みできるように（app.js側が参照）
   window.__milkpopSeVolume = seVolume;
 
   let unlocked = false;
@@ -147,116 +144,6 @@
 
   let audio = null;
 
-  /* =========================
-   * SE管理（UFO含む）
-   * ========================= */
-  const loopSEMap = new Map(); // key -> Audio
-
-  function normalizeSrc(src) {
-    if (!src) return src;
-    if (src.includes("%")) return src;
-    return encodeURI(src);
-  }
-
-  function getSEVolume() { return clamp(seVolume, 0, 1); }
-
-  function setSEVolume(v) {
-    seVolume = clamp(Number(v) || 0, 0, 1);
-    window.__milkpopSeVolume = seVolume;
-    saveSEVolume(seVolume);
-    // ループSEに即反映
-    applyLoopSEVolumes();
-    // 任意の通知（app.jsが聞ける）
-    try { window.dispatchEvent(new Event("milkpop:seVolume")); } catch {}
-  }
-
-  function effectiveSEVolume(base = 1.0) {
-    if (settings.muted) return 0;
-    return clamp(getSEVolume() * clamp(Number(base) || 1, 0, 2), 0, 1);
-  }
-
-  function applyLoopSEVolumes() {
-    const v = effectiveSEVolume(1);
-    loopSEMap.forEach((a) => {
-      try {
-        a.muted = !!settings.muted;
-        a.volume = v;
-      } catch {}
-    });
-  }
-
-  // 1回SE（AudioでもsrcでもOK）
-  function playSE(audioOrSrc, base = 1.0) {
-    if (!unlocked) return;
-
-    try {
-      let a = null;
-
-      if (typeof audioOrSrc === "string") {
-        a = new Audio(normalizeSrc(audioOrSrc));
-        a.preload = "auto";
-        a.loop = false;
-      } else {
-        a = audioOrSrc;
-      }
-
-      if (!a) return;
-
-      a.muted = !!settings.muted;
-      a.volume = effectiveSEVolume(base);
-
-      a.currentTime = 0;
-      a.play().catch(() => {});
-    } catch {}
-  }
-
-  // ループSE（UFOなど）
-  function loopSE(key, src, base = 1.0) {
-    if (!unlocked) return null;
-    if (!key) key = "loop";
-
-    const normalized = normalizeSrc(src);
-    let a = loopSEMap.get(key);
-
-    try {
-      if (!a) {
-        a = new Audio();
-        a.preload = "auto";
-        a.loop = true;
-        loopSEMap.set(key, a);
-      }
-
-      const nextHref = new URL(normalized, location.href).href;
-      if (a.src !== nextHref) {
-        try { a.pause(); } catch {}
-        a.src = normalized;
-        a.currentTime = 0;
-      }
-
-      a.muted = !!settings.muted;
-      a.volume = effectiveSEVolume(base);
-
-      if (!settings.enabled) return a; // BGM OFFでもSEは鳴らす方針（必要ならここを連動に変えられる）
-      a.play().catch(() => {});
-      return a;
-    } catch {
-      return a || null;
-    }
-  }
-
-  function stopLoopSE(key) {
-    const a = loopSEMap.get(key);
-    if (!a) return;
-    try { a.pause(); } catch {}
-  }
-
-  function stopAllLoopSE() {
-    loopSEMap.forEach((a) => { try { a.pause(); } catch {} });
-  }
-
-  /* =========================
-   * BGM audio
-   * ========================= */
   function ensureAudio() {
     if (audio) return audio;
     audio = new Audio();
@@ -277,8 +164,12 @@
   function applyVolume() {
     ensureAudio();
     audio.volume = settings.muted ? 0 : settings.volume;
-    // ★SE側もミュートに追従
-    applyLoopSEVolumes();
+  }
+
+  function normalizeSrc(src) {
+    if (!src) return src;
+    if (src.includes("%")) return src; // 既にencode済み
+    return encodeURI(src);
   }
 
   function pickByTime() {
@@ -407,8 +298,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const sk = selected?.selectedKey ?? null;
     if (sk && TRACKS[sk] && isOwned(sk)) return sk;
 
-    const t = pickByTime();
-    return t;
+    // ✅ 時間帯は無料で鳴る（owned不要）
+    return pickByTime();
   }
 
   function startBgm(force = false) {
@@ -423,14 +314,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     if (unlocked) return;
     unlocked = true;
     startBgm(true);
-    // ループSEも再生できる状態にする（必要ならここで何もしない）
+    // ループSEも「解禁後」すぐ鳴らせる状態に
     applyLoopSEVolumes();
   }
 
   function buyBgm(key) {
     if (!TRACKS[key] || !PRICES[key]) return { ok: false, reason: "unknown" };
 
+    // ✅ 無料は購入不可（常にOK扱い）
     if (FREE_TRACKS.has(key)) return { ok: true, reason: "free" };
+
     if (isOwned(key)) return { ok: true, reason: "already" };
 
     const price = PRICES[key];
@@ -478,16 +371,121 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   /* =========================
+   * SE volume / helpers
+   * ========================= */
+  function getSEVolume() { return clamp(seVolume, 0, 1); }
+
+  function setSEVolume(v) {
+    seVolume = clamp(Number(v) || 0, 0, 1);
+    saveSEVolume(seVolume);
+    window.__milkpopSeVolume = seVolume;
+    applyLoopSEVolumes();
+    try { window.dispatchEvent(new CustomEvent("milkpop:seVolume", { detail: { seVolume } })); } catch {}
+  }
+
+  function effectiveSEVolume(base = 1.0) {
+    const b = clamp(Number(base) || 1, 0, 1);
+    if (settings.muted) return 0;
+    return clamp(seVolume * b, 0, 1);
+  }
+
+  // ループSE：key -> { audio, base }
+  const loopSEMap = new Map();
+
+  function applyLoopSEVolumes() {
+    loopSEMap.forEach((obj) => {
+      const a = obj?.audio;
+      const base = Number(obj?.base ?? 1);
+      if (!a) return;
+      try {
+        a.muted = !!settings.muted;
+        a.volume = effectiveSEVolume(base);
+      } catch {}
+    });
+  }
+
+  // ワンショットSE（効果音）
+  function oneShotSE(src, base = 1.0) {
+    if (!unlocked) return null;
+    try {
+      const a = new Audio();
+      a.preload = "auto";
+      a.loop = false;
+      a.src = normalizeSrc(src);
+      a.muted = !!settings.muted;
+      a.volume = effectiveSEVolume(base);
+      a.currentTime = 0;
+      a.play().catch(() => {});
+      return a;
+    } catch {
+      return null;
+    }
+  }
+
+  // ループSE（UFOなど：ずっと鳴らす）
+  function loopSE(key, src, base = 1.0) {
+    if (!unlocked) return null;
+    if (!key) key = "loop";
+
+    const normalized = normalizeSrc(src);
+
+    let obj = loopSEMap.get(key);
+    let a = obj?.audio || null;
+
+    try {
+      if (!a) {
+        a = new Audio();
+        a.preload = "auto";
+        a.loop = true;
+        obj = { audio: a, base: Number(base) || 1 };
+        loopSEMap.set(key, obj);
+      } else {
+        obj.base = Number(base) || 1; // ★更新
+      }
+
+      const nextHref = new URL(normalized, location.href).href;
+      if (a.src !== nextHref) {
+        try { a.pause(); } catch {}
+        a.src = normalized;
+        a.currentTime = 0;
+      }
+
+      a.muted = !!settings.muted;
+      a.volume = effectiveSEVolume(obj.base);
+
+      a.play().catch(() => {});
+      return a;
+    } catch {
+      return a || null;
+    }
+  }
+
+  function stopLoopSE(key) {
+    const obj = loopSEMap.get(key);
+    const a = obj?.audio;
+    if (!a) return;
+    try { a.pause(); } catch {}
+  }
+
+  function stopAllLoopSE() {
+    loopSEMap.forEach((obj) => {
+      const a = obj?.audio;
+      if (!a) return;
+      try { a.pause(); } catch {}
+    });
+  }
+
+  /* =========================
    * WB patch (swap-safe)
    * ========================= */
   let lastWBRef = null;
 
   function patchWB(WB) {
     if (!WB || typeof WB !== "object") return;
-    if (lastWBRef === WB && WB.__bgmPatchedModalV2) return;
+    if (lastWBRef === WB && WB.__bgmPatchedModalV1) return;
     lastWBRef = WB;
 
-    if (!WB.__bgmPatchedModalV2) WB.__bgmPatchedModalV2 = { done: false };
+    if (!WB.__bgmPatchedModalV1) WB.__bgmPatchedModalV1 = { done: false };
 
     const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
     WB.unlockAudioOnce = async () => {
@@ -517,26 +515,26 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     WB.bgm.openModal = openModal;
     WB.bgm.closeModal = closeModal;
 
-    // ★SE音量API（app.js/tenki.jsが使える）
+    // ★SE API（app.js / tenki.js が使える）
     WB.getSEVolume = () => getSEVolume();
-    WB.setSEVolume = (v) => { setSEVolume(v); refreshUI(); };
-    WB.playSE = (audioOrSrc, base = 1.0) => playSE(audioOrSrc, base);
+    WB.setSEVolume = (v) => setSEVolume(v);
 
-    // ★ループSE API（UFO用）
     WB.se = WB.se || {};
+    WB.se.volume = () => getSEVolume();
+    WB.se.setVolume = (v) => setSEVolume(v);
+    WB.se.oneShot = (src, base = 1.0) => oneShotSE(src, base);
     WB.se.loop = (key, src, base = 1.0) => loopSE(key, src, base);
     WB.se.stop = (key) => stopLoopSE(key);
     WB.se.stopAll = () => stopAllLoopSE();
-    WB.se.getVolume = () => getSEVolume();
-    WB.se.setVolume = (v) => { setSEVolume(v); refreshUI(); };
 
-    WB.__bgmPatchedModalV2.done = true;
+    WB.__bgmPatchedModalV1.done = true;
 
     if (unlocked && settings.enabled) startBgm(true);
+    applyLoopSEVolumes();
   }
 
   /* =========================
-   * Modal UI
+   * Modal UI（ここが本体）
    * ========================= */
   function ensureStyles() {
     if (document.getElementById(UI.style)) return;
@@ -685,8 +683,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const toggle = $("#bgmToggleModal", modal);
     const mute = $("#bgmMuteModal", modal);
     const vol = $("#bgmVolModal", modal);
-    const seVol = $("#seVolModal", modal);
-    const seVolText = $("#seVolTextModal", modal);
+
+    // ★SE
+    const seVol = $("#bgmSEVolModal", modal);
+    const seVolText = $("#bgmSEVolTextModal", modal);
+
     const coinTag = $("#bgmCoinTagModal", modal);
 
     if (!stateText || !info || !selText || !toggle || !mute || !vol || !coinTag || !seVol || !seVolText) return;
@@ -756,13 +757,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     <div class="tag" id="bgmCoinTagModal">🪙 0</div>
   </div>
 
-  <div class="fine">BGM音量</div>
+  <div class="sectionTitle">▼ BGM音量</div>
   <input class="slider" id="bgmVolModal" type="range" min="0" max="100" step="1" />
 
-  <div class="row" style="margin-top:6px;">
-    <div class="fine" id="seVolTextModal">SE音量：${Math.round(getSEVolume() * 100)}%</div>
-  </div>
-  <input class="slider" id="seVolModal" type="range" min="0" max="100" step="1" />
+  <div class="sectionTitle">▼ SE音量（UFOなど効果音）</div>
+  <input class="slider" id="bgmSEVolModal" type="range" min="0" max="100" step="1" />
+  <div class="fine" id="bgmSEVolTextModal"></div>
 
   <div class="fine" id="bgmInfoModal"></div>
 
@@ -803,6 +803,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
         try { await window.WB?.unlockAudioOnce?.(); } catch {}
         startBgm(true);
       }
+      applyLoopSEVolumes();
       refreshUI();
     });
 
@@ -810,6 +811,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       settings.muted = !settings.muted;
       saveSettings(settings);
       applyVolume();
+      applyLoopSEVolumes();
       refreshUI();
     });
 
@@ -825,9 +827,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       refreshUI();
     });
 
-    // ★SE音量スライダー
-    $("#seVolModal", modal)?.addEventListener("input", () => {
-      const v = clamp(Number($("#seVolModal", modal).value) / 100, 0, 1);
+    // ★SE音量
+    $("#bgmSEVolModal", modal)?.addEventListener("input", () => {
+      const v = clamp(Number($("#bgmSEVolModal", modal).value) / 100, 0, 1);
       setSEVolume(v);
       refreshUI();
     });
@@ -870,6 +872,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       });
     }
 
+    // 定期更新（コイン表示など）
     clearInterval(__uiTimer);
     __uiTimer = setInterval(refreshUI, 500);
     refreshUI();
@@ -883,7 +886,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     buildUI();
     backdrop.style.display = "block";
 
+    // ✅ モーダルを開いたら一度アンロックを試す（1クリック後に確実に鳴る）
     try { window.WB?.unlockAudioOnce?.(); } catch {}
+
     refreshUI();
   }
 
