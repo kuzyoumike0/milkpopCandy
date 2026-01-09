@@ -1,28 +1,28 @@
-// haikei.js
+// haikei.js（V2）
 // ✅ /bg/bed.png を「うさぎの後ろ」に表示（自由配置）
 // ✅ 配置モード中は赤枠で位置を表示
-// ✅ shopで bed を購入した人だけ使える（未購入なら出さない）
-// ✅ 購入後：WB.emit("haikei:changed") / storage で即反映
+// ✅ shopで bed 購入 & 設置ON のときだけ有効
+// ✅ 設置OFF / 未購入なら完全撤去（ボタン・パネル・画像）
+// ✅ 購入/設置変更は WB.emit("haikei:changed"/"haikei:toggle") と storage で即反映
 // ✅ 位置保存（localStorage）
 
 (() => {
   "use strict";
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
+  const SHOP_STATE_KEY = "milkpop_shop_state_v1";
   const LS_KEY = "milkpop_haikei_v1";
 
-  const BED_SRC = "assets/bg/bed.png";
+  const BED_SRC = "/bg/bed.png";
 
   const BED_ID = "haikeiBedImage";
   const WRAP_ID = "haikeiBedWrap";
   const STYLE_ID = "haikeiBedStyle";
   const BTN_ID = "haikeiBtn";
+  const PANEL_ID = "haikeiCtrlPanel";
 
   const Z_BEHIND_BUNNY = 6;
-
   const DEFAULT = { x: 80, y: 220, scale: 1.0, rot: 0 };
-
-  const $ = (q, p = document) => p.querySelector(q);
 
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
 
@@ -30,6 +30,13 @@
     try { if (window.WB?.shop?.isOwned?.("bed")) return true; } catch {}
     const j = safeParse(localStorage.getItem(SHOP_OWNED_KEY)) || {};
     return !!j?.bed;
+  }
+
+  function isBedEnabled() {
+    try { if (typeof window.WB?.shop?.isBedEnabled === "function") return !!window.WB.shop.isBedEnabled(); } catch {}
+    const j = safeParse(localStorage.getItem(SHOP_STATE_KEY)) || {};
+    if (j && typeof j === "object" && "bedEnabled" in j) return !!j.bedEnabled;
+    return true; // stateが無い古い環境はON扱い
   }
 
   function loadState() {
@@ -44,9 +51,7 @@
     };
   }
 
-  function saveState(st) {
-    try { localStorage.setItem(LS_KEY, JSON.stringify(st)); } catch {}
-  }
+  function saveState(st) { try { localStorage.setItem(LS_KEY, JSON.stringify(st)); } catch {} }
 
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -77,7 +82,7 @@
 }
 #${BED_ID}.haikeiEditing:active{ cursor: grabbing; }
 
-#haikeiCtrlPanel{
+#${PANEL_ID}{
   position: fixed;
   left: 10px;
   top: 58px;
@@ -90,15 +95,15 @@
   font-size: 13px;
   display: none;
 }
-#haikeiCtrlPanel .row{ display:flex; gap:6px; margin: 6px 0; flex-wrap: wrap; }
-#haikeiCtrlPanel button{
+#${PANEL_ID} .row{ display:flex; gap:6px; margin: 6px 0; flex-wrap: wrap; }
+#${PANEL_ID} button{
   border: 1px solid rgba(0,0,0,.15);
   background: white;
   border-radius: 8px;
   padding: 6px 10px;
   cursor: pointer;
 }
-#haikeiCtrlPanel .hint{ opacity:.75; font-size:12px; margin-top:4px; }
+#${PANEL_ID} .hint{ opacity:.75; font-size:12px; margin-top:4px; }
 `;
     document.head.appendChild(st);
   }
@@ -149,9 +154,9 @@
     img.style.transform = `scale(${st.bed.scale}) rotate(${st.bed.rot}deg)`;
   }
 
-  // --- UI ---
   let editing = false;
   let state = loadState();
+  let drag = null;
 
   function ensureButton() {
     const hudButtons = document.getElementById("hudButtons");
@@ -170,11 +175,11 @@
   }
 
   function ensureCtrlPanel() {
-    let panel = document.getElementById("haikeiCtrlPanel");
+    let panel = document.getElementById(PANEL_ID);
     if (panel) return panel;
 
     panel = document.createElement("div");
-    panel.id = "haikeiCtrlPanel";
+    panel.id = PANEL_ID;
     panel.innerHTML = `
       <div><b>背景配置：ベッド</b></div>
       <div class="row">
@@ -240,7 +245,7 @@
   }
 
   function toggleEdit() {
-    if (!isBedOwned()) return; // 念のため
+    if (!(isBedOwned() && isBedEnabled())) return;
     setEditing(!editing);
   }
 
@@ -250,9 +255,6 @@
     applyTransform(img, state);
     if (saveNow) saveState(state);
   }
-
-  // --- Drag ---
-  let drag = null;
 
   function attachDrag(img) {
     if (img.__haikeiDragAttached) return;
@@ -288,16 +290,19 @@
   }
 
   function removeAll() {
-    setEditing(false);
-    try { document.getElementById("haikeiCtrlPanel")?.remove(); } catch {}
+    // OFF/未購入の瞬間に「触れない問題」を根絶
+    editing = false;
+    drag = null;
+    try { document.getElementById(PANEL_ID)?.remove(); } catch {}
     try { document.getElementById(BED_ID)?.remove(); } catch {}
     try { document.getElementById(WRAP_ID)?.remove(); } catch {}
     try { document.getElementById(BTN_ID)?.remove(); } catch {}
   }
 
   function boot() {
-    // 未購入なら何も出さない（完全非表示）
-    if (!isBedOwned()) {
+    const ok = isBedOwned() && isBedEnabled();
+
+    if (!ok) {
       removeAll();
       return;
     }
@@ -314,23 +319,24 @@
     setEditing(false);
   }
 
-  // DOM待機（resetで作り直されても復帰）
+  // DOM待機 + reset耐性
   let tries = 0;
   const t = setInterval(() => {
     tries++;
     boot();
-    if ((document.getElementById("hudButtons") && (isBedOwned() ? ensureBed() : true)) || tries > 220) {
+    if ((document.getElementById("hudButtons") && (isBedOwned() ? true : true)) || tries > 220) {
       clearInterval(t);
     }
   }, 60);
 
-  // shop購入通知で即反映
+  // 購入/設置トグル即反映
   const hookWB = () => {
     if (!window.WB?.on) return false;
     try {
       window.WB.on("haikei:changed", () => boot());
-      window.WB.on("shop:changed", () => boot());
-      window.WB.on("core:ready", () => boot());
+      window.WB.on("haikei:toggle",  () => boot());
+      window.WB.on("shop:changed",   () => boot());
+      window.WB.on("core:ready",     () => boot());
       window.WB.on("core:reset_partial", () => boot());
     } catch {}
     return true;
@@ -338,8 +344,9 @@
   hookWB();
   setTimeout(hookWB, 300);
 
-  // storage更新でも即反映
+  // storage更新でも即反映（別タブ含む）
   window.addEventListener("storage", (e) => {
-    if (e && e.key === SHOP_OWNED_KEY) boot();
+    if (!e) return;
+    if (e.key === SHOP_OWNED_KEY || e.key === SHOP_STATE_KEY) boot();
   });
 })();
