@@ -5,6 +5,7 @@
 // ✅ 当たり演出：ougon(3) > reabunny(2) > coin4(1) > others(0)
 // ✅ 当たり時：称号加算(slot_win) / 花火特大（HANABI.jackpot） / WB.emit("slotWin") / window event
 // ✅ syougou.js未ロードでもキューして後で反映
+// ✅ 追加：うさぎティアで払戻UP（babybunny < bunny1 < bunny3 < bunny4 < bunny5 < reabunny）
 
 (() => {
   const PANEL_ID = "slotStarMachinePanel3x3";
@@ -33,6 +34,57 @@
 
   const SPIN = { loops: 22, colDelay: 220, baseDuration: 980 };
   const $ = (q, p = document) => p.querySelector(q);
+
+  /* =========================
+   * ✅ うさぎティア（払戻UP）
+   * tier順：babybunny,bunny1,bunny3,bunny4,bunny5,reabunny
+   * - WB.getBunnies() を見て「最高ティア」を採用
+   * - baby判定は b.isBaby を優先（app.js側）
+   * - 係数：1 + tier*0.25（baby=1.00 / bunny1=1.25 / bunny3=1.50 / bunny4=1.75 / bunny5=2.00 / reabunny=2.25）
+   * ========================= */
+  const BUNNY_TIER = {
+    babybunny: 0,
+    bunny1: 1,
+    bunny3: 2,
+    bunny4: 3,
+    bunny5: 4,
+    reabunny: 5,
+  };
+
+  function getBestBunnyTier() {
+    try {
+      const WB = window.WB;
+      const list = (WB?.getBunnies?.() || WB?.bunnies || []);
+      if (!Array.isArray(list) || list.length === 0) return 0;
+
+      let best = 0;
+      for (const b of list) {
+        if (!b) continue;
+        // app.js の Bunny は isBaby を持つ
+        if (b.isBaby) { best = Math.max(best, 0); continue; }
+
+        const kind = String(b.kind || "bunny1");
+        const t = Number.isFinite(BUNNY_TIER[kind]) ? BUNNY_TIER[kind] : 1;
+        best = Math.max(best, t);
+      }
+      return best;
+    } catch {
+      return 0;
+    }
+  }
+
+  function bunnyTierMult() {
+    const tier = getBestBunnyTier();
+    const m = 1 + tier * 0.25;
+    // 念のため下限
+    return Math.max(1, m);
+  }
+
+  function bunnyTierLabel() {
+    const tier = getBestBunnyTier();
+    const inv = ["babybunny", "bunny1", "bunny3", "bunny4", "bunny5", "reabunny"];
+    return inv[tier] || "babybunny";
+  }
 
   /* =========================
    * 称号加算（syougou.jsが後から来てもOK）
@@ -82,6 +134,10 @@
 
     const rate = $(".betRate", panel);
     if (rate) rate.textContent = `×${betMult()}`;
+
+    // ✅ うさぎティア表示
+    const bt = $(".bunnyTier", panel);
+    if (bt) bt.textContent = `${bunnyTierLabel()}（×${bunnyTierMult().toFixed(2)}）`;
   }
 
   function setBet(v, panel) {
@@ -293,8 +349,6 @@
   }
 
   // ★ライン演出は常に入れる：
-  // - 当たり: winLines を描く
-  // - ハズレ: 全ラインを薄く描く（すぐ消える）
   function drawPaylinesAlways(panel, winLines, tier = 0) {
     const layer = $(".paylines", panel);
     if (!layer) return;
@@ -319,7 +373,6 @@
       svg.setAttribute("class", "lineSvg");
       svg.setAttribute("viewBox", `0 0 ${layer.clientWidth} ${layer.clientHeight}`);
 
-      // ★虹グラデ（ougon のときだけ使う）
       if (tier >= 3) {
         const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
         defs.innerHTML = `
@@ -427,7 +480,6 @@
 
   /* =========================
    * CSS（中央固定＆豪華演出＋虹ライン）
-   * ※結果表示を「台の上」に固定
    * ========================= */
   function injectStyles() {
     if (document.getElementById("slotStyleLuxV2Bet")) return;
@@ -775,7 +827,7 @@
   pointer-events:auto;
 }
 
-/* ===== 結果表示：台の上に固定 ===== */
+/* 結果表示：台の上に固定 */
 #${PANEL_ID} .results{
   left: 50%;
   top: calc(50% - min(520px, 92vw) * 0.52);
@@ -936,6 +988,9 @@
 
     <div class="chip">掛け：<b class="betNow">${BASE_BET}</b> 🪙 <span class="betRate">×1</span></div>
 
+    <!-- ✅ うさぎティア表示 -->
+    <div class="chip">うさぎ：<b class="bunnyTier">babybunny（×1.00）</b></div>
+
     <div class="betRow">
       ${BETS.map(v => `<button class="btn bet" type="button" data-bet="${v}">${v}</button>`).join("")}
     </div>
@@ -1070,15 +1125,11 @@
   let spinning = false;
 
   function onSlotWinSignal() {
-    // ✅ 当たり通知（他モジュール向け）
     try { window.WB?.emit?.("slotWin"); } catch {}
     try { window.dispatchEvent(new CustomEvent("wb:slotWin")); } catch {}
     try { window.dispatchEvent(new CustomEvent("milkpop:slotWin")); } catch {}
 
-    // ✅ 称号（スロット当たり）
     syAdd("slot_win", 1);
-
-    // ✅ 当たり花火（特大）
     try { window.HANABI?.jackpot?.(); } catch {}
   }
 
@@ -1086,6 +1137,12 @@
     if (spinning) return;
 
     flushSyougouQueue();
+
+    // ✅ スピン開始時のティア倍率を固定（途中で変わってもブレない）
+    const bunnyM = bunnyTierMult();
+    const bunnyTierName = bunnyTierLabel();
+
+    updateBetUI(panel);
 
     const have = getCoin();
     const cost = currentBet * count;
@@ -1115,7 +1172,6 @@
     let lastWinLines = [];
     let lastNames = [];
 
-    // ★掛け金倍率（50→×1 / 100→×2 ...）
     const mult = betMult();
 
     try {
@@ -1137,8 +1193,14 @@
         let payThis = 0;
         for (const line of w) {
           const sym = res[line[0]];
-          if (sym.pay) payThis += sym.pay * mult; // ★倍率をかける
+          if (sym.pay) {
+            // ✅ 掛け倍率 × うさぎティア倍率
+            payThis += sym.pay * mult * bunnyM;
+          }
         }
+
+        // 端数は切り捨て（コインは整数運用）
+        payThis = Math.floor(payThis);
 
         totalLines += w.length;
         totalPay += payThis;
@@ -1167,8 +1229,6 @@
 
     if (totalLines > 0) {
       triggerWinFx(panel, lastWinLines, bestTier, totalPay, totalLines);
-
-      // ✅ ここで当たり連携をまとめて実行
       onSlotWinSignal();
 
       const hold =
@@ -1176,7 +1236,11 @@
         bestTier >= 2 ? 4800 :
         bestTier >= 1 ? 4200 : 3600;
 
-      showResult(panel, `🎉 当たり ${totalLines}ライン / +${totalPay}🪙（掛け${currentBet}×${mult}）`, hold);
+      showResult(
+        panel,
+        `🎉 当たり ${totalLines}ライン / +${totalPay}🪙（掛け${currentBet}×${mult}・うさぎ${bunnyTierName}×${bunnyM.toFixed(2)}）`,
+        hold
+      );
     } else {
       showResult(panel, `はずれ！（掛け${currentBet}）`, 2400);
     }
@@ -1216,7 +1280,6 @@
     injectStyles();
     buildPanel();
 
-    // syougou.js が後から来た時にキューを自動で吐く
     const qFlushTimer = setInterval(() => {
       if (window.SYOUGOU?.add) {
         flushSyougouQueue();
@@ -1240,6 +1303,13 @@
       });
       mo.observe(cv, { childList: true, subtree: true, characterData: true });
     }
+
+    // ✅ うさぎ数/進化などでティアが変わるので、開いてる間はたまに更新
+    setInterval(() => {
+      if (panelRef && panelRef.style.display !== "none" && !spinning) {
+        updateBetUI(panelRef);
+      }
+    }, 900);
 
     window.addEventListener("resize", () => {
       if (panelRef && panelRef.style.display !== "none") {
