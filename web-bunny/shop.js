@@ -1,8 +1,9 @@
 // shop.js（非module）
-// ✅ HUDの「お迎え」(#shopBtn) を押すとモーダル表示
+// ✅ HUDの「ショップ」(#shopBtn) を押すとモーダル表示（omukaeとは別）
 // ✅ モーダルでミラーボール（assets/bg/mirrorball.png）を購入できる
 // ✅ WB coin API 互換 + #coinValue fallback
 // ✅ 購入後に WB.emit("bg:mirrorball_changed") で bgcolor.js 即反映
+// ✅ FIX: クリック伝播をcaptureで止めて omukae の委譲クリックを根絶
 
 (() => {
   "use strict";
@@ -13,8 +14,8 @@
     key: "mirrorball",
     label: "ミラーボール",
     desc: "背景が虹色にキラキラ（設置時のみ）",
-    price: 9000, // 好きに調整OK
-    img: "./assets/bg/mirrorball.png",
+    price: 9000,
+    img: "./assets/bg/mirrorball.png", // ✅ 指定どおり
   };
 
   const UI = {
@@ -174,16 +175,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 }
 #${UI.modal} .btn.ghost{ background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08); }
 #${UI.modal} .btn[disabled]{ opacity:.55; cursor:not-allowed; }
-
-#${UI.modal} .grid{
-  display:grid;
-  grid-template-columns: 1fr;
-  gap:10px;
-}
-@media (min-width: 520px){
-  #${UI.modal} .grid{ grid-template-columns: 1fr; }
-}
-
+#${UI.modal} .grid{ display:grid; grid-template-columns: 1fr; gap:10px; }
 #${UI.modal} .item{
   display:flex; gap:12px; align-items:center;
   padding:12px;
@@ -237,7 +229,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
 <div class="row">
   <div class="tag" id="shopCoinTagV1">🪙 0</div>
-  <div class="tag" id="shopHintTagV1">お迎えボタンで開く</div>
+  <div class="tag" id="shopHintTagV1">ショップボタンで開く</div>
 </div>
 
 <div class="sep"></div>
@@ -269,6 +261,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     modal.style.display = "block";
     refresh();
   }
+
   function closeModal() {
     const backdrop = document.getElementById(UI.backdrop);
     const modal = document.getElementById(UI.modal);
@@ -278,6 +271,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   function buyMirrorball() {
     if (isOwned(ITEM.key)) return { ok: true, reason: "already" };
+
     const cur = getCoinsWB();
     if (cur < ITEM.price) return { ok: false, reason: "coins", have: cur, need: ITEM.price };
 
@@ -287,9 +281,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     owned[ITEM.key] = true;
     saveOwned(owned);
 
-    // ✅ 背景側へ即通知
     try { window.WB?.emit?.("bg:mirrorball_changed", { owned: true }); } catch {}
-
     return { ok: true, reason: "bought" };
   }
 
@@ -320,10 +312,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const closeBtn = $("#shopCloseModalV1", modal);
     const buyBtn = $("#shopBuyBtnV1", modal);
 
-    closeBtn?.addEventListener("click", closeModal);
+    closeBtn?.addEventListener("click", (e) => { e.stopPropagation(); closeModal(); });
     backdrop.addEventListener("click", closeModal);
 
-    buyBtn?.addEventListener("click", () => {
+    buyBtn?.addEventListener("click", (e) => {
+      e.stopPropagation();
       const r = buyMirrorball();
       if (!r.ok) {
         if (r.reason === "coins") toast(`🪙 足りない！ ${r.have} / ${r.need}`);
@@ -334,13 +327,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       refresh();
     });
 
-    // ESCで閉じる
     window.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
-      if (modal.style.display === "block") closeModal();
+      const m = document.getElementById(UI.modal);
+      if (m && m.style.display === "block") closeModal();
     });
 
-    // 0.5秒ごとに更新（コインの変化に追従）
     setInterval(refresh, 500);
   }
 
@@ -378,7 +370,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       if (Date.now() - start > 15000) clearInterval(t);
     }, 200);
 
-    // ✅ HUDの「お迎え」ボタンに紐付ける
+    // ✅ HUDの「ショップ」ボタンにのみ紐付ける
     let shopBtn = null;
     try {
       shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
@@ -387,10 +379,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       return;
     }
 
+    // ✅ omukae のイベント委譲に負けない：captureで先に止める
     shopBtn.addEventListener("click", (e) => {
       e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
       openModal();
-    });
+    }, true); // ★ capture=true
 
     // 初期反映（購入済みならbgcolorへ通知しておく）
     if (isOwned(ITEM.key)) {
