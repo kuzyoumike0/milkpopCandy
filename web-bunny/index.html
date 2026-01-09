@@ -29,8 +29,11 @@
     <div id="coin">🪙 <span id="coinValue">0</span></div>
 
     <div id="hudButtons">
-      <!-- shop.js がこのボタンにモーダルを紐付ける -->
-      <button id="shopBtn" type="button">お迎え</button>
+      <!-- 🐰 お迎え（omukae.js 用） -->
+      <button id="omukaeBtn" type="button">お迎え</button>
+
+      <!-- 🛍 ショップ（shop.js 用） -->
+      <button id="shopBtn" type="button">ショップ</button>
 
       <button id="slotBtn" type="button">スロット</button>
       <button id="departBtn" type="button">旅立ち</button>
@@ -70,23 +73,22 @@
   <script src="./app.js?v=20260109_1"></script>
 
   <!-- =========================
-       ★ ショップ（お迎えボタン）
-       ミラーボール購入モーダル
+       🛍 ショップ（背景・アイテム購入）
        ========================= -->
   <script src="./shop.js?v=20260109_1"></script>
 
   <!-- =========================
-       BGM（必ず app.js の後）
+       🎵 BGM（必ず app.js の後）
        ========================= -->
   <script src="./BGM.js?v=20260109_1"></script>
 
   <!-- =========================
        拡張（WB依存）
        ========================= -->
+  <script src="./omukae.js?v=20260109_1"></script>
   <script src="./isyou.js?v=20260109_1"></script>
   <script src="./zisseki.js?v=20260109_1"></script>
   <script src="./syougou.js?v=20260109_1"></script>
-  <script src="./omukae.js?v=20260109_1"></script>
   <script src="./zukan.js?v=20260109_1"></script>
   <script src="./farewell_messages.js?v=20260109_1"></script>
   <script src="./tabidati.js?v=20260109_1"></script>
