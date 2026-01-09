@@ -1,641 +1,365 @@
-// itemPlace.js（V2.1 FIX）
-// ✅ shop.js購入済みの「配置できるアイテム」だけ赤枠で配置
-// ✅ ミラーボール(mirrorball)は配置しない（演出は bgcolor.js）
-// ✅ 実寸サイズ：画像の naturalWidth/Height を読んでゴースト枠も実寸
-// ✅ 配置できない問題を根絶：座標基準を #field に固定（bgLayerが0サイズでもOK）
-// ✅ 配置モード中はゲーム側クリックを capture で強制ブロック（app.jsに負けない）
-// ✅ 配置モード：赤枠（透明）→ クリックで設置 → ドラッグ移動 → 完了
+// shop.js（購入専用：#shopBtn専用 → ✅ハンバーガーメニュー対応版 / 設置ON/OFF削除）
+// ✅ #shopBtn クリックは「メニューから呼ぶ」想定（index.htmlでは非表示でもOK）
+// ✅ ハンバーガーメニュー側が呼べるように window.SHOP.open() / WB.shop.open() を提供
+// ✅ もし #shopBtn が存在するなら従来通りクリックで開く（互換）
+// ✅ owned（購入済み）保存 & 即通知
+// ✅ 設置ON/OFFは一切持たない（itemPlace.js 側で管理）
+// ✅ 二重起動・二重リスナー根絶
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V2.1 FIX", Date.now());
 
-  const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
-  const SHOP_STATE_KEY = "milkpop_shop_state_v1";
-  const LS_KEY = "milkpop_itemplace_v2";
+  // 二重読み込み防止
+  if (window.__BGSHOP_BUYONLY_V1_INITED__) {
+    console.warn("[shop.js] already inited; skip re-init");
+    return;
+  }
+  window.__BGSHOP_BUYONLY_V1_INITED__ = true;
 
-  // ✅ クリック座標の基準は field（ここが重要）
-  const HOST_ID = "field";
+  const LS_OWNED = "milkpop_shop_owned_v1";
 
-  const WRAP_ID  = "itemPlaceWrapV2";
-  const STYLE_ID = "itemPlaceStyleV2";
-  const PANEL_ID = "itemPlacePanelV2";
-  const GHOST_ID = "itemPlaceGhostV2";
-
-  // ✅ 配置できる実体アイテムだけ（mirrorballは絶対入れない）
-  const PLACE_ITEMS = {
+  // ✅ ショップで買える物（ON/OFFは持たない）
+  const ITEMS = {
+    mirrorball: {
+      key: "mirrorball",
+      label: "ミラーボール",
+      desc: "（配置はしない）夜の演出は bgcolor.js が見る",
+      price: 9000,
+      img: "./assets/bg/mirrorball.png",
+    },
     bed: {
       key: "bed",
       label: "ベッド",
-      src: "./assets/bg/bed.png",
-      z: 6, // うさぎより後ろ想定（必要なら調整）
-      default: { x: 180, y: 280, scale: 1.0, rot: 0, placed: false },
+      desc: "アイテム配置で置ける（itemPlace.js）",
+      price: 3500,
+      img: "./assets/bg/bed.png",
     },
-    // 追加したい場合はここに増やす（mirrorballは入れない）
+  };
+
+  const UI = {
+    style: "bgShopStyleV1",
+    backdrop: "bgShopBackdropV1",
+    modal: "bgShopModalV1",
+    toast: "bgShopToastV1",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
 
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
-  function loadOwned() { return safeParse(localStorage.getItem(SHOP_OWNED_KEY)) || {}; }
-  function loadShopState() { return safeParse(localStorage.getItem(SHOP_STATE_KEY)) || {}; }
+  function loadOwned() { return safeParse(localStorage.getItem(LS_OWNED)) || {}; }
+  function saveOwned(o) { try { localStorage.setItem(LS_OWNED, JSON.stringify(o)); } catch {} }
 
-  function isOwned(key) {
-    try { if (window.WB?.shop?.isOwned) return !!window.WB.shop.isOwned(key); } catch {}
-    const o = loadOwned();
-    return !!o?.[key];
+  let owned = loadOwned();
+
+  function getCoinsWB() {
+    const WB = window.WB;
+    try {
+      if (WB?.getCoin) return Number(WB.getCoin()) || 0;
+      if (typeof WB?.coins === "number") return Number(WB.coins) || 0;
+      const el = document.getElementById("coinValue");
+      return el ? Number(el.textContent || "0") : 0;
+    } catch {}
+    return 0;
   }
 
-  function isEnabled(key) {
-    const st = loadShopState();
-    const k = key + "Enabled";
-    if (k in st) return !!st[k];
-    return true;
+  function spendCoinsWB(amount) {
+    const WB = window.WB;
+    const a = Math.max(0, Math.floor(Number(amount) || 0));
+    if (!a) return true;
+
+    try {
+      if (WB?.spendCoin) return !!WB.spendCoin(a);
+      if (WB?.spendCoins) return !!WB.spendCoins(a);
+
+      if (typeof WB?.coins === "number") {
+        if (WB.coins < a) return false;
+        WB.coins -= a;
+        WB.updateHud?.();
+        return true;
+      }
+
+      const el = document.getElementById("coinValue");
+      if (el) {
+        const cur = Number(el.textContent || "0") || 0;
+        if (cur < a) return false;
+        el.textContent = String(cur - a);
+        return true;
+      }
+    } catch {}
+    return false;
   }
 
-  function loadState() {
-    const j = safeParse(localStorage.getItem(LS_KEY)) || {};
-    const out = {};
-    for (const k of Object.keys(PLACE_ITEMS)) {
-      const def = PLACE_ITEMS[k].default;
-      const cur = j?.[k] || {};
-      out[k] = {
-        x: Number(cur.x ?? def.x),
-        y: Number(cur.y ?? def.y),
-        scale: Number(cur.scale ?? def.scale),
-        rot: Number(cur.rot ?? def.rot),
-        placed: (typeof cur.placed === "boolean") ? cur.placed : !!def.placed,
-      };
+  function toast(msg) {
+    let el = document.getElementById(UI.toast);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = UI.toast;
+      el.style.cssText = `
+position:fixed; left:50%; top:16px; transform:translateX(-50%);
+z-index:2147483647;
+background:rgba(0,0,0,.78); color:#fff;
+padding:10px 12px; border-radius:14px;
+font-weight:900; font-size:13px;
+box-shadow:0 14px 40px rgba(0,0,0,.25);
+pointer-events:none; opacity:0; transition:opacity .18s ease;`;
+      document.body.appendChild(el);
     }
-    return out;
-  }
-  function saveState(st) { try { localStorage.setItem(LS_KEY, JSON.stringify(st)); } catch {} }
-
-  // ===== 画像実寸管理（naturalWidth/Height）=====
-  const imgSize = {}; // { key: { w, h } }
-
-  function preloadSize(key) {
-    const it = PLACE_ITEMS[key];
-    if (!it) return Promise.resolve(null);
-    if (imgSize[key]?.w && imgSize[key]?.h) return Promise.resolve(imgSize[key]);
-
-    return new Promise((resolve) => {
-      const im = new Image();
-      im.onload = () => {
-        imgSize[key] = { w: im.naturalWidth || 120, h: im.naturalHeight || 90 };
-        resolve(imgSize[key]);
-      };
-      im.onerror = () => {
-        console.warn("[itemPlace] preload failed:", it.src);
-        imgSize[key] = { w: 120, h: 90 };
-        resolve(imgSize[key]);
-      };
-      im.src = it.src;
-    });
+    el.textContent = msg;
+    el.style.opacity = "1";
+    clearTimeout(el.__t);
+    el.__t = setTimeout(() => { el.style.opacity = "0"; }, 1200);
   }
 
-  async function preloadAll() {
-    const ks = Object.keys(PLACE_ITEMS);
-    for (const k of ks) await preloadSize(k);
-  }
-
-  // ===== CSS / wrap =====
   function ensureStyle() {
-    if (document.getElementById(STYLE_ID)) return;
+    if (document.getElementById(UI.style)) return;
     const st = document.createElement("style");
-    st.id = STYLE_ID;
+    st.id = UI.style;
     st.textContent = `
-#${WRAP_ID}{
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  overflow:visible;
-}
-
-.itemPlaceObj{
-  position:absolute;
-  left:0; top:0;
-  transform-origin:0 0;
-  user-select:none;
-  -webkit-user-drag:none;
-  pointer-events:none;
-}
-
-.itemPlaceObj.editing{
-  pointer-events:auto;
-  outline: 3px solid rgba(255,0,0,.85);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 9999px rgba(0,0,0,.08);
-  cursor: grab;
-}
-.itemPlaceObj.editing:active{ cursor: grabbing; }
-
-#${GHOST_ID}{
-  position:fixed;
-  left:0; top:0;
-  transform: translate3d(-9999px,-9999px,0);
-  z-index:2147483646;
-  border: 3px solid rgba(255,0,0,.55);
-  border-radius: 14px;
-  background: rgba(255,0,0,.08);
-  pointer-events:none;
-  box-shadow: 0 14px 34px rgba(0,0,0,.18);
-  width:120px; height:90px;
-}
-
-#${PANEL_ID}{
-  position:fixed;
-  left:10px; top:58px;
-  z-index:2147483647;
-  background: rgba(255,255,255,.92);
-  border: 2px solid rgba(255,0,0,.75);
-  border-radius: 12px;
-  padding: 10px;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 13px;
+#${UI.backdrop}{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.28);
+  z-index:2147483002;
   display:none;
-  min-width: 260px;
 }
-#${PANEL_ID} .ttl{ font-weight:1000; margin-bottom:6px; }
-#${PANEL_ID} .row{ display:flex; gap:6px; margin: 6px 0; flex-wrap:wrap; }
-#${PANEL_ID} button{
-  border: 1px solid rgba(0,0,0,.15);
-  background: white;
-  border-radius: 10px;
-  padding: 7px 10px;
-  cursor: pointer;
-  font-weight: 1000;
+#${UI.modal}{
+  position:fixed;
+  left:50%; top:54%;
+  transform:translate(-50%,-50%);
+  width:min(560px, 92vw);
+  max-height:min(78vh, 680px);
+  overflow:auto;
+  background:rgba(255,255,255,.98);
+  border-radius:18px;
+  box-shadow:0 22px 70px rgba(0,0,0,.28);
+  z-index:2147483003;
+  padding:14px 14px 12px;
+  display:none;
 }
-#${PANEL_ID} select{
-  width:100%;
+#${UI.modal} .row{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+#${UI.modal} .ttl{ font-weight:900; font-size:16px; }
+#${UI.modal} .sub{ font-size:12px; opacity:.75; margin-top:2px; }
+#${UI.modal} .sep{ height:1px; background:rgba(0,0,0,.08); margin:12px 0; }
+#${UI.modal} .tag{
+  font-size:12px; font-weight:900;
+  padding:5px 10px; border-radius:999px;
+  background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08);
+  white-space:nowrap;
+}
+#${UI.modal} .btn{
+  border:none; border-radius:12px;
   padding:8px 10px;
-  border-radius:10px;
-  border:1px solid rgba(0,0,0,.15);
-  font-weight:1000;
+  font-weight:900;
+  cursor:pointer;
+  background:#ffd6e7;
 }
-#${PANEL_ID} .hint{ opacity:.75; font-size:12px; line-height:1.35; margin-top:6px; }
+#${UI.modal} .btn.ghost{ background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08); }
+#${UI.modal} .btn[disabled]{ opacity:.55; cursor:not-allowed; }
+#${UI.modal} .grid{ display:grid; grid-template-columns: 1fr; gap:10px; }
+#${UI.modal} .item{
+  display:flex; gap:12px; align-items:center;
+  padding:12px;
+  border-radius:16px;
+  background:rgba(0,0,0,.03);
+}
+#${UI.modal} .thumb{
+  width:78px; height:78px; flex:0 0 auto;
+  border-radius:14px;
+  background:#fff;
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+  overflow:hidden;
+  display:flex; align-items:center; justify-content:center;
+}
+#${UI.modal} .thumb img{ width:100%; height:100%; object-fit:contain; }
+#${UI.modal} .name{ font-weight:900; }
+#${UI.modal} .meta{ font-size:12px; opacity:.75; margin-top:2px; }
+#${UI.modal} .right{
+  margin-left:auto;
+  display:flex; gap:8px; flex-wrap:wrap;
+  align-items:center; justify-content:flex-end;
+}
 `;
     document.head.appendChild(st);
   }
 
-  function getHost() {
-    return document.getElementById(HOST_ID) || document.body;
-  }
-
-  function ensureWrap() {
+  function ensureUI() {
     ensureStyle();
-    const host = getHost();
-    if (!host) return null;
 
-    // hostがrelativeじゃないと inset:0 が効かない
-    try {
-      const cs = getComputedStyle(host);
-      if (cs.position === "static") host.style.position = "relative";
-    } catch {}
-
-    let wrap = document.getElementById(WRAP_ID);
-    if (!wrap) {
-      wrap = document.createElement("div");
-      wrap.id = WRAP_ID;
-      host.appendChild(wrap);
-    } else {
-      try { host.appendChild(wrap); } catch {}
+    let backdrop = document.getElementById(UI.backdrop);
+    if (!backdrop) {
+      backdrop = document.createElement("div");
+      backdrop.id = UI.backdrop;
+      document.body.appendChild(backdrop);
     }
-    return wrap;
-  }
 
-  function ensureGhost() {
-    ensureStyle();
-    let g = document.getElementById(GHOST_ID);
-    if (!g) {
-      g = document.createElement("div");
-      g.id = GHOST_ID;
-      document.body.appendChild(g);
+    let modal = document.getElementById(UI.modal);
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = UI.modal;
+      document.body.appendChild(modal);
     }
-    return g;
+
+    return { backdrop, modal };
   }
 
-  function setGhostSizeFor(key, scale = 1) {
-    const g = ensureGhost();
-    const s = imgSize[key] || { w: 120, h: 90 };
-    g.style.width  = `${Math.max(8, s.w * scale)}px`;
-    g.style.height = `${Math.max(8, s.h * scale)}px`;
+  function closeModal() {
+    const bd = document.getElementById(UI.backdrop);
+    const m = document.getElementById(UI.modal);
+    if (bd) bd.style.display = "none";
+    if (m) m.style.display = "none";
   }
 
-  function showGhostAt(clientX, clientY, key, scale) {
-    const g = ensureGhost();
-    setGhostSizeFor(key, scale);
-    const w = parseFloat(g.style.width) || 120;
-    const h = parseFloat(g.style.height) || 90;
-    g.style.transform = `translate3d(${clientX - w / 2}px,${clientY - h / 2}px,0)`;
-  }
+  function openModal() {
+    const { backdrop, modal } = ensureUI();
 
-  function hideGhost() {
-    const g = ensureGhost();
-    g.style.transform = "translate3d(-9999px,-9999px,0)";
-  }
+    owned = loadOwned();
+    const c = getCoinsWB();
 
-  // ===== 実体 =====
-  function ensureObj(key) {
-    const it = PLACE_ITEMS[key];
-    if (!it) return null;
-
-    const wrap = ensureWrap();
-    if (!wrap) return null;
-
-    let img = document.getElementById(`itemPlace_${key}`);
-    if (!img) {
-      img = document.createElement("img");
-      img.id = `itemPlace_${key}`;
-      img.className = "itemPlaceObj";
-      img.alt = key;
-      img.src = it.src;
-      img.draggable = false;
-      img.style.zIndex = String(it.z ?? 6);
-      img.addEventListener("error", () => console.warn("[itemPlace] load failed:", it.src));
-      wrap.appendChild(img);
-    } else if (img.getAttribute("src") !== it.src) {
-      img.src = it.src;
-    }
-    return img;
-  }
-
-  function removeObj(key) {
-    try { document.getElementById(`itemPlace_${key}`)?.remove(); } catch {}
-  }
-
-  function applyTransform(img, s) {
-    img.style.left = `${Math.round(s.x)}px`;
-    img.style.top  = `${Math.round(s.y)}px`;
-    img.style.transform = `scale(${s.scale}) rotate(${s.rot}deg)`;
-  }
-
-  // ===== 編集モード =====
-  let editing = false;
-  let selectedKey = "bed";
-  let st = loadState();
-  let drag = null;
-
-  function placeableKeys() {
-    return Object.keys(PLACE_ITEMS).filter(k => isOwned(k) && isEnabled(k));
-  }
-
-  function ensurePanel() {
-    ensureStyle();
-    let p = document.getElementById(PANEL_ID);
-    if (p) return p;
-
-    p = document.createElement("div");
-    p.id = PANEL_ID;
-    p.innerHTML = `
-  <div class="ttl">📦 アイテム配置</div>
-  <div class="row">
-    <select id="ipSel"></select>
+    modal.innerHTML = `
+<div class="row">
+  <div>
+    <div class="ttl">ショップ</div>
+    <div class="sub">背景アイテムを購入できます（設置ON/OFFは別メニュー）</div>
   </div>
-  <div class="row">
-    <button id="ipScaleDown">− 縮小</button>
-    <button id="ipScaleUp">＋ 拡大</button>
-    <button id="ipRotL">⟲ 回転</button>
-    <button id="ipRotR">⟳ 回転</button>
-  </div>
-  <div class="row">
-    <button id="ipReset">リセット</button>
-    <button id="ipRemove">撤去</button>
-    <button id="ipDone">完了</button>
-  </div>
-  <div class="hint">
-    透明赤枠の位置をクリックで設置。<br>
-    設置後は赤枠のアイテムをドラッグで移動。
-  </div>
+  <button class="btn ghost" id="bgShopCloseX" type="button">×</button>
+</div>
+
+<div class="sep"></div>
+
+<div class="row">
+  <div class="tag">🪙 ${c}</div>
+  <div class="tag">メニューから開ける</div>
+</div>
+
+<div class="sep"></div>
+
+<div class="grid">
+  ${Object.values(ITEMS).map(it => {
+    const own = !!owned[it.key];
+    return `
+    <div class="item">
+      <div class="thumb"><img src="${it.img}" alt="${it.key}"></div>
+      <div style="min-width:0;">
+        <div class="name">${it.label}</div>
+        <div class="meta">${it.desc}</div>
+        <div class="meta">価格：<b>${it.price}🪙</b></div>
+      </div>
+      <div class="right">
+        <div class="tag">${own ? "購入済み" : "未購入"}</div>
+        <button class="btn" data-buy="${it.key}" ${own ? "disabled" : ""}>購入</button>
+      </div>
+    </div>`;
+  }).join("")}
+</div>
 `;
-    document.body.appendChild(p);
 
-    const byId = (id) => document.getElementById(id);
+    backdrop.style.display = "block";
+    modal.style.display = "block";
 
-    byId("ipScaleDown").addEventListener("click", () => {
-      const s = st[selectedKey]; if (!s) return;
-      s.scale = Math.max(0.2, +(s.scale - 0.05).toFixed(3));
-      saveState(st); syncOne(selectedKey);
-    });
-    byId("ipScaleUp").addEventListener("click", () => {
-      const s = st[selectedKey]; if (!s) return;
-      s.scale = Math.min(4.0, +(s.scale + 0.05).toFixed(3));
-      saveState(st); syncOne(selectedKey);
-    });
-    byId("ipRotL").addEventListener("click", () => {
-      const s = st[selectedKey]; if (!s) return;
-      s.rot -= 5;
-      saveState(st); syncOne(selectedKey);
-    });
-    byId("ipRotR").addEventListener("click", () => {
-      const s = st[selectedKey]; if (!s) return;
-      s.rot += 5;
-      saveState(st); syncOne(selectedKey);
-    });
-    byId("ipReset").addEventListener("click", () => {
-      const def = PLACE_ITEMS[selectedKey]?.default; if (!def) return;
-      st[selectedKey] = { ...st[selectedKey], ...def, placed: st[selectedKey]?.placed ?? false };
-      saveState(st); syncOne(selectedKey);
-    });
-    byId("ipRemove").addEventListener("click", () => {
-      const s = st[selectedKey]; if (!s) return;
-      s.placed = false;
-      saveState(st);
-      syncOne(selectedKey);
-    });
-    byId("ipDone").addEventListener("click", () => setEditing(false));
+    $("#bgShopCloseX", modal)?.addEventListener("click", closeModal);
+    backdrop.onclick = (e) => { if (e.target === backdrop) closeModal(); };
 
-    return p;
-  }
+    modal.querySelectorAll("[data-buy]").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const key = btn.getAttribute("data-buy");
+        const it = ITEMS[key];
+        if (!it) return;
 
-  function refreshSelect() {
-    const p = ensurePanel();
-    const sel = $("#ipSel", p);
-    if (!sel) return;
+        if (owned[key]) return;
+        const have = getCoinsWB();
+        if (have < it.price) { toast(`🪙 足りない！ ${have} / ${it.price}`); openModal(); return; }
+        if (!spendCoinsWB(it.price)) { toast("購入できませんでした"); openModal(); return; }
 
-    const keys = placeableKeys();
-    if (!keys.length) {
-      sel.innerHTML = `<option value="">（配置できる購入済みアイテムがありません）</option>`;
-      sel.value = "";
-      return;
-    }
+        owned[key] = true;
+        saveOwned(owned);
 
-    sel.innerHTML = keys.map(k => {
-      const it = PLACE_ITEMS[k];
-      return `<option value="${k}">${it?.label || k}</option>`;
-    }).join("");
-
-    if (!keys.includes(selectedKey)) selectedKey = keys[0];
-    sel.value = selectedKey;
-
-    sel.onchange = () => {
-      if (!sel.value) return;
-      selectedKey = sel.value;
-      // 選択変えた瞬間にゴースト実寸を更新
-      const s = st[selectedKey] || PLACE_ITEMS[selectedKey]?.default;
-      showGhostAt(lastPointer.x, lastPointer.y, selectedKey, Number(s?.scale ?? 1));
-      syncAll();
-    };
-  }
-
-  function attachDrag(img, key) {
-    if (img.__ipDrag) return;
-    img.__ipDrag = true;
-
-    img.addEventListener("pointerdown", (e) => {
-      if (!editing) return;
-      if (key !== selectedKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
-      img.setPointerCapture?.(e.pointerId);
-
-      drag = {
-        key,
-        startX: e.clientX,
-        startY: e.clientY,
-        baseX: st[key].x,
-        baseY: st[key].y,
-      };
-    });
-  }
-
-  // ここは window 側で1回だけ登録（重複防止）
-  let winMoveHooked = false;
-  function hookWindowDragMoveOnce() {
-    if (winMoveHooked) return;
-    winMoveHooked = true;
-
-    window.addEventListener("pointermove", (e) => {
-      if (!editing || !drag) return;
-      const key = drag.key;
-      if (!st[key]) return;
-      const dx = e.clientX - drag.startX;
-      const dy = e.clientY - drag.startY;
-      st[key].x = drag.baseX + dx;
-      st[key].y = drag.baseY + dy;
-      syncOne(key);
-    }, { passive: true });
-
-    window.addEventListener("pointerup", () => {
-      if (!drag) return;
-      saveState(st);
-      drag = null;
-    }, { passive: true });
-  }
-
-  function syncOne(key) {
-    const it = PLACE_ITEMS[key];
-    const s = st[key];
-    if (!it || !s) return;
-
-    // 未購入/無効/未配置なら撤去
-    if (!isOwned(key) || !isEnabled(key) || !s.placed) {
-      removeObj(key);
-      return;
-    }
-
-    const img = ensureObj(key);
-    if (!img) return;
-
-    applyTransform(img, s);
-    img.classList.toggle("editing", editing && key === selectedKey);
-
-    attachDrag(img, key);
-  }
-
-  function syncAll() {
-    for (const k of Object.keys(PLACE_ITEMS)) syncOne(k);
-  }
-
-  function isOverUI(target) {
-    return !!(
-      target?.closest?.(
-        `#${PANEL_ID}, #gameMenuPanelV1, #gameHamburgerV1, #isyouModal, #isyouConfirmBar, #bgShopModalV1, #bgShopBackdropV1`
-      )
-    );
-  }
-
-  // ===== 置けない根絶：編集ON中はゲーム側クリックを全部ブロック =====
-  function blockGamePointerIfEditing(e) {
-    if (!editing) return;
-    if (!e?.target) return;
-    if (isOverUI(e.target)) return;
-    // ここで止める（capture最優先で勝つ）
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation?.();
-  }
-
-  // ===== ゴースト追従 =====
-  const MOVE_OPTS = { passive: true };
-  const DOWN_CAPTURE_OPTS = true;
-  const KEY_OPTS = { passive: true };
-
-  const lastPointer = { x: -9999, y: -9999 };
-
-  function onMoveGhost(e) {
-    if (!editing) return;
-    lastPointer.x = e.clientX;
-    lastPointer.y = e.clientY;
-    if (isOverUI(e.target)) { hideGhost(); return; }
-    const s = st[selectedKey] || PLACE_ITEMS[selectedKey]?.default;
-    const sc = Number(s?.scale ?? 1);
-    showGhostAt(e.clientX, e.clientY, selectedKey, sc);
-  }
-
-  // ===== 配置（captureで最優先）=====
-  function onPlaceDown(e) {
-    if (!editing) return;
-    if (isOverUI(e.target)) return;
-
-    // ✅ 先にブロックして勝つ
-    blockGamePointerIfEditing(e);
-
-    if (!selectedKey) return;
-    if (!isOwned(selectedKey) || !isEnabled(selectedKey)) return;
-
-    const host = getHost();
-    const r = host.getBoundingClientRect();
-
-    if (r.width <= 2 || r.height <= 2) {
-      console.warn("[itemPlace] host rect is too small:", r);
-      return;
-    }
-
-    const localX = e.clientX - r.left;
-    const localY = e.clientY - r.top;
-
-    const s = st[selectedKey] || (st[selectedKey] = { ...PLACE_ITEMS[selectedKey].default });
-    s.placed = true;
-
-    const size = imgSize[selectedKey] || { w: 120, h: 90 };
-    const sc = Number(s.scale) || 1;
-    const w = size.w * sc;
-    const h = size.h * sc;
-
-    s.x = localX - w / 2;
-    s.y = localY - h / 2;
-
-    saveState(st);
-    syncOne(selectedKey);
-  }
-
-  function onKey(e) {
-    if (!editing) return;
-    if (e.key === "Escape") setEditing(false);
-  }
-
-  function setEditing(on) {
-    editing = !!on;
-
-    const p = ensurePanel();
-    p.style.display = editing ? "block" : "none";
-
-    refreshSelect();
-
-    // ドラッグmoveは常に一回だけhook
-    hookWindowDragMoveOnce();
-
-    if (editing) {
-      // 実寸が取れてないと枠がズレるので先に整える
-      const s = st[selectedKey] || PLACE_ITEMS[selectedKey]?.default;
-      const sc = Number(s?.scale ?? 1);
-      setGhostSizeFor(selectedKey, sc);
-
-      hideGhost();
-
-      // ✅ 追加（同一optionsでremoveできるよう統一）
-      document.addEventListener("pointermove", onMoveGhost, MOVE_OPTS);
-
-      // ✅ 配置はcaptureで最優先
-      document.addEventListener("pointerdown", onPlaceDown, DOWN_CAPTURE_OPTS);
-
-      // ✅ ゲーム側クリック潰し（capture）
-      document.addEventListener("pointerdown", blockGamePointerIfEditing, true);
-      document.addEventListener("click", blockGamePointerIfEditing, true);
-
-      window.addEventListener("keydown", onKey, KEY_OPTS);
-    } else {
-      hideGhost();
-
-      // ✅ removeは addと同一optionsで
-      document.removeEventListener("pointermove", onMoveGhost, MOVE_OPTS);
-      document.removeEventListener("pointerdown", onPlaceDown, DOWN_CAPTURE_OPTS);
-
-      document.removeEventListener("pointerdown", blockGamePointerIfEditing, true);
-      document.removeEventListener("click", blockGamePointerIfEditing, true);
-
-      window.removeEventListener("keydown", onKey, KEY_OPTS);
-
-      drag = null;
-      saveState(st);
-    }
-
-    syncAll();
-  }
-
-  // ===== Public =====
-  async function open() {
-    await preloadAll();
-
-    const keys = placeableKeys();
-    if (!keys.length) {
-      console.warn("[itemPlace] no placeable items owned/enabled");
-      return;
-    }
-    if (!keys.includes(selectedKey)) selectedKey = keys[0];
-
-    st = loadState();
-    setEditing(true);
-  }
-
-  function close() { setEditing(false); }
-
-  // ===== boot =====
-  (async function boot() {
-    ensureStyle();
-    await preloadAll();
-    st = loadState();
-    syncAll();
-
-    // shop変更で即反映
-    const hookWB = () => {
-      if (!window.WB?.on) return false;
-      try {
-        window.WB.on("shop:changed", () => { st = loadState(); syncAll(); });
-        window.WB.on("core:ready", () => { st = loadState(); syncAll(); });
-      } catch {}
-      return true;
-    };
-    hookWB();
-    setTimeout(hookWB, 300);
-
-    window.addEventListener("storage", (e) => {
-      if (!e) return;
-      if (e.key === SHOP_OWNED_KEY || e.key === SHOP_STATE_KEY) {
-        st = loadState();
-        syncAll();
-      }
+        emitChanged(key);
+        toast(`✅ ${it.label} 購入！ -${it.price}🪙`);
+        openModal();
+      });
     });
 
-    // ✅ 公開API（gameMenu互換も付ける）
-    window.ITEMPLACE = {
-      open,
-      close,
-      openModal: open,
-      closeModal: close,
-      _items: PLACE_ITEMS
-    };
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const m = document.getElementById(UI.modal);
+      if (m && m.style.display === "block") closeModal();
+    }, { once: true });
+  }
 
-    // ✅ WBにも生やす（呼び出し安定）
+  // ✅ ownedだけ通知（enabledは出さない）
+  function emitChanged(key) {
     try {
-      window.WB = window.WB || {};
-      window.WB.itemplace = window.WB.itemplace || {};
-      window.WB.itemplace.open = open;
-      window.WB.itemplace.openModal = open;
-      window.WB.itemplace.close = close;
-      window.WB.itemplace.closeModal = close;
+      window.WB?.emit?.("shop:changed", { key, owned: !!owned[key] });
+
+      if (key === "mirrorball") {
+        window.WB?.emit?.("bg:mirrorball_changed", { owned: !!owned.mirrorball });
+      }
+      if (key === "bed") {
+        window.WB?.emit?.("itemplace:owned_changed", { key: "bed", owned: !!owned.bed });
+      }
     } catch {}
-  })();
+  }
+
+  function patchWB() {
+    const WB = window.WB;
+    if (!WB || typeof WB !== "object") return;
+
+    WB.shop = WB.shop || {};
+    WB.shop.isOwned = (key) => !!(loadOwned()?.[key]);
+    WB.shop.open = () => openModal();
+  }
+
+  function waitForElm(getter, timeoutMs = 12000) {
+    const start = Date.now();
+    return new Promise((resolve, reject) => {
+      const t = setInterval(() => {
+        const v = getter();
+        if (v) { clearInterval(t); resolve(v); return; }
+        if (Date.now() - start > timeoutMs) { clearInterval(t); reject(new Error("timeout")); }
+      }, 50);
+    });
+  }
+
+  async function boot() {
+    ensureStyle();
+    patchWB();
+
+    // WB後追い
+    const start = Date.now();
+    const wbTimer = setInterval(() => {
+      patchWB();
+      if (Date.now() - start > 15000) clearInterval(wbTimer);
+    }, 200);
+
+    // ✅ グローバルAPI
+    window.SHOP = {
+      open: () => openModal(),
+      close: () => closeModal(),
+      isOwned: (k) => !!loadOwned()?.[k],
+      owned: () => loadOwned(),
+    };
+
+    // ✅ #shopBtn 互換
+    try {
+      const shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
+      if (shopBtn && !shopBtn.__bgshopBound) {
+        shopBtn.__bgshopBound = true;
+        shopBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          openModal();
+        }, true);
+      }
+    } catch {
+      console.warn("[shop.js] #shopBtn not found (menu-open only)");
+    }
+
+    // 初期通知（購入済みだけ）
+    owned = loadOwned();
+    if (owned.mirrorball) emitChanged("mirrorball");
+    if (owned.bed) emitChanged("bed");
+  }
+
+  boot().catch(() => {});
 })();
