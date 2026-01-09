@@ -3,10 +3,12 @@
 // ✅ hat は bunny と同じ位置＆サイズ（getBoundingClientRect一致）
 // ✅ びくびく防止：left/top更新しない、transform translate3d で追従
 // ✅ 赤枠は fixed + translate3d（軽い＆確実に見える）
+//
+// ✅ 変更：HUDボタンを作らない（既存 #isyouBtn があれば削除）
 
 (() => {
   "use strict";
-  console.log("[isyou.js] LOADED V31.4", Date.now());
+  console.log("[isyou.js] LOADED V31.4 (no HUD button)", Date.now());
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -350,9 +352,6 @@
     return overlay;
   }
 
-  // ✅ ここが本丸：親要素に付いた scaleX(-1) も含め「反転の有無」を検出
-  // - CSS transform の行列 determinant が負なら「鏡映（反転）」扱い
-  // - 祖先分を XOR で畳み込む（反転×反転=元に戻る）
   function isMirroredDeep(el, stopEl) {
     let cur = el;
     let mirrored = 0;
@@ -502,8 +501,6 @@
     scheduleSyncLoop();
   }
 
-  // ✅ FIX：反転は「img本人」だけでなく「祖先の反転」も含めて判定
-  // ✅ 反転時は tx = x + w にしてから scaleX(-1)（位置ズレ根絶）
   function syncHatEnt(ent, ovRect) {
     const img = ent.targetImg;
     const hat = ent.hatDiv;
@@ -1012,26 +1009,16 @@
   function onPointerUpCapture(e) { blockGameClickIfEquipMode(e); }
   function onClickCapture(e) { blockGameClickIfEquipMode(e); }
 
-  function injectHudButton() {
-    const hud = document.getElementById("hud");
-    if (!hud) return;
-
-    const mount = document.getElementById("hudButtons") || hud;
-    if (document.getElementById("isyouBtn")) return;
-
-    const btn = document.createElement("button");
-    btn.id = "isyouBtn";
-    btn.type = "button";
-    btn.textContent = "お洒落";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (state.mode === "equip") cancelEquipMode(false);
-      openModal();
-    });
-
-    mount.appendChild(btn);
+  /* =========================
+   * ✅ HUDボタン削除（作らない）
+   * ========================= */
+  function removeHudButton() {
+    try { document.getElementById("isyouBtn")?.remove(); } catch {}
   }
 
+  /* =========================
+   * 起動
+   * ========================= */
   let __moTimer = 0;
   function requestRefresh() {
     clearTimeout(__moTimer);
@@ -1045,7 +1032,9 @@
     ensureOverlay();
     ensureSelectBoxFixed();
 
-    injectHudButton();
+    // ✅ ボタンは作らない＆あれば消す
+    removeHudButton();
+
     ensureModal();
     ensureConfirmBar();
 
@@ -1075,7 +1064,10 @@
   window.addEventListener("load", () => {
     injectStyles();
     loadAll();
-    injectHudButton();
+
+    // ✅ 早めに削除（旧版が先に出してても消す）
+    removeHudButton();
+
     ensureOverlay();
     ensureSelectBoxFixed();
 
@@ -1090,5 +1082,6 @@
     _state: state,
     _items: ITEMS,
     _liveHats: () => liveHats,
+    removeHudButton, // 手動でも消せる
   };
 })();
