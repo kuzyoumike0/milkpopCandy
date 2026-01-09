@@ -124,20 +124,99 @@
   function groundY() { return FIELD_H - 60; }
 
   /* =========================
-   * Audio
+   * Audio (SEはBGM.js準拠：SE音量/ミュート対応 + encodeURI + unlock連結)
    * ========================= */
-  const sePoyo     = new Audio(ASSETS.poyoSE);
-  const seBaby     = new Audio(ASSETS.babySE);
-  const seCoin     = new Audio(ASSETS.coinSE);
-  const seTabidati = new Audio(ASSETS.tabidatiSE);
+  const sePoyo     = new Audio(encodeURI(ASSETS.poyoSE));
+  const seBaby     = new Audio(encodeURI(ASSETS.babySE));
+  const seCoin     = new Audio(encodeURI(ASSETS.coinSE));
+  const seTabidati = new Audio(encodeURI(ASSETS.tabidatiSE));
+  const seUnchi    = new Audio(encodeURI(ASSETS.unchiSE));
 
-  // ✅ 黄金うんち専用SE
-  const seUnchi    = new Audio(ASSETS.unchiSE);
+  // ループ不要（SE）
+  [sePoyo, seBaby, seCoin, seTabidati, seUnchi].forEach(a => {
+    try { a.preload = "auto"; a.loop = false; } catch {}
+  });
+
+  // ★BGM.js と同じキー/思想で SE を管理
+  const LS_KEY_BGM_SETTINGS = "milkpop_bgm_settings_v2"; // { muted: bool, ... }
+  const LS_KEY_SE_VOL       = "milkpop_se_volume_v1";   // 0..1
+
+  function loadBgmSettingsLike() {
+    try {
+      const raw = localStorage.getItem(LS_KEY_BGM_SETTINGS);
+      if (!raw) return { muted: false };
+      const j = JSON.parse(raw);
+      return { muted: !!j.muted };
+    } catch {
+      return { muted: false };
+    }
+  }
+
+  function getSEVolume() {
+    // 1) WB.getSEVolume（BGM.jsが提供）
+    try {
+      if (window.WB && typeof window.WB.getSEVolume === "function") {
+        const v = Number(window.WB.getSEVolume());
+        if (Number.isFinite(v)) return clamp(v, 0, 1);
+      }
+    } catch {}
+
+    // 2) window.__milkpopSeVolume（BGM.jsが公開）
+    try {
+      const v = Number(window.__milkpopSeVolume);
+      if (Number.isFinite(v)) return clamp(v, 0, 1);
+    } catch {}
+
+    // 3) localStorage 直読み
+    try {
+      const raw = localStorage.getItem(LS_KEY_SE_VOL);
+      if (raw == null) return 0.85;
+      const v = Number(raw);
+      return clamp(Number.isFinite(v) ? v : 0.85, 0, 1);
+    } catch {
+      return 0.85;
+    }
+  }
+
+  function isSemuted() {
+    // BGMミュートはSEもミュート扱いに揃える（要望があれば別キーに分離可能）
+    const s = loadBgmSettingsLike();
+    return !!s.muted;
+  }
+
+  // ★音量適用：SE再生直前に掛ける（常に最新設定を反映）
+  function playSE(a, base = 1.0) {
+    try {
+      if (!a) return;
+      if (!audioUnlocked) return; // unlock前は鳴らさない（ブラウザ規制回避）
+
+      const muted = isSemuted();
+      const vol = muted ? 0 : clamp((Number(a.volume) || 1) * base * getSEVolume(), 0, 1);
+
+      const prevVol = a.volume;
+      const prevMuted = a.muted;
+
+      a.muted = muted ? true : false;
+      a.volume = vol;
+      a.currentTime = 0;
+      a.play().catch(() => {});
+
+      // 次の再生に影響しないように戻す
+      setTimeout(() => {
+        try { a.volume = prevVol; a.muted = prevMuted; } catch {}
+      }, 0);
+    } catch {}
+  }
 
   let audioUnlocked = false;
   function unlockAudioOnce() {
     if (audioUnlocked) return;
     audioUnlocked = true;
+
+    // BGM.js があるなら、そっちのunlockにも繋ぐ（連結）
+    try { window.WB?.unlockAudioOnce?.(); } catch {}
+
+    // 自前のunlock（最小の無音再生）
     try {
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
@@ -148,9 +227,9 @@
   }
   window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
 
-  function playSE(a) {
-    try { a.currentTime = 0; a.play().catch(() => {}); } catch {}
-  }
+  // ★BGM.js側の設定変更に追従（SE音量/ミュートが変わったら即反映される想定）
+  // （playSEは毎回読むので実質不要だが、外部が欲しがるので残す）
+  window.addEventListener("milkpop:seVolume", () => {}, { passive: true });
 
   /* =========================
    * CSS injection（コイン小さく / ハート小さめ＆ゆらゆら）
@@ -434,6 +513,7 @@
       const tap = (e) => {
         e?.preventDefault?.();
         unlockAudioOnce();
+
         playSE(this.isBaby ? seBaby : sePoyo);
 
         // ✅ babybunny：coin1(tier0)しか出ない + 黄金うんち抽選なし
@@ -751,11 +831,14 @@
     saveCoins,
     saveBunnyMeta,
 
+    // ✅ BGM.jsと連結できるよう残す
     unlockAudioOnce,
-    playSE,
-    seTabidati,
 
-    // ✅ うんちSEを外部でも使えるように公開（必要なら）
+    // ★SEはBGM.js準拠（SE音量/ミュートを反映）
+    playSE,
+    getSEVolume,
+
+    seTabidati,
     seUnchi,
 
     updateHud,
