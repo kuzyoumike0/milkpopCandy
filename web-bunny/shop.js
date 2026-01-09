@@ -1,38 +1,38 @@
-// shop.js（背景ショップ：#shopBtn専用 → ✅ハンバーガーメニュー対応版）
+// shop.js（購入専用：#shopBtn専用 → ✅ハンバーガーメニュー対応版 / 設置ON/OFF削除）
 // ✅ #shopBtn クリックは「メニューから呼ぶ」想定（index.htmlでは非表示でもOK）
 // ✅ ハンバーガーメニュー側が呼べるように window.SHOP.open() / WB.shop.open() を提供
 // ✅ もし #shopBtn が存在するなら従来通りクリックで開く（互換）
-// ✅ owned/state 保存 & 即通知
+// ✅ owned（購入済み）保存 & 即通知
+// ✅ 設置ON/OFFは一切持たない（itemPlace.js 側で管理）
 // ✅ 二重起動・二重リスナー根絶
 
 (() => {
   "use strict";
 
   // 二重読み込み防止
-  if (window.__BGSHOP_V1_INITED__) {
+  if (window.__BGSHOP_BUYONLY_V1_INITED__) {
     console.warn("[shop.js] already inited; skip re-init");
-    try { window.SHOP?.open?.(); } catch {}
     return;
   }
-  window.__BGSHOP_V1_INITED__ = true;
+  window.__BGSHOP_BUYONLY_V1_INITED__ = true;
 
   const LS_OWNED = "milkpop_shop_owned_v1";
-  const LS_STATE = "milkpop_shop_state_v1";
 
+  // ✅ ショップで買える物（ON/OFFは持たない）
   const ITEMS = {
     mirrorball: {
       key: "mirrorball",
       label: "ミラーボール",
-      desc: "設置ONでスポットライトが出る",
+      desc: "（配置はしない）夜の演出は bgcolor.js が見る",
       price: 9000,
       img: "./assets/bg/mirrorball.png",
     },
     bed: {
       key: "bed",
       label: "ベッド",
-      desc: "うさぎの後ろに配置できる背景アイテム",
+      desc: "アイテム配置で置ける（itemPlace.js）",
       price: 3500,
-      img: "./assets/bg/bed.png", // ← パス統一（先頭/無しで404りやすいので ./assets に）
+      img: "./assets/bg/bed.png",
     },
   };
 
@@ -48,17 +48,8 @@
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
   function loadOwned() { return safeParse(localStorage.getItem(LS_OWNED)) || {}; }
   function saveOwned(o) { try { localStorage.setItem(LS_OWNED, JSON.stringify(o)); } catch {} }
-  function loadState() {
-    const j = safeParse(localStorage.getItem(LS_STATE)) || {};
-    return {
-      mirrorballEnabled: j.mirrorballEnabled !== false,
-      bedEnabled: j.bedEnabled !== false,
-    };
-  }
-  function saveState(s) { try { localStorage.setItem(LS_STATE, JSON.stringify(s)); } catch {} }
 
   let owned = loadOwned();
-  let state = loadState();
 
   function getCoinsWB() {
     const WB = window.WB;
@@ -221,15 +212,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const { backdrop, modal } = ensureUI();
 
     owned = loadOwned();
-    state = loadState();
-
     const c = getCoinsWB();
 
     modal.innerHTML = `
 <div class="row">
   <div>
     <div class="ttl">ショップ</div>
-    <div class="sub">背景アイテムを購入 / 設置できます</div>
+    <div class="sub">背景アイテムを購入できます（設置ON/OFFは別メニュー）</div>
   </div>
   <button class="btn ghost" id="bgShopCloseX" type="button">×</button>
 </div>
@@ -246,7 +235,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 <div class="grid">
   ${Object.values(ITEMS).map(it => {
     const own = !!owned[it.key];
-    const en  = !!state[it.key + "Enabled"];
     return `
     <div class="item">
       <div class="thumb"><img src="${it.img}" alt="${it.key}"></div>
@@ -258,9 +246,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       <div class="right">
         <div class="tag">${own ? "購入済み" : "未購入"}</div>
         <button class="btn" data-buy="${it.key}" ${own ? "disabled" : ""}>購入</button>
-        <button class="btn ghost" data-toggle="${it.key}" ${own ? "" : "disabled"}>
-          ${en ? "設置ON" : "設置OFF"}
-        </button>
       </div>
     </div>`;
   }).join("")}
@@ -288,26 +273,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         owned[key] = true;
         saveOwned(owned);
 
-        state[key + "Enabled"] = true;
-        saveState(state);
-
         emitChanged(key);
         toast(`✅ ${it.label} 購入！ -${it.price}🪙`);
-        openModal();
-      });
-    });
-
-    modal.querySelectorAll("[data-toggle]").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const key = btn.getAttribute("data-toggle");
-        if (!owned[key]) return;
-
-        state[key + "Enabled"] = !state[key + "Enabled"];
-        saveState(state);
-
-        emitChanged(key);
-        toast(state[key + "Enabled"] ? `✅ ${ITEMS[key].label} 設置ON` : `⛔ ${ITEMS[key].label} 設置OFF`);
         openModal();
       });
     });
@@ -319,16 +286,19 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     }, { once: true });
   }
 
+  // ✅ ownedだけ通知（enabledは出さない）
   function emitChanged(key) {
     try {
-      window.WB?.emit?.("shop:changed", { key, owned: !!owned[key], enabled: !!state[key + "Enabled"] });
+      window.WB?.emit?.("shop:changed", { key, owned: !!owned[key] });
+
+      // mirrorball は「購入状態」だけ通知（演出は bgcolor.js が見る想定）
       if (key === "mirrorball") {
-        window.WB?.emit?.("bg:mirrorball_toggle", { enabled: !!state.mirrorballEnabled });
-        window.WB?.emit?.("bg:mirrorball_changed", { owned: !!owned.mirrorball, enabled: !!state.mirrorballEnabled });
+        window.WB?.emit?.("bg:mirrorball_changed", { owned: !!owned.mirrorball });
       }
+
+      // bed は「購入状態」だけ通知（配置のON/OFFや配置は itemPlace.js 側）
       if (key === "bed") {
-        window.WB?.emit?.("bg:bed_toggle", { enabled: !!state.bedEnabled });
-        window.WB?.emit?.("haikei:toggle", { enabled: !!state.bedEnabled, owned: !!owned.bed });
+        window.WB?.emit?.("itemplace:owned_changed", { key: "bed", owned: !!owned.bed });
       }
     } catch {}
   }
@@ -339,29 +309,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     WB.shop = WB.shop || {};
     WB.shop.isOwned = (key) => !!(loadOwned()?.[key]);
-
-    WB.shop.isMirrorballEnabled = () => !!loadState().mirrorballEnabled;
-    WB.shop.setMirrorballEnabled = (v) => {
-      const st = loadState();
-      st.mirrorballEnabled = !!v;
-      saveState(st);
-      owned = loadOwned();
-      state = st;
-      emitChanged("mirrorball");
-      return true;
-    };
-
-    WB.shop.isBedEnabled = () => !!loadState().bedEnabled;
-    WB.shop.setBedEnabled = (v) => {
-      const st = loadState();
-      st.bedEnabled = !!v;
-      saveState(st);
-      owned = loadOwned();
-      state = st;
-      emitChanged("bed");
-      return true;
-    };
-
     WB.shop.open = () => openModal();
   }
 
@@ -392,7 +339,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       open: () => openModal(),
       close: () => closeModal(),
       isOwned: (k) => !!loadOwned()?.[k],
-      state: () => loadState(),
+      owned: () => loadOwned(),
     };
 
     // ✅ #shopBtn が存在する時だけ、従来通り click で開く（互換）
@@ -408,13 +355,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         }, true);
       }
     } catch {
-      // いまは #shopBtn を消してる/隠してる構成でもOK（メニューから window.SHOP.open() で開く）
       console.warn("[shop.js] #shopBtn not found (menu-open only)");
     }
 
-    // 初期通知
+    // 初期通知（購入済みだけ）
     owned = loadOwned();
-    state = loadState();
     if (owned.mirrorball) emitChanged("mirrorball");
     if (owned.bed) emitChanged("bed");
   }
