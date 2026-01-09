@@ -1,10 +1,11 @@
 // gameMenu.js（非module）
 // ✅ 右上にハンバーガーメニュー1個だけ作る
-// ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🧸アイテム配置 / 📖図鑑 / 🎵BGM
+// ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🧸アイテム配置 / 🎰スロット / 📖図鑑 / 🎵BGM
 // ✅ 呼び出し：
 //   - shop     : WB.shop.open()
 //   - isyou    : ISYOU.openModal()
-//   - itemplace: ITEMPLACE.open()   ← ★ここ重要（openModalじゃない）
+//   - itemplace: ITEMPLACE.open()
+//   - slot     : WB.slot.open() / SLOT.open() / #slotBtn click（順で吸収）
 //   - zukan    : WB.zukan.open("bunny")
 //   - bgm      : WB.bgm.openModal()
 // ✅ 外側クリックで閉じる
@@ -103,12 +104,14 @@
           <button class="item" type="button" data-act="shop">🛒 ショップ</button>
           <button class="item" type="button" data-act="isyou">🎀 お洒落</button>
           <button class="item" type="button" data-act="itemplace">🧸 アイテム配置</button>
+          <button class="item" type="button" data-act="slot">🎰 スロット</button>
           <button class="item" type="button" data-act="zukan">📖 図鑑</button>
           <button class="item" type="button" data-act="bgm">🎵 BGM</button>
         </div>
         <div class="note">
           ※ BGMは一度クリックが必要です。<br>
-          ※ アイテム配置：選んだアイテムが透明赤枠で出ます → 置きたい場所をクリックで確定。
+          ※ アイテム配置：選んだアイテムが透明赤枠で出ます → 置きたい場所をクリックで確定。<br>
+          ※ スロット：コイン消費に注意。
         </div>
       `;
       document.body.appendChild(panel);
@@ -127,6 +130,36 @@
     setTimeout(() => { try { fn(); } catch {} }, retryMs);
   }
 
+  function openSlotBestEffort() {
+    // 1) いちばん理想：WB.slot.open()
+    try {
+      if (window.WB?.slot?.open) { window.WB.slot.open(); return true; }
+    } catch {}
+
+    // 2) 次：グローバル SLOT.open()
+    try {
+      if (window.SLOT?.open) { window.SLOT.open(); return true; }
+    } catch {}
+
+    // 3) 次：#slotBtn を「クリックしたことにする」
+    const btn = document.getElementById("slotBtn");
+    if (btn) {
+      try { btn.click(); return true; } catch {}
+      // クリックが潰されてる環境用（イベント発火）
+      try {
+        btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+        return true;
+      } catch {}
+    }
+
+    // 4) 最後：WB.openSlot みたいな互換があるか
+    try {
+      if (window.WB?.openSlot) { window.WB.openSlot(); return true; }
+    } catch {}
+
+    return false;
+  }
+
   function handleAction(act) {
     if (act === "shop") {
       safeCall(() => window.WB?.shop?.open?.());
@@ -137,20 +170,24 @@
       return;
     }
     if (act === "itemplace") {
-      // ✅ 正：ITEMPLACE.open()
       safeCall(() => window.ITEMPLACE?.open?.());
 
-      // 互換：もし openModal を持つ版が来てもOK
       setTimeout(() => {
         if (window.ITEMPLACE?.open) return;
         try { window.ITEMPLACE?.openModal?.(); } catch {}
       }, 0);
 
-      // 互換：WBに生えてる場合
       setTimeout(() => {
         try { window.WB?.itemplace?.open?.(); } catch {}
         try { window.WB?.itemplace?.openModal?.(); } catch {}
       }, 0);
+      return;
+    }
+    if (act === "slot") {
+      // ✅ ここ追加：スロットを開く
+      safeCall(() => openSlotBestEffort());
+      // ちょい遅延で再トライ（ロード順対策）
+      setTimeout(() => { openSlotBestEffort(); }, 120);
       return;
     }
     if (act === "zukan") {
