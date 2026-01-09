@@ -1,9 +1,9 @@
 // zukan.js（互換強化版）
 // 図鑑 + 実績 + 称号 UI（スクショ風のカードUI）
-// - 「図鑑」ボタンをHUDに追加
+// - ✅ HUDボタンは作らない（ハンバーガーメニューから呼ぶ）
 // - タブ：うさぎ / 実績 / 称号
 // - SYOUGOU, zisseki があれば自動連動
-// - 旅立ち回数（うさぎ別）は localStorage で保持（WBが持っていればそこも拾える）
+// - 旅立ち回数（うさぎ別）は localStorage で保持
 // - ✅ WB新旧互換：getBunnies / getCoin など
 // - ✅ CATEGORIES 未定義バグ修正（内部定義）
 // - ✅ 旅立ちイベント(bunnyDeparted/tabidachi)で farewell 加算
@@ -77,13 +77,10 @@
   function guessKeyFromBunnyObj(b) {
     if (!b) return null;
 
-    // いろんな実装の「画像参照」を全部拾う
     const candidates = [];
 
-    // 文字列だけ渡されるケース
     if (typeof b === "string") candidates.push(b);
 
-    // オブジェクトのありがちなプロパティ
     if (typeof b?.kind === "string") candidates.push(b.kind);
     if (typeof b?.adultSrc === "string") candidates.push(b.adultSrc);
     if (typeof b?.src === "string") candidates.push(b.src);
@@ -91,7 +88,6 @@
     if (typeof b?.img === "string") candidates.push(b.img);
     if (typeof b?.asset === "string") candidates.push(b.asset);
 
-    // DOM参照があるケース
     try {
       if (b?.el?.src) candidates.push(String(b.el.src));
       if (b?.img?.src) candidates.push(String(b.img.src));
@@ -116,7 +112,6 @@
     }
   }
 
-  // 今いるうさぎから自動で図鑑登録
   function scanCurrentBunnies() {
     try {
       const list = getBunnies();
@@ -128,7 +123,6 @@
     } catch {}
   }
 
-  // 旅立ち（うさぎ別）加算：外部から呼べるようにする
   function addFarewellByType(key, n = 1) {
     const k = String(key || "");
     if (!k) return;
@@ -140,8 +134,6 @@
    * UI
    * ========================= */
   const PANEL_ID = "wbZukanPanelV1";
-  const BTN_ID = "zukanBtn";
-
   let panelEl = null;
 
   function $(q, p = document) {
@@ -301,8 +293,6 @@
 }
 #${PANEL_ID} .btn.primary{ background: #ffd6e7; }
 #${PANEL_ID} .btn[disabled]{ opacity:.55; cursor:not-allowed; box-shadow:none; }
-
-#${BTN_ID}{ margin-left: 8px; }
 `;
     document.head.appendChild(s);
   }
@@ -454,8 +444,6 @@
    * Titles（SYOUGOU連動）
    * ========================= */
 
-  // ✅ CATEGORIES 未定義バグ修正：このファイル内で持つ
-  // SYOUGOU側のカウントキーに合わせてね（例：unchi/tabidachi/hanabi/slot_win/omukae）
   const CATEGORIES = [
     { key: "unchi",     label: "ウンチ",     emoji: "💩" },
     { key: "tabidachi", label: "旅立ち",     emoji: "✈️" },
@@ -543,7 +531,6 @@
     const p = buildPanel();
     p.style.display = "block";
 
-    // 開くたびに最新の発見を拾う
     scanCurrentBunnies();
 
     p.querySelectorAll(".tab").forEach((x) => x.classList.remove("on"));
@@ -556,21 +543,6 @@
     const p = panelEl || document.getElementById(PANEL_ID);
     if (!p) return;
     p.style.display = "none";
-  }
-
-  function injectHudButton() {
-    const hud = document.getElementById("hud");
-    if (!hud) return;
-    if (document.getElementById(BTN_ID)) return;
-
-    const btn = document.createElement("button");
-    btn.id = BTN_ID;
-    btn.textContent = "図鑑";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      open("bunny");
-    });
-    hud.appendChild(btn);
   }
 
   /* =========================
@@ -594,11 +566,8 @@
    * Hooks
    * ========================= */
 
-  // うさぎ増減 → 図鑑スキャン
   try { WB.on?.("bunnyCountChanged", scanCurrentBunnies); } catch {}
 
-  // ✅ 旅立ち通知 → 旅立ち回数（うさぎ別）を加算
-  // tabidati.js（互換強化版）が emit("bunnyDeparted",{kind}) している前提
   try {
     WB.on?.("bunnyDeparted", (p) => {
       const key = String(p?.kind || "") || null;
@@ -606,7 +575,6 @@
     });
   } catch {}
 
-  // もし別名イベントも使ってるなら拾う（SYOUGOU連動用に emit している場合）
   try {
     WB.on?.("tabidachi", (p) => {
       const key = String(p?.kind || "") || null;
@@ -614,9 +582,7 @@
     });
   } catch {}
 
-  // 起動
   window.addEventListener("load", () => {
-    injectHudButton();
     scanCurrentBunnies();
   });
 })();
