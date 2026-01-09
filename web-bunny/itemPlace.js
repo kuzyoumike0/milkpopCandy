@@ -1,13 +1,14 @@
-// itemPlace.js（V2）
+// itemPlace.js（V2.1 FIX）
 // ✅ shop.js購入済みの「配置できるアイテム」だけ赤枠で配置
 // ✅ ミラーボール(mirrorball)は配置しない（演出は bgcolor.js）
 // ✅ 実寸サイズ：画像の naturalWidth/Height を読んでゴースト枠も実寸
 // ✅ 配置できない問題を根絶：座標基準を #field に固定（bgLayerが0サイズでもOK）
+// ✅ 配置モード中はゲーム側クリックを capture で強制ブロック（app.jsに負けない）
 // ✅ 配置モード：赤枠（透明）→ クリックで設置 → ドラッグ移動 → 完了
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V2", Date.now());
+  console.log("[itemPlace] LOADED V2.1 FIX", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
   const SHOP_STATE_KEY = "milkpop_shop_state_v1";
@@ -30,13 +31,12 @@
       z: 6, // うさぎより後ろ想定（必要なら調整）
       default: { x: 180, y: 280, scale: 1.0, rot: 0, placed: false },
     },
-    // 追加したい場合はここに増やす
+    // 追加したい場合はここに増やす（mirrorballは入れない）
   };
 
   const $ = (q, p = document) => p.querySelector(q);
 
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
-
   function loadOwned() { return safeParse(localStorage.getItem(SHOP_OWNED_KEY)) || {}; }
   function loadShopState() { return safeParse(localStorage.getItem(SHOP_STATE_KEY)) || {}; }
 
@@ -371,6 +371,10 @@
     sel.onchange = () => {
       if (!sel.value) return;
       selectedKey = sel.value;
+      // 選択変えた瞬間にゴースト実寸を更新
+      const s = st[selectedKey] || PLACE_ITEMS[selectedKey]?.default;
+      showGhostAt(lastPointer.x, lastPointer.y, selectedKey, Number(s?.scale ?? 1));
+      syncAll();
     };
   }
 
@@ -383,7 +387,9 @@
       if (key !== selectedKey) return;
       e.preventDefault();
       e.stopPropagation();
+      e.stopImmediatePropagation?.();
       img.setPointerCapture?.(e.pointerId);
+
       drag = {
         key,
         startX: e.clientX,
@@ -392,10 +398,18 @@
         baseY: st[key].y,
       };
     });
+  }
+
+  // ここは window 側で1回だけ登録（重複防止）
+  let winMoveHooked = false;
+  function hookWindowDragMoveOnce() {
+    if (winMoveHooked) return;
+    winMoveHooked = true;
 
     window.addEventListener("pointermove", (e) => {
       if (!editing || !drag) return;
-      if (drag.key !== key) return;
+      const key = drag.key;
+      if (!st[key]) return;
       const dx = e.clientX - drag.startX;
       const dy = e.clientY - drag.startY;
       st[key].x = drag.baseX + dx;
@@ -442,17 +456,41 @@
     );
   }
 
+  // ===== 置けない根絶：編集ON中はゲーム側クリックを全部ブロック =====
+  function blockGamePointerIfEditing(e) {
+    if (!editing) return;
+    if (!e?.target) return;
+    if (isOverUI(e.target)) return;
+    // ここで止める（capture最優先で勝つ）
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+  }
+
+  // ===== ゴースト追従 =====
+  const MOVE_OPTS = { passive: true };
+  const DOWN_CAPTURE_OPTS = true;
+  const KEY_OPTS = { passive: true };
+
+  const lastPointer = { x: -9999, y: -9999 };
+
   function onMoveGhost(e) {
     if (!editing) return;
+    lastPointer.x = e.clientX;
+    lastPointer.y = e.clientY;
     if (isOverUI(e.target)) { hideGhost(); return; }
     const s = st[selectedKey] || PLACE_ITEMS[selectedKey]?.default;
     const sc = Number(s?.scale ?? 1);
     showGhostAt(e.clientX, e.clientY, selectedKey, sc);
   }
 
+  // ===== 配置（captureで最優先）=====
   function onPlaceDown(e) {
     if (!editing) return;
     if (isOverUI(e.target)) return;
+
+    // ✅ 先にブロックして勝つ
+    blockGamePointerIfEditing(e);
 
     if (!selectedKey) return;
     if (!isOwned(selectedKey) || !isEnabled(selectedKey)) return;
@@ -460,33 +498,27 @@
     const host = getHost();
     const r = host.getBoundingClientRect();
 
-    // ✅ hostが0サイズの時は置けないのでガード
     if (r.width <= 2 || r.height <= 2) {
       console.warn("[itemPlace] host rect is too small:", r);
       return;
     }
 
-    // ✅ クリック位置を hostローカル座標へ
     const localX = e.clientX - r.left;
     const localY = e.clientY - r.top;
 
     const s = st[selectedKey] || (st[selectedKey] = { ...PLACE_ITEMS[selectedKey].default });
     s.placed = true;
 
-    // ✅ 実寸で “中心に置く” （自然サイズ × scale）
     const size = imgSize[selectedKey] || { w: 120, h: 90 };
-    const w = size.w * (Number(s.scale) || 1);
-    const h = size.h * (Number(s.scale) || 1);
+    const sc = Number(s.scale) || 1;
+    const w = size.w * sc;
+    const h = size.h * sc;
 
     s.x = localX - w / 2;
     s.y = localY - h / 2;
 
     saveState(st);
     syncOne(selectedKey);
-
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation?.();
   }
 
   function onKey(e) {
@@ -496,21 +528,47 @@
 
   function setEditing(on) {
     editing = !!on;
+
     const p = ensurePanel();
     p.style.display = editing ? "block" : "none";
 
     refreshSelect();
 
+    // ドラッグmoveは常に一回だけhook
+    hookWindowDragMoveOnce();
+
     if (editing) {
+      // 実寸が取れてないと枠がズレるので先に整える
+      const s = st[selectedKey] || PLACE_ITEMS[selectedKey]?.default;
+      const sc = Number(s?.scale ?? 1);
+      setGhostSizeFor(selectedKey, sc);
+
       hideGhost();
-      document.addEventListener("pointermove", onMoveGhost, { passive: true });
-      document.addEventListener("pointerdown", onPlaceDown, true);
-      window.addEventListener("keydown", onKey, { passive: true });
+
+      // ✅ 追加（同一optionsでremoveできるよう統一）
+      document.addEventListener("pointermove", onMoveGhost, MOVE_OPTS);
+
+      // ✅ 配置はcaptureで最優先
+      document.addEventListener("pointerdown", onPlaceDown, DOWN_CAPTURE_OPTS);
+
+      // ✅ ゲーム側クリック潰し（capture）
+      document.addEventListener("pointerdown", blockGamePointerIfEditing, true);
+      document.addEventListener("click", blockGamePointerIfEditing, true);
+
+      window.addEventListener("keydown", onKey, KEY_OPTS);
     } else {
       hideGhost();
-      document.removeEventListener("pointermove", onMoveGhost);
-      document.removeEventListener("pointerdown", onPlaceDown, true);
-      window.removeEventListener("keydown", onKey);
+
+      // ✅ removeは addと同一optionsで
+      document.removeEventListener("pointermove", onMoveGhost, MOVE_OPTS);
+      document.removeEventListener("pointerdown", onPlaceDown, DOWN_CAPTURE_OPTS);
+
+      document.removeEventListener("pointerdown", blockGamePointerIfEditing, true);
+      document.removeEventListener("click", blockGamePointerIfEditing, true);
+
+      window.removeEventListener("keydown", onKey, KEY_OPTS);
+
+      drag = null;
       saveState(st);
     }
 
@@ -561,6 +619,23 @@
       }
     });
 
-    window.ITEMPLACE = { open, close, _items: PLACE_ITEMS };
+    // ✅ 公開API（gameMenu互換も付ける）
+    window.ITEMPLACE = {
+      open,
+      close,
+      openModal: open,
+      closeModal: close,
+      _items: PLACE_ITEMS
+    };
+
+    // ✅ WBにも生やす（呼び出し安定）
+    try {
+      window.WB = window.WB || {};
+      window.WB.itemplace = window.WB.itemplace || {};
+      window.WB.itemplace.open = open;
+      window.WB.itemplace.openModal = open;
+      window.WB.itemplace.close = close;
+      window.WB.itemplace.closeModal = close;
+    } catch {}
   })();
 })();
