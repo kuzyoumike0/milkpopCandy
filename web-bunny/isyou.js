@@ -177,6 +177,8 @@
     ribbon:   { slot: "hat", label: "リボン",           imgs: imgCandidates("ribbon.png"),   price: 700 },
     ahiru:    { slot: "hat", label: "アヒル",           imgs: imgCandidates("ahiru.png"),    price: 450 },
     aimasuku: { slot: "hat", label: "アイマスク",       imgs: imgCandidates("aimasuku.png"), price: 650 },
+    hanamegane: { slot: "hat", label: "鼻メガネ",       imgs: imgCandidates("hanamegane.png"), price: 650 },
+    nekutai: { slot: "hat", label: "蝶ネクタイ",       imgs: imgCandidates("nekutai.png"), price: 650 },
   };
 
   const state = {
