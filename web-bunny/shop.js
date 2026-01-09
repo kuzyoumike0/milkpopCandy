@@ -1,32 +1,36 @@
 // shop.js（非module）
-// ✅ #shopBtn でモーダル
-// ✅ mirrorball 購入
-// ✅ 設置/外す（mirrorballEnabled）を保存して bgcolor.js に即反映
-// ✅ クリック伝播をcaptureで止める
+// ✅ HUDの「ショップ」(#shopBtn) で開く（omukaeとは別）
+// ✅ ミラーボール：購入（所持）＋設置ON/OFF（外せる）
+// ✅ 購入/設置変更時に WB.emit("bg:mirrorball_changed") で bgcolor.js に即反映
+// ✅ FIX: captureで伝播停止（omukae側の委譲クリック根絶）
+// ✅ WB coin API 互換 + #coinValue fallback
 
 (() => {
   "use strict";
 
-  const LS_KEY_OWNED = "milkpop_shop_owned_v1";
-  const LS_KEY_STATE = "milkpop_shop_state_v1";
+  const LS_OWNED = "milkpop_shop_owned_v1";   // { mirrorball:true }
+  const LS_STATE = "milkpop_shop_state_v1";   // { mirrorballEnabled:true }
 
   const ITEM = {
     key: "mirrorball",
     label: "ミラーボール",
-    desc: "設置するとディスコ背景（スポットライト/回転ライト/ビーム/キラ粒）",
+    desc: "背景がディスコ（設置時のみ）",
     price: 9000,
     img: "./assets/bg/mirrorball.png",
   };
 
   const UI = {
-    style: "milkpopShopStyleV5",
-    backdrop: "milkpopShopBackdropV5",
-    modal: "milkpopShopModalV5",
-    toast: "milkpopShopToastV5",
+    style: "milkpopShopStyleV2",
+    backdrop: "milkpopShopBackdropV2",
+    modal: "milkpopShopModalV2",
+    toast: "milkpopShopToastV2",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
 
+  /* =========================
+   * storage
+   * ========================= */
   function loadJson(key, fallback) {
     try {
       const raw = localStorage.getItem(key);
@@ -37,24 +41,27 @@
       return fallback;
     }
   }
-  function saveJson(key, obj) { try { localStorage.setItem(key, JSON.stringify(obj)); } catch {} }
+  function saveJson(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
 
-  let owned = loadJson(LS_KEY_OWNED, {});
-  let state = loadJson(LS_KEY_STATE, { mirrorballEnabled: true });
+  let owned = loadJson(LS_OWNED, {});
+  let state = loadJson(LS_STATE, { mirrorballEnabled: true });
 
-  function isOwned(key) { return !!owned?.[key]; }
-  function isMirrorballEnabled() {
-    return (typeof state.mirrorballEnabled === "boolean") ? state.mirrorballEnabled : true;
+  function isOwned(k) { return !!owned?.[k]; }
+  function isEnabled() { return !!state?.mirrorballEnabled; }
+  function setEnabled(v) {
+    state.mirrorballEnabled = !!v;
+    saveJson(LS_STATE, state);
+    try { window.WB?.emit?.("bg:mirrorball_changed", { owned: isOwned(ITEM.key), enabled: isEnabled() }); } catch {}
   }
-  function emitBg() {
-    try { window.WB?.emit?.("bg:mirrorball_changed", { owned: isOwned(ITEM.key), enabled: isMirrorballEnabled() }); } catch {}
-  }
 
-  /* ===== WB coin compat ===== */
+  /* =========================
+   * WB coin compat
+   * ========================= */
   function getCoinsWB() {
     const WB = window.WB;
     try {
       if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0;
+      if (WB && typeof WB.getCoins === "function") return Number(WB.getCoins()) || 0;
       if (WB && typeof WB.coins === "number") return Number(WB.coins) || 0;
       const el = document.getElementById("coinValue");
       if (el) return Number(el.textContent || "0") || 0;
@@ -68,13 +75,21 @@
     if (!a) return true;
 
     try {
+      if (WB && typeof WB.spendCoins === "function") return !!WB.spendCoins(a);
       if (WB && typeof WB.spendCoin === "function") return !!WB.spendCoin(a);
+
+      if (WB && typeof WB.addCoin === "function") {
+        const cur = getCoinsWB();
+        if (cur < a) return false;
+        WB.addCoin(-a);
+        // 念のためHUD直も更新されない環境向けは bgcolor/shop側では不要
+        return true;
+      }
 
       const cur = getCoinsWB();
       if (cur < a) return false;
-
-      // fallback
-      if (WB && typeof WB.addCoin === "function") { WB.addCoin(-a); return true; }
+      // 直書きfallback（WBにsetがない場合）
+      if (WB && typeof WB.coins === "number") WB.coins = cur - a;
       const el = document.getElementById("coinValue");
       if (el) el.textContent = String(cur - a);
       return true;
@@ -83,7 +98,9 @@
     }
   }
 
-  /* ===== toast ===== */
+  /* =========================
+   * toast
+   * ========================= */
   function toast(msg) {
     try {
       let el = document.getElementById(UI.toast);
@@ -108,43 +125,83 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     } catch {}
   }
 
+  /* =========================
+   * UI style
+   * ========================= */
   function ensureStyle() {
     if (document.getElementById(UI.style)) return;
     const st = document.createElement("style");
     st.id = UI.style;
     st.textContent = `
-#${UI.backdrop}{ position:fixed; inset:0; background:rgba(0,0,0,.28); z-index:2147483002; display:none; }
+#${UI.backdrop}{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.28);
+  z-index:2147483002;
+  display:none;
+}
 #${UI.modal}{
-  position:fixed; left:50%; top:54%; transform:translate(-50%,-50%);
-  width:min(560px, 92vw); max-height:min(78vh, 680px); overflow:auto;
-  background:rgba(255,255,255,.98); border-radius:18px;
+  position:fixed;
+  left:50%; top:54%;
+  transform:translate(-50%,-50%);
+  width:min(560px, 92vw);
+  max-height:min(78vh, 680px);
+  overflow:auto;
+  background:rgba(255,255,255,.98);
+  border-radius:18px;
   box-shadow:0 22px 70px rgba(0,0,0,.28);
-  z-index:2147483003; padding:14px 14px 12px; display:none;
+  z-index:2147483003;
+  padding:14px 14px 12px;
+  display:none;
 }
 #${UI.modal} .row{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
 #${UI.modal} .ttl{ font-weight:900; font-size:16px; }
 #${UI.modal} .sub{ font-size:12px; opacity:.75; margin-top:2px; }
 #${UI.modal} .sep{ height:1px; background:rgba(0,0,0,.08); margin:12px 0; }
 #${UI.modal} .tag{
-  font-size:12px; font-weight:900; padding:5px 10px; border-radius:999px;
-  background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08); white-space:nowrap;
+  font-size:12px; font-weight:900;
+  padding:5px 10px; border-radius:999px;
+  background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08);
+  white-space:nowrap;
 }
-#${UI.modal} .btn{ border:none; border-radius:12px; padding:8px 10px; font-weight:900; cursor:pointer; background:#ffd6e7; }
+#${UI.modal} .btn{
+  border:none; border-radius:12px;
+  padding:8px 10px;
+  font-weight:900;
+  cursor:pointer;
+  background:#ffd6e7;
+}
 #${UI.modal} .btn.ghost{ background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08); }
 #${UI.modal} .btn[disabled]{ opacity:.55; cursor:not-allowed; }
+#${UI.modal} .grid{ display:grid; grid-template-columns: 1fr; gap:10px; }
 #${UI.modal} .item{
-  display:flex; gap:12px; align-items:center; padding:12px;
-  border-radius:16px; background:rgba(0,0,0,.03);
+  display:flex; gap:12px; align-items:center;
+  padding:12px;
+  border-radius:16px;
+  background:rgba(0,0,0,.03);
 }
 #${UI.modal} .thumb{
-  width:78px; height:78px; border-radius:14px; background:#fff;
-  box-shadow:0 10px 24px rgba(0,0,0,.08); overflow:hidden;
+  width:78px; height:78px; flex:0 0 auto;
+  border-radius:14px;
+  background:#fff;
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+  overflow:hidden;
   display:flex; align-items:center; justify-content:center;
 }
 #${UI.modal} .thumb img{ width:100%; height:100%; object-fit:contain; }
 #${UI.modal} .name{ font-weight:900; }
 #${UI.modal} .meta{ font-size:12px; opacity:.75; margin-top:2px; }
-#${UI.modal} .right{ margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
+#${UI.modal} .right{
+  margin-left:auto;
+  display:flex; gap:8px; flex-wrap:wrap;
+  align-items:center; justify-content:flex-end;
+}
+#${UI.modal} .toggle{
+  border:none; border-radius:12px;
+  padding:8px 10px; font-weight:900;
+  cursor:pointer; background:#fff;
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+}
+#${UI.modal} .toggle.on{ background:#333; color:#fff; box-shadow:none; }
 `;
     document.head.appendChild(st);
   }
@@ -167,30 +224,33 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 <div class="row">
   <div>
     <div class="ttl">ショップ</div>
-    <div class="sub">購入・設置できます</div>
+    <div class="sub">アイテムを購入・設置できます</div>
   </div>
-  <button class="btn ghost" id="shopCloseBtnV5" type="button">×</button>
+  <button class="btn ghost" id="shopCloseModalV2" type="button">×</button>
 </div>
 
 <div class="sep"></div>
 
 <div class="row">
-  <div class="tag" id="shopCoinTagV5">🪙 0</div>
-  <div class="tag" id="shopStateTagV5">未購入</div>
+  <div class="tag" id="shopCoinTagV2">🪙 0</div>
+  <div class="tag" id="shopStateTagV2">ミラーボール：OFF</div>
 </div>
 
 <div class="sep"></div>
 
-<div class="item">
-  <div class="thumb"><img src="${ITEM.img}" alt="mirrorball"></div>
-  <div style="min-width:0;">
-    <div class="name">${ITEM.label}</div>
-    <div class="meta">${ITEM.desc}</div>
-    <div class="meta">価格：<b>${ITEM.price}🪙</b></div>
-  </div>
-  <div class="right">
-    <button class="btn" id="shopBuyBtnV5" type="button">購入</button>
-    <button class="btn ghost" id="shopToggleBtnV5" type="button">設置</button>
+<div class="grid">
+  <div class="item">
+    <div class="thumb"><img src="${ITEM.img}" alt="mirrorball"></div>
+    <div style="min-width:0;">
+      <div class="name">${ITEM.label}</div>
+      <div class="meta">${ITEM.desc}</div>
+      <div class="meta">価格：<b>${ITEM.price}🪙</b></div>
+    </div>
+    <div class="right">
+      <div class="tag" id="shopOwnedTagV2">未購入</div>
+      <button class="btn" id="shopBuyBtnV2" type="button">購入</button>
+      <button class="toggle" id="shopToggleBtnV2" type="button">設置</button>
+    </div>
   </div>
 </div>
 `;
@@ -208,89 +268,79 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function closeModal() {
-    const b = document.getElementById(UI.backdrop);
-    const m = document.getElementById(UI.modal);
-    if (b) b.style.display = "none";
-    if (m) m.style.display = "none";
+    const backdrop = document.getElementById(UI.backdrop);
+    const modal = document.getElementById(UI.modal);
+    if (backdrop) backdrop.style.display = "none";
+    if (modal) modal.style.display = "none";
   }
 
-  function buy() {
-    owned = loadJson(LS_KEY_OWNED, owned);
-    state = loadJson(LS_KEY_STATE, state);
-
-    if (isOwned(ITEM.key)) return { ok: true, already: true };
+  function buyMirrorball() {
+    if (isOwned(ITEM.key)) return { ok: true, reason: "already" };
 
     const cur = getCoinsWB();
     if (cur < ITEM.price) return { ok: false, reason: "coins", have: cur, need: ITEM.price };
 
-    if (!spendCoinsWB(ITEM.price)) return { ok: false, reason: "coins_api" };
+    const ok = spendCoinsWB(ITEM.price);
+    if (!ok) return { ok: false, reason: "coins_api" };
 
     owned[ITEM.key] = true;
-    saveJson(LS_KEY_OWNED, owned);
+    saveJson(LS_OWNED, owned);
 
-    // ★購入したら必ず設置ONにする（「設置されない」を根絶）
-    state.mirrorballEnabled = true;
-    saveJson(LS_KEY_STATE, state);
+    // 購入直後はONにしておく
+    if (!isEnabled()) setEnabled(true);
 
-    emitBg();
-    return { ok: true };
-  }
-
-  function toggle() {
-    owned = loadJson(LS_KEY_OWNED, owned);
-    state = loadJson(LS_KEY_STATE, state);
-
-    if (!isOwned(ITEM.key)) return { ok: false, reason: "not_owned" };
-
-    state.mirrorballEnabled = !isMirrorballEnabled();
-    saveJson(LS_KEY_STATE, state);
-
-    emitBg();
-    return { ok: true, enabled: state.mirrorballEnabled };
+    try { window.WB?.emit?.("bg:mirrorball_changed", { owned: true, enabled: isEnabled() }); } catch {}
+    return { ok: true, reason: "bought" };
   }
 
   function refresh() {
     const modal = document.getElementById(UI.modal);
     if (!modal) return;
 
-    owned = loadJson(LS_KEY_OWNED, owned);
-    state = loadJson(LS_KEY_STATE, state);
-
-    const coinTag = $("#shopCoinTagV5", modal);
-    const stateTag = $("#shopStateTagV5", modal);
-    const buyBtn = $("#shopBuyBtnV5", modal);
-    const toggleBtn = $("#shopToggleBtnV5", modal);
+    const coinTag = $("#shopCoinTagV2", modal);
+    const ownedTag = $("#shopOwnedTagV2", modal);
+    const buyBtn = $("#shopBuyBtnV2", modal);
+    const toggleBtn = $("#shopToggleBtnV2", modal);
+    const stateTag = $("#shopStateTagV2", modal);
 
     const c = getCoinsWB();
     if (coinTag) coinTag.textContent = `🪙 ${c}`;
 
     const own = isOwned(ITEM.key);
-    const en = isMirrorballEnabled();
-
-    if (stateTag) stateTag.textContent = own ? (en ? "購入済み（設置中）" : "購入済み（外し中）") : "未購入";
-
+    if (ownedTag) ownedTag.textContent = own ? "購入済み" : "未購入";
     if (buyBtn) {
       buyBtn.disabled = own || (c < ITEM.price);
       buyBtn.textContent = own ? "OK" : "購入";
     }
 
+    const on = own && isEnabled();
     if (toggleBtn) {
       toggleBtn.disabled = !own;
-      toggleBtn.textContent = en ? "外す" : "設置";
+      toggleBtn.classList.toggle("on", on);
+      toggleBtn.textContent = on ? "外す" : "設置";
     }
+    if (stateTag) stateTag.textContent = `ミラーボール：${on ? "ON" : "OFF"}`;
   }
 
-  function bindEvents() {
-    const modal = document.getElementById(UI.modal);
-    const backdrop = document.getElementById(UI.backdrop);
-    if (!modal || !backdrop) return;
+  function bindModalEvents() {
+    const { modal, backdrop } = ensureUI();
 
-    $("#shopCloseBtnV5", modal)?.addEventListener("click", (e) => { e.stopPropagation(); closeModal(); });
-    backdrop.addEventListener("click", closeModal);
+    const closeBtn = $("#shopCloseModalV2", modal);
+    const buyBtn = $("#shopBuyBtnV2", modal);
+    const toggleBtn = $("#shopToggleBtnV2", modal);
 
-    $("#shopBuyBtnV5", modal)?.addEventListener("click", (e) => {
+    const stop = (e) => {
+      e.preventDefault();
       e.stopPropagation();
-      const r = buy();
+      if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+    };
+
+    closeBtn?.addEventListener("click", (e) => { stop(e); closeModal(); }, true);
+    backdrop.addEventListener("click", () => closeModal(), true);
+
+    buyBtn?.addEventListener("click", (e) => {
+      stop(e);
+      const r = buyMirrorball();
       if (!r.ok) {
         if (r.reason === "coins") toast(`🪙 足りない！ ${r.have} / ${r.need}`);
         else toast("購入できませんでした");
@@ -298,15 +348,15 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
         toast(`✅ ${ITEM.label} 購入！ -${ITEM.price}🪙`);
       }
       refresh();
-    });
+    }, true);
 
-    $("#shopToggleBtnV5", modal)?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const r = toggle();
-      if (!r.ok) toast("未購入です");
-      else toast(r.enabled ? "🪩 設置した！" : "🧹 外した！");
+    toggleBtn?.addEventListener("click", (e) => {
+      stop(e);
+      if (!isOwned(ITEM.key)) { toast("未購入です"); return; }
+      setEnabled(!isEnabled());
+      toast(isEnabled() ? "🪩 設置した！" : "🧹 外した！");
       refresh();
-    });
+    }, true);
 
     window.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
@@ -322,15 +372,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     if (!WB || typeof WB !== "object") return;
     WB.shop = WB.shop || {};
     WB.shop.isOwned = (key) => isOwned(key);
-    WB.shop.isMirrorballEnabled = () => isMirrorballEnabled();
-    WB.shop.setMirrorballEnabled = (v) => {
-      state.mirrorballEnabled = !!v;
-      saveJson(LS_KEY_STATE, state);
-      emitBg();
-    };
+    WB.shop.isMirrorballEnabled = () => isEnabled();
+    WB.shop.setMirrorballEnabled = (v) => setEnabled(v);
     WB.shop.open = openModal;
-    WB.shop.buyMirrorball = buy;
-    WB.shop.toggleMirrorball = toggle;
+    WB.shop.buyMirrorball = buyMirrorball;
   }
 
   function waitForElm(getter, timeoutMs = 12000) {
@@ -346,9 +391,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   (async function boot() {
     try { await waitForElm(() => document.body, 8000); } catch {}
-
     ensureUI();
-    bindEvents();
+    bindModalEvents();
 
     patchWB();
     const start = Date.now();
@@ -357,11 +401,15 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       if (Date.now() - start > 15000) clearInterval(t);
     }, 200);
 
-    let shopBtn;
-    try { shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000); }
-    catch { console.warn("[shop.js] #shopBtn not found"); return; }
+    let shopBtn = null;
+    try {
+      shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
+    } catch {
+      console.warn("[shop.js] #shopBtn not found");
+      return;
+    }
 
-    // captureで委譲クリックより先に止める
+    // captureで先に止める
     shopBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -369,7 +417,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       openModal();
     }, true);
 
-    // 起動時にbgへ通知（確実反映）
-    emitBg();
+    // 初期反映
+    try {
+      window.WB?.emit?.("bg:mirrorball_changed", { owned: isOwned(ITEM.key), enabled: isEnabled() });
+    } catch {}
   })();
 })();
