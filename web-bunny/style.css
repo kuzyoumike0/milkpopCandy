@@ -164,3 +164,41 @@ html,body{
   pointer-events:none;
   z-index:4;
 }
+/* =========================
+   BG LAYERS (FIX)
+   - bgcolor.js の描画を確実に見せる
+========================= */
+#bgLayer{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  z-index:0;
+  pointer-events:none;
+}
+
+/* tenki.js が使うなら */
+#tenkiLayer{
+  position:absolute;
+  inset:0;
+  z-index:0;
+  pointer-events:none;
+}
+
+/* fieldが常に黒を塗るのをやめる（黒化バグ根絶） */
+#field{
+  background:#fff3f8; /* ここは好みのベース色でOK */
+}
+
+/* bunny/coin は背景より上 */
+#bunnyLayer,
+#coinLayer{
+  z-index:2;
+}
+
+/* もし他の要素が bgLayer より下に潜るなら保険 */
+#field{
+  position:fixed;
+  inset:0;
+  overflow:hidden;
+}
