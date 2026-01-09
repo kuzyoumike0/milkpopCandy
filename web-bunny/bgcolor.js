@@ -275,9 +275,19 @@
 
     // ✅ mirrorballの設置/解除 ＋ ディスコ背景
     const owned = hasMirrorballOwned();
-    ensureMirrorball(owned);
-    setDiscoEnabled(owned);
-  }
+const enabled = (() => {
+  try { return window.WB?.shop?.isMirrorballEnabled?.(); } catch {}
+  try {
+    const raw = localStorage.getItem("milkpop_shop_state_v1");
+    const j = raw ? JSON.parse(raw) : null;
+    return !!j?.mirrorballEnabled;
+  } catch { return true; }
+})();
+const on = owned && enabled;
+
+ensureMirrorball(on);
+setDiscoEnabled(on);
+
 
   // 初回
   apply(true);
