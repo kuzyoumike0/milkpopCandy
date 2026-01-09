@@ -1,9 +1,10 @@
 // gameMenu.js（非module）
 // ✅ 右上にハンバーガーメニュー1個だけ作る
-// ✅ メニュー項目：🎀お洒落 / 📖図鑑 / 🎵BGM
-// ✅ それぞれ：ISYOU.openModal / WB.zukan.open / WB.bgm.openModal を呼ぶ
+// ✅ メニュー項目：🎀お洒落 / 📖図鑑 / 🎵BGM / 🛍️ショップ
+// ✅ それぞれ：ISYOU.openModal / WB.zukan.open / WB.bgm.openModal / shop（WB.shop.open or #shopBtn.click）
 // ✅ 他スクリプトより先に読み込まれてもOK（呼び出しはクリック時）
 // ✅ 外側クリックで閉じる
+// ✅ HUDから消しても動くように「shopBtnが無くてもWB.shop.open/SHOP.open」を優先
 
 (() => {
   "use strict";
@@ -101,6 +102,7 @@
           <button class="item" type="button" data-act="isyou">🎀 お洒落</button>
           <button class="item" type="button" data-act="zukan">📖 図鑑</button>
           <button class="item" type="button" data-act="bgm">🎵 BGM</button>
+          <button class="item" type="button" data-act="shop">🛍️ ショップ</button>
         </div>
         <div class="note">
           ※ 画面クリックで音が解放されます（BGMは一度クリックが必要）
@@ -112,9 +114,6 @@
     return { btn, panel };
   }
 
-  function openPanel(panel) {
-    panel.style.display = "block";
-  }
   function closePanel(panel) {
     panel.style.display = "none";
   }
@@ -125,6 +124,21 @@
   function safeCall(fn, retryMs = 140) {
     try { fn(); return; } catch {}
     setTimeout(() => { try { fn(); } catch {} }, retryMs);
+  }
+
+  // ✅ shop.js を「#shopBtn専用」にしていても開けるように
+  // 優先順位：
+  // 1) window.SHOP.open()（もし用意しているなら）
+  // 2) window.WB.shop.open()
+  // 3) #shopBtn.click()（DOMが残っていれば）
+  function openShop() {
+    safeCall(() => {
+      if (window.SHOP?.open) return window.SHOP.open();
+      if (window.WB?.shop?.open) return window.WB.shop.open();
+
+      const btn = document.getElementById("shopBtn");
+      if (btn) btn.click();
+    });
   }
 
   function handleAction(act) {
@@ -139,11 +153,16 @@
     if (act === "bgm") {
       // ✅ BGM.js（モーダル版）で openModal を提供
       safeCall(() => window.WB?.bgm?.openModal?.());
-      // 互換：もし openModal が無い旧版なら mountUI を呼ぶ（ただし“ハンバーガー版”は使わない想定）
+
+      // 互換：もし openModal が無い旧版なら mountUI を呼ぶ
       setTimeout(() => {
         if (window.WB?.bgm?.openModal) return;
         try { window.WB?.bgm?.mountUI?.({ position: "top-right", title: "BGM" }); } catch {}
       }, 0);
+      return;
+    }
+    if (act === "shop") {
+      openShop();
       return;
     }
   }
@@ -158,16 +177,15 @@
     });
 
     panel.addEventListener("click", (e) => {
-      const t = e.target;
-      const b = t?.closest?.("[data-act]");
+      const b = e.target?.closest?.("[data-act]");
       if (!b) return;
       e.preventDefault();
       e.stopPropagation();
       closePanel(panel);
-      const act = b.getAttribute("data-act");
-      handleAction(act);
+      handleAction(b.getAttribute("data-act"));
     });
 
+    // 外側クリックで閉じる
     document.addEventListener("pointerdown", (e) => {
       if (panel.style.display !== "block") return;
       if (panel.contains(e.target) || btn.contains(e.target)) return;
