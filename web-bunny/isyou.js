@@ -5,10 +5,20 @@
 // ✅ 赤枠は fixed + translate3d（軽い＆確実に見える）
 //
 // ✅ 変更：HUDボタンを作らない（既存 #isyouBtn があれば削除）
+// ✅ 追加：重複リスナー根絶（同一ファイル再読込でも増殖しない）
+// ✅ 追加：overlay の z-index を適切化（coin/UIより上、メニューより下になりやすい値）
 
 (() => {
   "use strict";
   console.log("[isyou.js] LOADED V31.4 (no HUD button)", Date.now());
+
+  // 既に初期化済みなら二重起動しない
+  if (window.__ISYOU_V314_INITED__) {
+    try { window.ISYOU?.removeHudButton?.(); } catch {}
+    console.warn("[isyou.js] already inited; skip re-init");
+    return;
+  }
+  window.__ISYOU_V314_INITED__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -318,6 +328,7 @@
 #isyouConfirmBar button.primary{background:#ffd6e7;}
 #isyouConfirmBar button.danger{background:rgba(255,80,80,.12);}
 
+/* overlay：coinより上に置きたいので高め。メニューが更に上ならそちら優先 */
 #isyouOverlay{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:2147482000;overflow:visible;}
 .isyouHat{position:absolute;left:0;top:0;width:10px;height:10px;pointer-events:none;transform-origin:0 0;will-change:transform,width,height;}
 .isyouHat img{width:100%;height:100%;object-fit:contain;display:block;}
@@ -352,6 +363,7 @@
     return overlay;
   }
 
+  // ✅ 反転検出：親にscaleX(-1)が付いててもdet<0で拾う（XOR畳み込み）
   function isMirroredDeep(el, stopEl) {
     let cur = el;
     let mirrored = 0;
@@ -501,6 +513,7 @@
     scheduleSyncLoop();
   }
 
+  // ✅ 反転時は tx = x + w してから scaleX(-1)（位置ズレ根絶）
   function syncHatEnt(ent, ovRect) {
     const img = ent.targetImg;
     const hat = ent.hatDiv;
@@ -1038,9 +1051,15 @@
     ensureModal();
     ensureConfirmBar();
 
-    document.addEventListener("pointerdown", onPointerDownCapture, true);
-    document.addEventListener("pointerup", onPointerUpCapture, true);
-    document.addEventListener("click", onClickCapture, true);
+    // 念のため重複防止（同一ページでscriptが再評価されたケース）
+    if (!window.__ISYOU_V314_LISTENERS__) {
+      window.__ISYOU_V314_LISTENERS__ = true;
+      document.addEventListener("pointerdown", onPointerDownCapture, true);
+      document.addEventListener("pointerup", onPointerUpCapture, true);
+      document.addEventListener("click", onClickCapture, true);
+      window.addEventListener("resize", () => scheduleSyncLoop(), { passive: true });
+      window.addEventListener("scroll",  () => scheduleSyncLoop(), { passive: true });
+    }
 
     preloadEquipSe();
 
@@ -1049,12 +1068,10 @@
     setTimeout(applyEquipsAll, 900);
     setTimeout(applyEquipsAll, 1600);
 
-    window.addEventListener("resize", () => scheduleSyncLoop(), { passive: true });
-    window.addEventListener("scroll",  () => scheduleSyncLoop(), { passive: true });
-
     try {
       const layer = document.getElementById("bunnyLayer");
-      if (layer) {
+      if (layer && !window.__ISYOU_V314_MO__) {
+        window.__ISYOU_V314_MO__ = true;
         const mo = new MutationObserver(() => requestRefresh());
         mo.observe(layer, { childList: true, subtree: true, attributes: true });
       }
