@@ -1,4 +1,4 @@
-// bgcolor.js
+// bgcolor.js（FIX & LITE）
 // ✅ 朝・昼・夜を「JST」で判定して #bgLayer / #field に直接適用
 // ✅ mirrorball（購入済み＆ON）なら「ミラーボール画像＋スポットライトだけ」出す（全面ディスコ回転背景は出さない）
 // ✅ 光（スポット）は “必ずミラーボール位置（画面中央上）からのみ” 出る
@@ -7,6 +7,8 @@
 // ✅ うさぎがスポットに入ると少し明るく見える（bunnyWrap brightness）
 // ✅ 重要：OFF時は「残骸含めて」ミラーボール・スポットを完全削除（外せない問題根絶）
 // ✅ reset 等でDOMが作り直されても再適用（黒くなる対策）
+// ✅ FIX: ON/OFFが反映されない問題 → localStorageフック＋storageイベント＋WBイベント
+// ✅ LITE: 重い問題 → bunny判定を低頻度＆差分更新＆rectキャッシュ
 
 (() => {
   "use strict";
@@ -57,8 +59,8 @@
   /* =========================
    * Find nodes safely (reset耐性)
    * ========================= */
-  function getBgLayer() { return document.getElementById("bgLayer"); }
-  function getField()   { return document.getElementById("field"); }
+  const getBgLayer = () => document.getElementById("bgLayer");
+  const getField   = () => document.getElementById("field");
 
   function ensureBgLayerReady(bgLayer) {
     if (!bgLayer) return;
@@ -68,30 +70,43 @@
   }
 
   /* =========================
-   * Mirrorball state
+   * Mirrorball state (robust)
    * ========================= */
-  function hasMirrorballOwned() {
-    try { if (window.WB?.shop?.isOwned?.("mirrorball")) return true; } catch {}
+  function safeParseLS(key) {
     try {
-      const raw = localStorage.getItem(LS_OWNED);
-      const j = raw ? JSON.parse(raw) : null;
-      return !!j?.mirrorball;
-    } catch { return false; }
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   }
 
+  function hasMirrorballOwned() {
+    try { if (window.WB?.shop?.isOwned?.("mirrorball")) return true; } catch {}
+    const j = safeParseLS(LS_OWNED);
+    return !!j?.mirrorball;
+  }
+
+  // ★ここがON/OFF不一致の主因になりやすいので「false優先」
   function isMirrorballEnabled() {
+    // 1) WBが持ってるならそれを最優先
     try {
       if (typeof window.WB?.shop?.isMirrorballEnabled === "function") {
-        return !!window.WB.shop.isMirrorballEnabled();
+        const v = window.WB.shop.isMirrorballEnabled();
+        if (typeof v === "boolean") return v;
+        return !!v;
       }
+      // ありがちな形
+      const wbState = window.WB?.shop?.state;
+      if (wbState && typeof wbState.mirrorballEnabled === "boolean") return wbState.mirrorballEnabled;
     } catch {}
 
-    try {
-      const raw = localStorage.getItem(LS_STATE);
-      const j = raw ? JSON.parse(raw) : null;
-      if (j && typeof j === "object" && "mirrorballEnabled" in j) return !!j.mirrorballEnabled;
-    } catch {}
-    return true; // stateが無い古い環境はON扱い
+    // 2) LS_STATE を見る（明示falseなら必ずOFF）
+    const j = safeParseLS(LS_STATE);
+    if (j && typeof j === "object" && "mirrorballEnabled" in j) {
+      return !!j.mirrorballEnabled;
+    }
+
+    // 3) stateが無い古い環境：デフォルトON（owned前提でONになるのでOK）
+    return true;
   }
 
   /* =========================
@@ -115,6 +130,8 @@
     // 2) src一致で削除（過去版でidが違う場合）
     try {
       root.querySelectorAll('img[src*="mirrorball.png"], img[src*="/mirrorball.png"]').forEach(el => {
+        // FINAL版のは id で消すので、こっちは旧残骸対策だけ
+        if (el.id === MIRROR.id) return;
         try { el.remove(); } catch {}
       });
     } catch {}
@@ -194,11 +211,11 @@
     rightId: "mirrorballSpotRightFINAL",
     z: 18, // ミラーボールより下
     // 調整ポイント
-    widthVmax: 210,      // スポットの“広がり”（大きいほど幅広）
-    coreOpacity: 0.52,   // 基本濃さ
-    nightAdd: 0.22,      // 夜の追加濃さ
-    swayDegA: 18,        // 揺れ角度（基準）
-    swayDegB: 28,        // 揺れ角度（最大）
+    widthVmax: 210,
+    coreOpacity: 0.52,
+    nightAdd: 0.22,
+    swayDegA: 18,
+    swayDegB: 28,
   };
 
   function spotOriginTopPx() {
@@ -207,6 +224,7 @@
   }
 
   function ensureSpotStyle() {
+    // ★top値は固定なので style は1回でOK
     if (document.getElementById(SPOT.styleId)) return;
 
     const st = document.createElement("style");
@@ -234,7 +252,7 @@
   pointer-events:none;
   overflow:hidden;
   opacity:0;
-  transition: opacity .25s ease;
+  transition: opacity .20s ease;
 }
 
 /* ★ “起点は必ずミラーボール位置” */
@@ -250,7 +268,6 @@
   mix-blend-mode: screen;
   opacity:${SPOT.coreOpacity};
 
-  /* 三角コーン（中心が明るい） */
   background:
     conic-gradient(from 0deg,
       rgba(255,255,255,0)   0deg,
@@ -262,7 +279,6 @@
       rgba(255,255,255,0)  360deg
     );
 
-  /* 上ほど濃く、下ほど薄い */
   mask-image: radial-gradient(circle at 50% 0%, rgba(0,0,0,1) 0 34%, rgba(0,0,0,0) 74%);
   -webkit-mask-image: radial-gradient(circle at 50% 0%, rgba(0,0,0,1) 0 34%, rgba(0,0,0,0) 74%);
 
@@ -270,7 +286,6 @@
   will-change: transform, filter, opacity;
 }
 
-/* 左右（起点は同じ、角度だけ違う） */
 #${SPOT.leftId}{
   animation: mbHueFINAL 6.6s linear infinite, mbSwayL_FINAL 2.9s ease-in-out infinite;
 }
@@ -303,7 +318,6 @@
       wrap.appendChild(left);
       wrap.appendChild(right);
 
-      // bgLayerの先頭に（背景の上・ミラーボールの下）
       bgLayer.insertBefore(wrap, bgLayer.firstChild);
     }
     return wrap;
@@ -333,19 +347,38 @@
     const left = document.getElementById(SPOT.leftId);
     const right = document.getElementById(SPOT.rightId);
     if (left && right) {
-      left.style.opacity = String(SPOT.coreOpacity + add);
-      right.style.opacity = String(SPOT.coreOpacity + add);
+      const op = String(SPOT.coreOpacity + add);
+      // 無駄更新しない
+      if (left.style.opacity !== op) left.style.opacity = op;
+      if (right.style.opacity !== op) right.style.opacity = op;
     }
   }
 
   /* =========================
-   * Bunny brighten when in spot (cheap)
+   * Bunny brighten when in spot (LITE)
    * ========================= */
   let bunnyBrightTimer = null;
 
+  // rectキャッシュ（毎回getBoundingClientRectしない）
+  let cachedFieldRect = null;
+  let cachedFieldRectAt = 0;
+  const FIELD_RECT_TTL = 800; // ms
+
+  // 前回適用状態（無駄なstyle更新を減らす）
+  const prevBright = new WeakMap();
+
   function stopBunnyGlow() {
     if (bunnyBrightTimer) { clearInterval(bunnyBrightTimer); bunnyBrightTimer = null; }
+    prevBright.clear?.(); // WeakMapはclear無い環境もあるのでガード
     document.querySelectorAll(".bunnyWrap").forEach(w => { w.style.filter = ""; });
+  }
+
+  function getFieldRect(field) {
+    const now = Date.now();
+    if (cachedFieldRect && (now - cachedFieldRectAt) < FIELD_RECT_TTL) return cachedFieldRect;
+    cachedFieldRect = field.getBoundingClientRect();
+    cachedFieldRectAt = now;
+    return cachedFieldRect;
   }
 
   function startBunnyGlow(on, phase) {
@@ -354,37 +387,59 @@
     const field = getField();
     if (!field) { stopBunnyGlow(); return; }
 
+    // 120ms→350msに（体感ほぼ変わらず、負荷大幅減）
     const boost = (phase === "night") ? 1.20 : 1.10;
+    const tick = 350;
 
     if (bunnyBrightTimer) clearInterval(bunnyBrightTimer);
+
     bunnyBrightTimer = setInterval(() => {
-      const fr = field.getBoundingClientRect();
+      const fieldEl = getField();
+      if (!fieldEl) { stopBunnyGlow(); return; }
+
+      const fr = getFieldRect(fieldEl);
       const centerX = fr.left + fr.width * 0.5;
       const originY = fr.top + spotOriginTopPx();
 
-      document.querySelectorAll(".bunnyWrap").forEach(w => {
+      const wraps = document.querySelectorAll(".bunnyWrap");
+      if (!wraps.length) return;
+
+      wraps.forEach(w => {
         const r = w.getBoundingClientRect();
         const x = r.left + r.width * 0.5;
         const y = r.top  + r.height * 0.8;
 
         const dy = Math.max(0, y - originY);
-        const allowed = 130 + dy * 0.90; // 下に行くほど広がる
+        const allowed = 130 + dy * 0.90;
         const inside = Math.abs(x - centerX) < allowed;
 
-        w.style.filter = inside ? `brightness(${boost})` : "";
+        const want = inside ? `brightness(${boost})` : "";
+        // 差分更新のみ
+        if (w.style.filter !== want) w.style.filter = want;
       });
-    }, 120);
+    }, tick);
   }
 
   /* =========================
    * Apply theme & effects
    * ========================= */
   let lastPhase = "";
+  let lastOn = null;
+
+  // applyの連打抑制（トグル連続でも軽く）
+  let applyQueued = false;
+  function requestApply(force = false) {
+    if (applyQueued) return;
+    applyQueued = true;
+    requestAnimationFrame(() => {
+      applyQueued = false;
+      apply(force);
+    });
+  }
 
   function apply(force = false) {
     const bgLayer = getBgLayer();
     const field = getField();
-
     if (!bgLayer) return;
 
     ensureBgLayerReady(bgLayer);
@@ -392,7 +447,7 @@
     const h = getJSTHour();
     const phase = getPhaseByHour(h);
 
-    // 背景（黒固定をしない）
+    // 背景
     if (force || phase !== lastPhase) {
       lastPhase = phase;
       const bg = THEMES[phase] || THEMES.day;
@@ -406,16 +461,28 @@
     const enabled = isMirrorballEnabled();
     const on = owned && enabled;
 
-    // ✅ OFFなら確実に消す（残骸含めて）
-    ensureMirrorball(bgLayer, on);
-    setSpotEnabled(bgLayer, on, phase);
-    startBunnyGlow(on, phase);
-
-    // ✅ “ミラーボール以外から光” の原因になりがちな残骸を毎回掃除（軽量）
-    if (!on) {
-      cleanupAllMirrorballStuff(document);
-      stopBunnyGlow();
+    // ON/OFF変化がない時は無駄な重い処理をしない（forceならやる）
+    if (!force && lastOn === on) {
+      // ただし phaseで夜強化が変わるのでスポット/グローは更新
+      setSpotEnabled(bgLayer, on, phase);
+      startBunnyGlow(on, phase);
+      return;
     }
+    lastOn = on;
+
+    if (!on) {
+      // ✅ OFFなら確実に消す（残骸含めて）
+      ensureMirrorball(bgLayer, false);
+      removeSpot();
+      stopBunnyGlow();
+      cleanupAllMirrorballStuff(document);
+      return;
+    }
+
+    // ON
+    ensureMirrorball(bgLayer, true);
+    setSpotEnabled(bgLayer, true, phase);
+    startBunnyGlow(true, phase);
   }
 
   /* =========================
@@ -425,22 +492,54 @@
   let tries = 0;
   const bootTimer = setInterval(() => {
     tries++;
-    apply(true);
+    requestApply(true);
     if (getBgLayer() || tries >= 80) clearInterval(bootTimer); // 最大約4秒
   }, 50);
 
-  // 時間帯切替
-  setInterval(() => apply(false), 60 * 1000);
+  // 時間帯切替（1分）
+  setInterval(() => requestApply(false), 60 * 1000);
 
-  // reset / shop toggle 即反映
+  // resize/scrollでrectキャッシュを捨てる（グロー判定のズレ防止）
+  const invalidateRect = () => { cachedFieldRect = null; cachedFieldRectAt = 0; };
+  window.addEventListener("resize", invalidateRect, { passive: true });
+  window.addEventListener("scroll", invalidateRect, { passive: true });
+
+  // reset / shop toggle 即反映（WBがある場合）
   const hookWB = () => {
     if (!window.WB?.on) return false;
-    window.WB.on("core:reset_partial", () => apply(true));
-    window.WB.on("core:ready", () => apply(true));
-    window.WB.on("bg:mirrorball_changed", () => apply(true));
-    window.WB.on("bg:mirrorball_toggle", () => apply(true));
+
+    const events = [
+      "core:reset_partial",
+      "core:ready",
+      "bg:mirrorball_changed",
+      "bg:mirrorball_toggle",
+      // よくあるイベント名も保険で
+      "shop:changed",
+      "shop:state_changed",
+      "shop:toggled",
+    ];
+    events.forEach(ev => {
+      try { window.WB.on(ev, () => requestApply(true)); } catch {}
+    });
     return true;
   };
   hookWB();
   setTimeout(hookWB, 300);
+
+  // ✅ localStorage 更新を同タブで確実に拾う（ON/OFF反映の決定打）
+  (function hookLocalStorage() {
+    try {
+      const _setItem = localStorage.setItem.bind(localStorage);
+      localStorage.setItem = (k, v) => {
+        _setItem(k, v);
+        if (k === LS_STATE || k === LS_OWNED) requestApply(true);
+      };
+    } catch {}
+  })();
+
+  // 別タブ変更も拾う
+  window.addEventListener("storage", (e) => {
+    if (!e) return;
+    if (e.key === LS_STATE || e.key === LS_OWNED) requestApply(true);
+  });
 })();
