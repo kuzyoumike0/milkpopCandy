@@ -34,6 +34,15 @@
       price: 3500,
       img: "./assets/bg/bed.png",
     },
+
+    // ✅ 追加：oak.png
+    oak: {
+      key: "oak",
+      label: "にんじんの木（オーク）",
+      desc: "アイテム配置で置ける（itemPlace.js）",
+      price: 6000,
+      img: "./assets/bg/oak.png",
+    },
   };
 
   const UI = {
@@ -291,14 +300,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     try {
       window.WB?.emit?.("shop:changed", { key, owned: !!owned[key] });
 
-      // mirrorball は「購入状態」だけ通知（演出は bgcolor.js が見る想定）
       if (key === "mirrorball") {
         window.WB?.emit?.("bg:mirrorball_changed", { owned: !!owned.mirrorball });
       }
-
-      // bed は「購入状態」だけ通知（配置のON/OFFや配置は itemPlace.js 側）
       if (key === "bed") {
         window.WB?.emit?.("itemplace:owned_changed", { key: "bed", owned: !!owned.bed });
+      }
+      if (key === "oak") {
+        window.WB?.emit?.("itemplace:owned_changed", { key: "oak", owned: !!owned.oak });
       }
     } catch {}
   }
@@ -327,14 +336,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     ensureStyle();
     patchWB();
 
-    // WB後追い（遅延ロードでも追いつく）
+    // WB後追い
     const start = Date.now();
     const wbTimer = setInterval(() => {
       patchWB();
       if (Date.now() - start > 15000) clearInterval(wbTimer);
     }, 200);
 
-    // ✅ グローバルAPI（ハンバーガーメニューから呼べる）
+    // ✅ グローバルAPI
     window.SHOP = {
       open: () => openModal(),
       close: () => closeModal(),
@@ -342,7 +351,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       owned: () => loadOwned(),
     };
 
-    // ✅ #shopBtn が存在する時だけ、従来通り click で開く（互換）
+    // ✅ #shopBtn 互換
     try {
       const shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
       if (shopBtn && !shopBtn.__bgshopBound) {
@@ -362,6 +371,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     owned = loadOwned();
     if (owned.mirrorball) emitChanged("mirrorball");
     if (owned.bed) emitChanged("bed");
+    if (owned.oak) emitChanged("oak");
   }
 
   boot().catch(() => {});
