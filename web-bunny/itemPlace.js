@@ -1,23 +1,13 @@
-// itemPlace.js（V9：bed/oak は “うさぎと同じくらい” スケール + 🛏 bed 地面吸着 + 🪩 mirrorball 設置ON/OFF + 虹スポット）
-// ✅ アイテム配置は itemPlace のみで行う（shop.js は購入のみ）
-// ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う（★mirrorball も扱う）
-// ✅ oak.png などアイテムが増えても自動対応：SHOP.items() / WB.shop.items() / fallback の順で吸収
-// ✅ 設置ON/OFFは itemPlace.js が管理（LS: milkpop_itemplace_enabled_v1）
-// ✅ 拡大縮小UIは無し
-// ✅ 表示倍率は固定：デフォは少し大きめ、ただし bed/oak は “うさぎと同じくらい” に上書き
-// ✅ ゴースト枠も同倍率
-// ✅ 座標基準は #field
-// ✅ 配置モード：赤枠（透明）→ クリックで設置 → ドラッグ移動 → 完了
-// ✅ OFFにした瞬間に撤去（残骸ゼロ）
-// ✅ アイテム選択も itemPlace で完結（セレクト + 配置物クリックで選択）
-// ✅ うさぎの裏：wrap を #bunnyLayer の直前へ（DOM順）＋低z-index
-// ✅ クリックできない問題根絶：編集中だけ pointer-events:auto
-// ✅ 🛏 bed を地面吸着（bottom基準）：置いた/ドラッグした後に “床” に吸着（y固定）
-// ✅ 🪩 mirrorball：設置時、ミラーボール位置から「幅広の虹スポットライト」2本を左右にゆらす（常時）
+// itemPlace.js（V9.1：✅配置できない修正 + ✅スポットライト出ない修正（再帰バグ根絶））
+// ✅ mirrorball も設置ON/OFFできる
+// ✅ mirrorball 設置中は「幅広い虹スポットライト」2本がミラーボール位置から出て左右にゆらぐ
+// ✅ 重要修正：ensureWrap() ⇄ ensureFX() の無限再帰でスクリプトが死んでいたのを完全解消
+// ✅ 重要修正：FXは wrap ができた後に “wrap直下” に確実に生成
+// ✅ 重要修正：syncAll()/syncOne() で必ずFX再同期（置いた瞬間に出る）
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V9", Date.now());
+  console.log("[itemPlace] LOADED V9.1", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
   const LS_STATE_KEY   = "milkpop_itemplace_v9";          // { key:{x,y,rot,placed} }
@@ -42,7 +32,6 @@
   const ITEM_SCALE_OVERRIDE = {
     bed: 1.00,
     oak: 1.00,
-    // mirrorball は雰囲気優先で少し大きめにしたければ 1.1 とかにしてOK
     mirrorball: 1.00,
   };
 
@@ -52,23 +41,16 @@
   // ✅ 🪩 虹スポットライト設定
   const MIRRORBALL_KEY = "mirrorball";
   const SPOT = {
-    // beams (px) ※広め
     width: 320,
     height: 520,
-    // 出力点（ミラーボール画像内の割合）
     anchorX: 0.50,
     anchorY: 0.28,
-    // 初期角度（左右）
     baseAngleL: -18,
     baseAngleR:  18,
-    // ゆらぎの振れ幅
     swayDeg: 10,
-    // ゆらぎ速度（大きいほど早い）
     swaySpeed: 0.0016,
-    // 透明度
     opacityDay: 0.52,
     opacityNight: 0.72,
-    // blur
     blurPx: 2.8,
   };
 
@@ -76,6 +58,7 @@
   const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
 
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
   function toast(msg) {
     let el = document.getElementById(TOAST_ID);
@@ -103,9 +86,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
    * ========================= */
 
   const FALLBACK_ITEMS = [
-    { key: "bed", label: "ベッド", img: "./assets/bg/bed.png", placeable: true },
-    { key: "oak", label: "オーク", img: "./assets/bg/oak.png", placeable: true },
-    { key: "mirrorball", label: "ミラーボール", img: "./assets/bg/mirrorball.png", placeable: true },
+    { key: "bed",       label: "ベッド",     img: "./assets/bg/bed.png",       placeable: true },
+    { key: "oak",       label: "オーク",     img: "./assets/bg/oak.png",       placeable: true },
+    { key: "mirrorball",label: "ミラーボール", img: "./assets/bg/mirrorball.png", placeable: true },
   ];
 
   function normalizeShopItem(it) {
@@ -133,7 +116,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   function getDefaultForKey(key) {
-    // 初期位置は適当に中央寄り
+    // 初期位置（適当）
     return { x: 180, y: 280, rot: 0, placed: false };
   }
 
@@ -153,10 +136,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       }
     }
 
+    // map由来に mirrorball が無い環境でも fallback を足して救済
+    const hasKey = new Set(items.map(x => x.key));
+    for (const fb of FALLBACK_ITEMS) {
+      if (!hasKey.has(fb.key)) items.push(normalizeShopItem(fb));
+    }
+
     const out = {};
     for (const it of items) {
-      if (!it.placeable) continue;
-      if (!it.src) continue;
+      if (!it?.placeable) continue;
+      if (!it?.src) continue;
 
       out[it.key] = {
         key: it.key,
@@ -197,7 +186,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   function loadOwned() { return safeParse(localStorage.getItem(SHOP_OWNED_KEY)) || {}; }
 
   function isOwned(key) {
-    try { if (window.WB?.shop?.isOwned) return !!window.WB.shop.isOwned(key); } catch {}
+    try {
+      if (window.WB?.shop?.isOwned) return !!window.WB.shop.isOwned(key);
+    } catch {}
     return !!loadOwned()?.[key];
   }
 
@@ -309,8 +300,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
    * 🛏 bed 地面吸着
    * ========================= */
 
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
   function snapGroundIfNeeded(key) {
     const it = PLACE_ITEMS[key];
     if (!it?.groundSnap) return;
@@ -325,138 +314,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const wh = getDisplayWH(key);
     s.y = (r.height - wh.h - BED_GROUND_MARGIN_PX);
     s.x = clamp(s.x, -wh.w * 0.2, r.width - wh.w * 0.8);
-  }
-
-  /* =========================
-   * 🪩 Mirrorball FX (虹スポットライト)
-   * ========================= */
-
-  function isNightNow() {
-    const h = new Date().getHours();
-    return (h < 6 || h >= 18);
-  }
-
-  function ensureFX() {
-    ensureStyle();
-    let fx = document.getElementById(FX_ID);
-    if (!fx) {
-      fx = document.createElement("div");
-      fx.id = FX_ID;
-      fx.innerHTML = `<div id="${FX_L_ID}"></div><div id="${FX_R_ID}"></div>`;
-      ensureWrap()?.appendChild(fx);
-    }
-    return fx;
-  }
-
-  function getMirrorballAnchor() {
-    // st座標は hostローカル。FXも wrap 内 absolute なので同座標でOK
-    const s = st[MIRRORBALL_KEY];
-    if (!s || !s.placed) return null;
-
-    const wh = getDisplayWH(MIRRORBALL_KEY);
-    const ax = s.x + wh.w * SPOT.anchorX;
-    const ay = s.y + wh.h * SPOT.anchorY;
-    return { x: ax, y: ay, w: wh.w, h: wh.h };
-  }
-
-  function shouldShowFX() {
-    if (!(MIRRORBALL_KEY in PLACE_ITEMS)) return false;
-    if (!isOwned(MIRRORBALL_KEY)) return false;
-    if (!isEnabled(MIRRORBALL_KEY)) return false;
-    const s = st[MIRRORBALL_KEY];
-    if (!s || !s.placed) return false;
-    return true;
-  }
-
-  function syncFX() {
-    const wrap = ensureWrap();
-    if (!wrap) return;
-
-    const show = shouldShowFX();
-    const fx = ensureFX();
-    fx.style.display = show ? "block" : "none";
-    if (!show) return;
-
-    const a = getMirrorballAnchor();
-    if (!a) return;
-
-    const L = document.getElementById(FX_L_ID);
-    const R = document.getElementById(FX_R_ID);
-    if (!L || !R) return;
-
-    const op = isNightNow() ? SPOT.opacityNight : SPOT.opacityDay;
-
-    // 位置をアンカーへ
-    fx.style.left = "0px";
-    fx.style.top = "0px";
-
-    // beams 共通スタイル（毎回合わせ直してズレ根絶）
-    const common = (el) => {
-      el.style.position = "absolute";
-      el.style.left = `${Math.round(a.x)}px`;
-      el.style.top = `${Math.round(a.y)}px`;
-      el.style.width = `${SPOT.width}px`;
-      el.style.height = `${SPOT.height}px`;
-      el.style.transformOrigin = "50% 0%";
-      el.style.pointerEvents = "none";
-      el.style.opacity = String(op);
-      el.style.filter = `blur(${SPOT.blurPx}px) saturate(1.35)`;
-      el.style.mixBlendMode = "screen";
-      el.style.borderRadius = "18px";
-      el.style.clipPath = "polygon(50% 0%, 0% 100%, 100% 100%)";
-      // 虹（横グラデ）＋うっすら中心強調
-      el.style.background =
-        "linear-gradient(90deg," +
-        "rgba(255,0,80,.92) 0%," +
-        "rgba(255,140,0,.92) 14%," +
-        "rgba(255,230,0,.92) 28%," +
-        "rgba(0,255,120,.92) 42%," +
-        "rgba(0,210,255,.92) 56%," +
-        "rgba(0,120,255,.92) 70%," +
-        "rgba(170,70,255,.92) 84%," +
-        "rgba(255,0,180,.92) 100%)";
-      el.style.boxShadow = "0 0 40px rgba(255,255,255,.15) inset";
-    };
-
-    common(L);
-    common(R);
-
-    // 左右の “基準角度” はアニメで毎フレ更新する（ここでは初期だけ）
-    L.style.transform = `translateX(-50%) rotate(${SPOT.baseAngleL}deg)`;
-    R.style.transform = `translateX(-50%) rotate(${SPOT.baseAngleR}deg)`;
-  }
-
-  let __fxRAF = 0;
-  function startFXLoop() {
-    cancelAnimationFrame(__fxRAF);
-
-    const tick = (t) => {
-      __fxRAF = requestAnimationFrame(tick);
-
-      if (!shouldShowFX()) return;
-
-      const L = document.getElementById(FX_L_ID);
-      const R = document.getElementById(FX_R_ID);
-      if (!L || !R) return;
-
-      // ゆらぎ（左右で位相を変える）
-      const s1 = Math.sin(t * SPOT.swaySpeed);
-      const s2 = Math.sin(t * (SPOT.swaySpeed * 1.12) + 1.7);
-
-      const angL = SPOT.baseAngleL + s1 * SPOT.swayDeg;
-      const angR = SPOT.baseAngleR - s2 * SPOT.swayDeg;
-
-      L.style.transform = `translateX(-50%) rotate(${angL.toFixed(2)}deg)`;
-      R.style.transform = `translateX(-50%) rotate(${angR.toFixed(2)}deg)`;
-
-      // 虹色の変化（hue-rotate）
-      const hue = (t * 0.02) % 360;
-      const f = `blur(${SPOT.blurPx}px) saturate(1.35) hue-rotate(${hue.toFixed(1)}deg)`;
-      L.style.filter = f;
-      R.style.filter = f;
-    };
-
-    __fxRAF = requestAnimationFrame(tick);
   }
 
   /* =========================
@@ -498,11 +355,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   position:absolute;
   inset:0;
   pointer-events:none;
-  z-index:0; /* アイテムより後ろ（=さらに奥） */
+  z-index:0; /* アイテムより奥 */
+  display:none;
 }
-#${FX_ID} > div{
-  pointer-events:none;
-}
+#${FX_ID} > div{ pointer-events:none; }
 
 #${GHOST_ID}{
   position:fixed;
@@ -612,8 +468,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     wrap.style.zIndex = "1";
 
-    // FXはwrapの先頭に（さらに奥）
-    ensureFX();
+    // ✅ ここでFXを「wrap直下」に確実に用意（※ensureFXは ensureWrapを呼ばない！）
+    ensureFX(wrap);
+
     return wrap;
   }
 
@@ -646,6 +503,139 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   function hideGhost() {
     const g = ensureGhost();
     g.style.transform = "translate3d(-9999px,-9999px,0)";
+  }
+
+  /* =========================
+   * 🪩 Mirrorball FX (虹スポットライト)
+   * ========================= */
+
+  function isNightNow() {
+    const h = new Date().getHours();
+    return (h < 6 || h >= 18);
+  }
+
+  function ensureFX(wrap) {
+    ensureStyle();
+    if (!wrap) wrap = document.getElementById(WRAP_ID);
+    if (!wrap) return null;
+
+    let fx = document.getElementById(FX_ID);
+    if (!fx) {
+      fx = document.createElement("div");
+      fx.id = FX_ID;
+      fx.innerHTML = `<div id="${FX_L_ID}"></div><div id="${FX_R_ID}"></div>`;
+      // ✅ いちばん奥にしたいので先頭へ
+      wrap.insertBefore(fx, wrap.firstChild);
+    } else {
+      // ✅ wrapが差し替わった/DOM順が変わっても必ずwrap直下に戻す
+      if (fx.parentElement !== wrap) wrap.insertBefore(fx, wrap.firstChild);
+      else if (wrap.firstChild !== fx) wrap.insertBefore(fx, wrap.firstChild);
+    }
+    return fx;
+  }
+
+  function getMirrorballAnchor() {
+    const s = st[MIRRORBALL_KEY];
+    if (!s || !s.placed) return null;
+
+    const wh = getDisplayWH(MIRRORBALL_KEY);
+    const ax = s.x + wh.w * SPOT.anchorX;
+    const ay = s.y + wh.h * SPOT.anchorY;
+    return { x: ax, y: ay };
+  }
+
+  function shouldShowFX() {
+    if (!(MIRRORBALL_KEY in PLACE_ITEMS)) return false;
+    if (!isOwned(MIRRORBALL_KEY)) return false;
+    if (!isEnabled(MIRRORBALL_KEY)) return false;
+    const s = st[MIRRORBALL_KEY];
+    if (!s || !s.placed) return false;
+    return true;
+  }
+
+  function syncFX() {
+    const wrap = ensureWrap();
+    if (!wrap) return;
+
+    const fx = ensureFX(wrap);
+    if (!fx) return;
+
+    const show = shouldShowFX();
+    fx.style.display = show ? "block" : "none";
+    if (!show) return;
+
+    const a = getMirrorballAnchor();
+    if (!a) return;
+
+    const L = document.getElementById(FX_L_ID);
+    const R = document.getElementById(FX_R_ID);
+    if (!L || !R) return;
+
+    const op = isNightNow() ? SPOT.opacityNight : SPOT.opacityDay;
+
+    const common = (el) => {
+      el.style.position = "absolute";
+      el.style.left = `${Math.round(a.x)}px`;
+      el.style.top  = `${Math.round(a.y)}px`;
+      el.style.width  = `${SPOT.width}px`;
+      el.style.height = `${SPOT.height}px`;
+      el.style.transformOrigin = "50% 0%";
+      el.style.pointerEvents = "none";
+      el.style.opacity = String(op);
+      el.style.mixBlendMode = "screen";
+      el.style.borderRadius = "18px";
+      el.style.clipPath = "polygon(50% 0%, 0% 100%, 100% 100%)";
+      el.style.background =
+        "linear-gradient(90deg," +
+        "rgba(255,0,80,.92) 0%," +
+        "rgba(255,140,0,.92) 14%," +
+        "rgba(255,230,0,.92) 28%," +
+        "rgba(0,255,120,.92) 42%," +
+        "rgba(0,210,255,.92) 56%," +
+        "rgba(0,120,255,.92) 70%," +
+        "rgba(170,70,255,.92) 84%," +
+        "rgba(255,0,180,.92) 100%)";
+      el.style.boxShadow = "0 0 40px rgba(255,255,255,.15) inset";
+      // filter はRAF側で hue-rotate を付ける
+      el.style.filter = `blur(${SPOT.blurPx}px) saturate(1.35)`;
+    };
+
+    common(L);
+    common(R);
+
+    L.style.transform = `translateX(-50%) rotate(${SPOT.baseAngleL}deg)`;
+    R.style.transform = `translateX(-50%) rotate(${SPOT.baseAngleR}deg)`;
+  }
+
+  let __fxRAF = 0;
+  function startFXLoop() {
+    cancelAnimationFrame(__fxRAF);
+
+    const tick = (t) => {
+      __fxRAF = requestAnimationFrame(tick);
+
+      if (!shouldShowFX()) return;
+
+      const L = document.getElementById(FX_L_ID);
+      const R = document.getElementById(FX_R_ID);
+      if (!L || !R) return;
+
+      const s1 = Math.sin(t * SPOT.swaySpeed);
+      const s2 = Math.sin(t * (SPOT.swaySpeed * 1.12) + 1.7);
+
+      const angL = SPOT.baseAngleL + s1 * SPOT.swayDeg;
+      const angR = SPOT.baseAngleR - s2 * SPOT.swayDeg;
+
+      L.style.transform = `translateX(-50%) rotate(${angL.toFixed(2)}deg)`;
+      R.style.transform = `translateX(-50%) rotate(${angR.toFixed(2)}deg)`;
+
+      const hue = (t * 0.02) % 360;
+      const f = `blur(${SPOT.blurPx}px) saturate(1.35) hue-rotate(${hue.toFixed(1)}deg)`;
+      L.style.filter = f;
+      R.style.filter = f;
+    };
+
+    __fxRAF = requestAnimationFrame(tick);
   }
 
   /* =========================
@@ -918,7 +908,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     for (const k of Object.keys(PLACE_ITEMS)) syncOne(k);
 
-    // FXも常に整える
+    // ✅ 常にFXを整える（置いた瞬間に出る）
     syncFX();
   }
 
@@ -942,6 +932,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!editing) return;
     if (isOverUI(e.target)) return;
 
+    // 配置物をクリックした場合は置かない（ドラッグ側）
     const hit = e.target?.closest?.(".itemPlaceObj");
     if (hit && hit.dataset?.ipKey) return;
 
@@ -970,6 +961,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     saveState(st);
     syncOne(selectedKey);
+    syncFX(); // ✅ 置いた瞬間にスポット出す
 
     e.preventDefault();
     e.stopPropagation();
@@ -1022,18 +1014,18 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     snapGroundIfNeeded(drag.key);
 
     syncOne(drag.key);
+    if (drag.key === MIRRORBALL_KEY) syncFX();
   }
 
   function onObjUp() {
     if (!drag.active) return;
+    const key = drag.key;
     drag.active = false;
 
-    snapGroundIfNeeded(drag.key);
-
+    snapGroundIfNeeded(key);
     saveState(st);
 
-    // 🪩 drag後もFX更新
-    if (drag.key === MIRRORBALL_KEY) syncFX();
+    if (key === MIRRORBALL_KEY) syncFX();
   }
 
   function onKey(e) {
@@ -1103,6 +1095,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     try { snapGroundIfNeeded("bed"); } catch {}
 
     setEditing(true);
+    syncAll();
   }
 
   function close() { setEditing(false); }
@@ -1157,7 +1150,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       }
     });
 
-    // レイアウト変化でもFX位置を合わせる
     window.addEventListener("resize", () => syncFX(), { passive: true });
     window.addEventListener("scroll", () => syncFX(), { passive: true });
 
