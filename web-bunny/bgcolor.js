@@ -1,23 +1,50 @@
 // bgcolor.js
 // 朝・昼・夜を「日本時間(JST)」で判定して #bgLayer に直接適用（確実）
 // reset後に背景が黒くなる対策：イベントでも再適用
-// ✅ mirrorball設置(購入済み)の時だけ、背景を虹色にキラキラさせる（オーバーレイ）
+// ✅ mirrorball（購入済み）なら「上中央に設置」＋「虹キラ」ON
 
 (() => {
   const bgLayer = document.getElementById("bgLayer");
   const field = document.getElementById("field");
   if (!bgLayer) return;
 
-  // =========================
-  // Mirrorball sparkle overlay
-  // =========================
-  const SPARKLE = {
-    styleId: "mirrorballSparkleStyleV1",
-    layerId: "mirrorballSparkleLayerV1",
+  /* =========================
+   * Time themes (JST)
+   * ========================= */
+  const MORNING = { start: 5,  end: 10 };
+  const DAY     = { start: 10, end: 17 };
+
+  const THEMES = {
+    morning: "linear-gradient(180deg, #ffe7b8 0%, #ffd6e7 55%, #ffffff 100%)",
+    day:     "linear-gradient(180deg, #bfe9ff 0%, #d9f7ff 55%, #ffffff 100%)",
+    night:   "linear-gradient(180deg, #0b1026 0%, #141b3a 55%, #2b1b44 100%)",
   };
 
+  function getJSTHour() {
+    const parts = new Intl.DateTimeFormat("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      hour: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+    return Number(parts.find(p => p.type === "hour")?.value ?? 0);
+  }
+
+  function getPhaseByHour(h) {
+    if (h >= MORNING.start && h < MORNING.end) return "morning";
+    if (h >= DAY.start && h < DAY.end) return "day";
+    return "night";
+  }
+
+  /* =========================
+   * Mirrorball owned?
+   * ========================= */
   function hasMirrorballOwned() {
-    // shop.js の購入状態（localStorage）を見る
+    // 1) WB.shop があるならそれ優先（将来拡張に強い）
+    try {
+      if (window.WB?.shop?.isOwned?.("mirrorball")) return true;
+    } catch {}
+
+    // 2) shop.js のlocalStorage（今の実装）
     try {
       const raw = localStorage.getItem("milkpop_shop_owned_v1");
       if (!raw) return false;
@@ -27,6 +54,77 @@
       return false;
     }
   }
+
+  /* =========================
+   * Mirrorball image placement
+   * ========================= */
+  const MIRROR = {
+    id: "mirrorballImgV1",
+    styleId: "mirrorballImgStyleV1",
+    src: "./assets/bg/mirrorball.png",
+    top: 8,          // 上からpx
+    size: 140,       // 幅px（好みで調整）
+    z: 5,            // bgLayer内の重なり（sparkleより上にしたいなら調整）
+  };
+
+  function ensureMirrorballStyle() {
+    if (document.getElementById(MIRROR.styleId)) return;
+    const st = document.createElement("style");
+    st.id = MIRROR.styleId;
+    st.textContent = `
+#${MIRROR.id}{
+  position:absolute;
+  left:50%;
+  top:${MIRROR.top}px;
+  transform:translateX(-50%);
+  width:${MIRROR.size}px;
+  height:auto;
+  z-index:${MIRROR.z};
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+}
+`;
+    document.head.appendChild(st);
+  }
+
+  function ensureMirrorball(enabled) {
+    // bgLayerが子要素を置けるように
+    const cs = getComputedStyle(bgLayer);
+    if (cs.position === "static") bgLayer.style.position = "relative";
+
+    ensureMirrorballStyle();
+
+    const old = document.getElementById(MIRROR.id);
+
+    if (!enabled) {
+      try { old?.remove(); } catch {}
+      return;
+    }
+
+    let img = old;
+    if (!img) {
+      img = document.createElement("img");
+      img.id = MIRROR.id;
+      img.alt = "mirrorball";
+      img.src = MIRROR.src;
+      img.addEventListener("error", () => {
+        console.warn("[bgcolor] mirrorball load failed:", MIRROR.src);
+      });
+      bgLayer.appendChild(img);
+    } else {
+      if (img.getAttribute("src") !== MIRROR.src) img.src = MIRROR.src;
+    }
+  }
+
+  /* =========================
+   * Sparkle overlay (rainbow)
+   * ========================= */
+  const SPARKLE = {
+    styleId: "mirrorballSparkleStyleV1",
+    layerId: "mirrorballSparkleLayerV1",
+    z: 4, // ミラーボール画像の下にしたいので MIRROR.z より小さく
+  };
 
   function ensureSparkleStyle() {
     if (document.getElementById(SPARKLE.styleId)) return;
@@ -48,17 +146,15 @@
   50%     { opacity: .42; }
 }
 
-/* オーバーレイ本体（bgLayerの上に重ねる） */
 #${SPARKLE.layerId}{
   position:absolute;
   inset:-12%;
   pointer-events:none;
-  z-index:4; /* 背景より上。ミラーボール画像(z)より下/上は好みで調整 */
+  z-index:${SPARKLE.z};
   mix-blend-mode: screen;
   opacity:0;
   transition: opacity .25s ease;
 
-  /* 虹っぽい層 + キラ粒っぽい層（擬似的） */
   background:
     radial-gradient(circle at 20% 18%, rgba(255,255,255,.45) 0 2px, rgba(255,255,255,0) 3px) 0 0 / 120px 120px,
     radial-gradient(circle at 65% 52%, rgba(255,255,255,.35) 0 1.5px, rgba(255,255,255,0) 3px) 0 0 / 160px 160px,
@@ -86,7 +182,6 @@
   function ensureSparkleLayer() {
     ensureSparkleStyle();
 
-    // bgLayerが absolute 子を持てるように（念のため）
     const cs = getComputedStyle(bgLayer);
     if (cs.position === "static") bgLayer.style.position = "relative";
 
@@ -104,41 +199,14 @@
     layer.style.opacity = enabled ? "1" : "0";
   }
 
-  // =========================
-  // Time-based background
-  // =========================
-
-  // 時間帯（好みで調整OK）
-  const MORNING = { start: 5,  end: 10 }; // 05:00〜09:59
-  const DAY     = { start: 10, end: 17 }; // 10:00〜16:59
-
-  const THEMES = {
-    morning: "linear-gradient(180deg, #ffe7b8 0%, #ffd6e7 55%, #ffffff 100%)",
-    day:     "linear-gradient(180deg, #bfe9ff 0%, #d9f7ff 55%, #ffffff 100%)",
-    night:   "linear-gradient(180deg, #0b1026 0%, #141b3a 55%, #2b1b44 100%)",
-  };
-
-  function getJSTHour() {
-    const parts = new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      hour: "2-digit",
-      hour12: false,
-    }).formatToParts(new Date());
-    return Number(parts.find(p => p.type === "hour")?.value ?? 0);
-  }
-
-  function getPhaseByHour(h) {
-    if (h >= MORNING.start && h < MORNING.end) return "morning";
-    if (h >= DAY.start && h < DAY.end) return "day";
-    return "night";
-  }
-
+  /* =========================
+   * apply
+   * ========================= */
   let last = "";
   function apply(force = false) {
     const h = getJSTHour();
     const phase = getPhaseByHour(h);
 
-    // 背景は朝昼夜で切替
     if (force || phase !== last) {
       last = phase;
 
@@ -148,8 +216,10 @@
       window.WB?.emit?.("bg:changed", { phase, hour: h });
     }
 
-    // ✅ mirrorball設置時だけキラキラON（phaseと独立）
-    setSparkleEnabled(hasMirrorballOwned());
+    // ✅ mirrorballの設置/解除
+    const owned = hasMirrorballOwned();
+    ensureMirrorball(owned);
+    setSparkleEnabled(owned);
   }
 
   // 初回
@@ -158,17 +228,16 @@
   // 1分ごと
   setInterval(() => apply(false), 60 * 1000);
 
-  // ★ reset時に即反映（WBがある場合）
+  /* =========================
+   * WB hook
+   * ========================= */
   const hookWB = () => {
     if (!window.WB?.on) return false;
     window.WB.on("core:reset_partial", () => apply(true));
     window.WB.on("core:ready", () => apply(true));
-
-    // shop.jsが購入直後に emit する想定（入れてあるなら即反映）
-    window.WB.on("bg:mirrorball_changed", () => apply(true));
+    window.WB.on("bg:mirrorball_changed", () => apply(true)); // 購入直後
     return true;
   };
-
   hookWB();
   setTimeout(hookWB, 300);
 })();
