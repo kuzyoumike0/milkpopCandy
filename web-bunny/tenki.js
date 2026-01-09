@@ -1,4 +1,4 @@
-// tenki.js
+// tenki.js（UFOレア飛来つき）
 (() => {
   const FIELD_ID = "tenkiLayer";
   const HUD_ID = "hud";
@@ -17,6 +17,32 @@
   const SUN_BASE_OPACITY = 1.0;
   const SUN_HIDE_OPACITY = 0.25;
   const SUN_FADE_SPEED = 0.06;
+
+  /* =========================
+   * 👽 UFO（レアで左→右に画面外から画面外へ）
+   * ========================= */
+  const UFO_SRC = "./assets/tenki/UFO.png";
+
+  // レア確率：この間隔ごとに判定
+  const UFO_CHECK_MS = 6000;
+
+  // 1回の判定で出る確率（例：0.06=約6%）
+  const UFO_CHANCE = 0.06;
+
+  // 同時に複数出さない
+  let ufoActive = false;
+
+  // ふわふわ設定
+  const UFO_MIN_SIZE = 70;
+  const UFO_MAX_SIZE = 120;
+
+  // 速度（px/s）
+  const UFO_MIN_SPEED = 55;
+  const UFO_MAX_SPEED = 120;
+
+  // ふわふわ振幅（px）
+  const UFO_MIN_BOB = 8;
+  const UFO_MAX_BOB = 18;
 
   const field = document.getElementById(FIELD_ID);
   if (!field) return;
@@ -121,13 +147,108 @@
   }, 7000);
 
   /* =========================
+   * 👽 UFO 生成（左画面外→右画面外）
+   * ========================= */
+  function spawnUFO() {
+    if (ufoActive) return;
+    ufoActive = true;
+
+    const fr = fieldRect();
+    const top = computeTopOffset();
+
+    const ufo = document.createElement("img");
+    ufo.src = UFO_SRC;
+    ufo.draggable = false;
+
+    const size = UFO_MIN_SIZE + Math.random() * (UFO_MAX_SIZE - UFO_MIN_SIZE);
+    const speed = UFO_MIN_SPEED + Math.random() * (UFO_MAX_SPEED - UFO_MIN_SPEED);
+    const bobAmp = UFO_MIN_BOB + Math.random() * (UFO_MAX_BOB - UFO_MIN_BOB);
+    const bobSpeed = 0.9 + Math.random() * 1.3; // 揺れ速度
+
+    // 上寄り（雲の範囲より少し上〜同じくらい）
+    const minY = top + 10;
+    const maxY = Math.max(minY + 20, top + fr.height * 0.30);
+    const baseY = Math.floor(minY + Math.random() * (maxY - minY));
+
+    // 画面外スタート → 画面外ゴール
+    let x = -size - 40;
+    const endX = fr.width + size + 60;
+
+    // z-index：雲のちょい上〜太陽より下/上は好み。ここは雲より上にして目立たせる
+    const z = 5;
+
+    Object.assign(ufo.style, {
+      position: "absolute",
+      left: "0px",
+      top: `${baseY}px`,
+      width: `${size}px`,
+      pointerEvents: "none",
+      zIndex: String(z),
+      opacity: "0.0",
+      transform: `translateX(${x}px) translateY(0px)`,
+      filter: "drop-shadow(0 10px 14px rgba(0,0,0,.18))",
+      willChange: "transform,opacity",
+    });
+
+    field.appendChild(ufo);
+
+    const fadeInDur = 700;
+    const fadeOutDur = 700;
+
+    let startedAt = performance.now();
+    let lastTs = startedAt;
+
+    function step(ts) {
+      const dt = Math.min(0.05, (ts - lastTs) / 1000);
+      lastTs = ts;
+
+      // 横移動
+      x += speed * dt;
+
+      // ふわふわ（sin）
+      const t = (ts - startedAt) / 1000;
+      const bob = Math.sin(t * bobSpeed * Math.PI * 2) * bobAmp;
+
+      // フェード
+      const dist = endX - (-size - 40);
+      const p = clamp01((x - (-size - 40)) / Math.max(1, dist));
+      let op = 1;
+
+      // 入り
+      if (p < 0.12) op = p / 0.12;
+      // 出
+      if (p > 0.88) op = (1 - p) / 0.12;
+
+      ufo.style.opacity = String(clamp01(op));
+      ufo.style.transform = `translateX(${x}px) translateY(${bob}px)`;
+
+      if (x >= endX) {
+        try { ufo.remove(); } catch {}
+        ufoActive = false;
+        return;
+      }
+
+      requestAnimationFrame(step);
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+
+  // レア判定タイマー（開いてる間に時々出る）
+  setInterval(() => {
+    if (ufoActive) return;
+    if (Math.random() < UFO_CHANCE) spawnUFO();
+  }, UFO_CHECK_MS);
+
+  /* =========================
      アニメーション
   ========================= */
   function animate() {
     const fr = fieldRect();
 
-    // 位置がズレないよう、たまに太陽の基準を更新（HUDの高さ変化対策）
-    // ここは軽いので毎フレでもOK
+    // HUDの高さ変化対策：毎フレ更新しても軽い
     layoutSun();
 
     // 雲移動
