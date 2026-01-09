@@ -1,165 +1,183 @@
-// gameMenu.js（パッチ例）
-// ✅ 右上ハンバーガーに「図鑑」「お洒落」などを追加して、既存ボタンの click() や API を呼ぶ
-// ✅ HUDに残すのは「お迎え」「花火」だけ（他はここから起動）
+// gameMenu.js（非module）
+// ✅ 右上にハンバーガーメニュー1個だけ作る
+// ✅ メニュー項目：🎀お洒落 / 📖図鑑 / 🎵BGM
+// ✅ それぞれ：ISYOU.openModal / WB.zukan.open / WB.bgm.openModal を呼ぶ
+// ✅ 他スクリプトより先に読み込まれてもOK（呼び出しはクリック時）
+// ✅ 外側クリックで閉じる
 
 (() => {
   "use strict";
 
-  const MENU_BTN_ID = "gameMenuBtn";
-  const MENU_PANEL_ID = "gameMenuPanel";
+  const UI = {
+    btn: "gameHamburgerV1",
+    panel: "gameMenuPanelV1",
+    style: "gameMenuStyleV1",
+  };
 
   const $ = (q, p = document) => p.querySelector(q);
 
-  function ensureStyleOnce() {
-    if (document.getElementById("gameMenuStyleV1")) return;
+  function ensureStyle() {
+    if (document.getElementById(UI.style)) return;
     const s = document.createElement("style");
-    s.id = "gameMenuStyleV1";
+    s.id = UI.style;
     s.textContent = `
-#${MENU_BTN_ID}{
-  position: fixed; right: 10px; top: 10px;
-  z-index: 2147483005;
-  width: 44px; height: 44px;
-  border: none; border-radius: 14px;
-  background: rgba(255,255,255,.95);
-  box-shadow: 0 12px 32px rgba(0,0,0,.18);
-  cursor: pointer;
+#${UI.btn}{
+  position:fixed; top:10px; right:10px;
+  z-index:2147483100;
+  width:44px; height:44px;
+  border:none; border-radius:14px;
+  background:rgba(255,255,255,.95);
+  box-shadow:0 12px 32px rgba(0,0,0,.18);
+  cursor:pointer;
   display:flex; align-items:center; justify-content:center;
 }
-#${MENU_BTN_ID} .bars{ width:18px;height:14px; position:relative; }
-#${MENU_BTN_ID} .bars i{
-  position:absolute; left:0; right:0; height:2px; border-radius:2px; background:#333;
+#${UI.btn} .bars{ width:18px; height:14px; position:relative; }
+#${UI.btn} .bars i{
+  position:absolute; left:0; right:0; height:2px;
+  border-radius:2px; background:#333;
 }
-#${MENU_BTN_ID} .bars i:nth-child(1){ top:0; }
-#${MENU_BTN_ID} .bars i:nth-child(2){ top:6px; }
-#${MENU_BTN_ID} .bars i:nth-child(3){ top:12px; }
+#${UI.btn} .bars i:nth-child(1){ top:0; }
+#${UI.btn} .bars i:nth-child(2){ top:6px; }
+#${UI.btn} .bars i:nth-child(3){ top:12px; }
 
-#${MENU_PANEL_ID}{
-  position: fixed; right: 10px; top: 62px;
-  z-index: 2147483006;
-  width: min(260px, 92vw);
-  background: rgba(255,255,255,.98);
-  border-radius: 16px;
-  box-shadow: 0 18px 44px rgba(0,0,0,.22);
-  padding: 10px;
+#${UI.panel}{
+  position:fixed; top:62px; right:10px;
+  z-index:2147483101;
+  width:min(260px, 92vw);
+  background:rgba(255,255,255,.98);
+  border-radius:16px;
+  box-shadow:0 18px 44px rgba(0,0,0,.22);
+  padding:10px;
   display:none;
 }
-#${MENU_PANEL_ID} .item{
-  width:100%;
-  border:none;
-  border-radius: 14px;
-  padding: 12px 12px;
-  font-weight: 1000;
-  cursor:pointer;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(0,0,0,.08);
-  display:flex; align-items:center; justify-content:space-between;
-  margin: 8px 0;
+#${UI.panel} .ttl{
+  font-weight:1000; letter-spacing:.02em;
+  padding:6px 8px 10px;
 }
-#${MENU_PANEL_ID} .item.primary{ background:#ffd6e7; box-shadow:none; }
-#${MENU_PANEL_ID} .item small{ opacity:.7; font-weight:900; }
+#${UI.panel} .list{
+  display:flex; flex-direction:column; gap:8px;
+}
+#${UI.panel} .item{
+  border:none; border-radius:14px;
+  padding:10px 12px;
+  font-weight:1000;
+  background:rgba(0,0,0,.04);
+  cursor:pointer;
+  text-align:left;
+}
+#${UI.panel} .item:hover{ background:rgba(0,0,0,.06); }
+#${UI.panel} .note{
+  margin-top:8px;
+  font-size:12px;
+  opacity:.75;
+  padding:6px 8px 2px;
+  line-height:1.35;
+}
 `;
     document.head.appendChild(s);
   }
 
-  function hideHudButtonsExceptKeep() {
-    // HUDに残すID（お迎え・花火）
-    const keep = new Set(["omukaeBtn", "hanabiBtn"]);
-    const hudButtons = document.getElementById("hudButtons");
-    if (!hudButtons) return;
-
-    Array.from(hudButtons.querySelectorAll("button")).forEach((b) => {
-      if (!b?.id) return;
-      if (keep.has(b.id)) return;
-      b.style.display = "none";
-    });
-  }
-
-  function togglePanel(panel) {
-    panel.style.display = (panel.style.display === "block") ? "none" : "block";
-  }
-
-  function closePanel(panel) {
-    panel.style.display = "none";
-  }
-
-  function safeClick(id) {
-    const el = document.getElementById(id);
-    if (el) el.click();
-  }
-
   function ensureUI() {
-    ensureStyleOnce();
+    ensureStyle();
 
-    if (!document.getElementById(MENU_BTN_ID)) {
-      const btn = document.createElement("button");
-      btn.id = MENU_BTN_ID;
+    let btn = document.getElementById(UI.btn);
+    let panel = document.getElementById(UI.panel);
+
+    if (!btn) {
+      btn = document.createElement("button");
+      btn.id = UI.btn;
       btn.type = "button";
       btn.innerHTML = `<span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>`;
       btn.title = "メニュー";
       document.body.appendChild(btn);
     }
 
-    if (!document.getElementById(MENU_PANEL_ID)) {
-      const panel = document.createElement("div");
-      panel.id = MENU_PANEL_ID;
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = UI.panel;
+      panel.innerHTML = `
+        <div class="ttl">🐰 Milkpop メニュー</div>
+        <div class="list">
+          <button class="item" type="button" data-act="isyou">🎀 お洒落</button>
+          <button class="item" type="button" data-act="zukan">📖 図鑑</button>
+          <button class="item" type="button" data-act="bgm">🎵 BGM</button>
+        </div>
+        <div class="note">
+          ※ 画面クリックで音が解放されます（BGMは一度クリックが必要）
+        </div>
+      `;
       document.body.appendChild(panel);
     }
 
-    const btn = document.getElementById(MENU_BTN_ID);
-    const panel = document.getElementById(MENU_PANEL_ID);
+    return { btn, panel };
+  }
 
-    // メニュー項目（ここに「図鑑」「お洒落」追加）
-    panel.innerHTML = `
-      <button class="item primary" type="button" data-act="shop">🛍️ ショップ <small>（shop.js）</small></button>
-      <button class="item" type="button" data-act="slot">🎰 スロット</button>
-      <button class="item" type="button" data-act="depart">✈️ 旅立ち</button>
-      <button class="item" type="button" data-act="reset">♻️ リセット</button>
+  function openPanel(panel) {
+    panel.style.display = "block";
+  }
+  function closePanel(panel) {
+    panel.style.display = "none";
+  }
+  function togglePanel(panel) {
+    panel.style.display = (panel.style.display === "block") ? "none" : "block";
+  }
 
-      <button class="item" type="button" data-act="zukan">📖 図鑑</button>
-      <button class="item" type="button" data-act="isyou">🎀 お洒落</button>
-    `;
+  function safeCall(fn, retryMs = 140) {
+    try { fn(); return; } catch {}
+    setTimeout(() => { try { fn(); } catch {} }, retryMs);
+  }
 
-    btn.onclick = () => togglePanel(panel);
+  function handleAction(act) {
+    if (act === "isyou") {
+      safeCall(() => window.ISYOU?.openModal?.());
+      return;
+    }
+    if (act === "zukan") {
+      safeCall(() => window.WB?.zukan?.open?.("bunny"));
+      return;
+    }
+    if (act === "bgm") {
+      // ✅ BGM.js（モーダル版）で openModal を提供
+      safeCall(() => window.WB?.bgm?.openModal?.());
+      // 互換：もし openModal が無い旧版なら mountUI を呼ぶ（ただし“ハンバーガー版”は使わない想定）
+      setTimeout(() => {
+        if (window.WB?.bgm?.openModal) return;
+        try { window.WB?.bgm?.mountUI?.({ position: "top-right", title: "BGM" }); } catch {}
+      }, 0);
+      return;
+    }
+  }
 
-    panel.querySelectorAll("[data-act]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const act = b.getAttribute("data-act");
-        closePanel(panel);
+  function boot() {
+    const { btn, panel } = ensureUI();
 
-        // クリックで音解放（BGM/SE対策）
-        try { window.WB?.unlockAudioOnce?.(); } catch {}
-
-        if (act === "shop")   return safeClick("shopBtn");   // shop.js 側のボタン挙動
-        if (act === "slot")   return safeClick("slotBtn");
-        if (act === "depart") return safeClick("departBtn");
-        if (act === "reset")  return safeClick("resetBtn");
-
-        // ✅ 追加：図鑑（zukan.js）
-        if (act === "zukan") {
-          try { window.WB?.zukan?.open?.("bunny"); return; } catch {}
-          // まだロード前なら遅延で再挑戦
-          setTimeout(() => { try { window.WB?.zukan?.open?.("bunny"); } catch {} }, 120);
-          return;
-        }
-
-        // ✅ 追加：お洒落（isyou.js）
-        if (act === "isyou") {
-          try { window.ISYOU?.openModal?.(); return; } catch {}
-          setTimeout(() => { try { window.ISYOU?.openModal?.(); } catch {} }, 120);
-          return;
-        }
-      });
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      togglePanel(panel);
     });
 
-    // 外側クリックで閉じる
+    panel.addEventListener("click", (e) => {
+      const t = e.target;
+      const b = t?.closest?.("[data-act]");
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closePanel(panel);
+      const act = b.getAttribute("data-act");
+      handleAction(act);
+    });
+
     document.addEventListener("pointerdown", (e) => {
       if (panel.style.display !== "block") return;
       if (panel.contains(e.target) || btn.contains(e.target)) return;
       closePanel(panel);
-    });
-
-    hideHudButtonsExceptKeep();
+    }, { passive: true });
   }
 
-  window.addEventListener("load", ensureUI);
+  if (document.readyState === "loading") {
+    window.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
 })();
