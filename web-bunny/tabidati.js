@@ -1,12 +1,13 @@
-// tabidati.js（v12.8 app.js対応 / FIX: 旅立ち後に hart.png が残らない）
+// tabidati.js（v13.0：旅立ちボタンを「お迎え/スロット」と同じHUD列に自動追加）
 // - 旅立ちモードON/OFF
 // - 旅立ち時：コスト支払い / SE / 記録 / メッセージ / うさぎ削除
 // - 旅立ちモード中：うさぎホバーで赤縁取り
 // - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（はみ出し防止）
 // - 「長い空白メッセージ」対策：専用トーストCSSで表示
 // ✅ SYOUGOU.add("tabidachi") を直接呼ぶ（あれば）
-// ✅ FIX: app.js が field 直下に生成する .wbChargeHart（hart.png）を残さない
-// ✅ 正攻法：WB.removeBunnyInstance(bunny) を優先して使う（wrap/hart/配列/保存/emitを一括整理）
+// ✅ FIX: 旅立ち後に hart.png が残らない（bunny.hideHeart/hartEl/removeBunnyInstance）
+// ✅ 旅立ちボタンは HUD(#hudButtons) に自動で置く（無ければ #hud 末尾）
+// ✅ 既存の WB.departBtn があっても壊さない（あればそれも反応）
 
 (() => {
   if (!window.WB) return;
@@ -17,6 +18,8 @@
 
   let departMode = false;
   let clampTimer = null;
+
+  const BTN_ID = "departBtnV1"; // ← HUDに置くボタンID
 
   /* =========================
    * Helpers（WB互換）
@@ -96,6 +99,16 @@ body.departModeOn .bunnyWrap:hover{
   transform: translateY(-18px) scale(0.98);
   opacity: 0;
 }
+
+/* ✅ HUDボタン見た目（他ボタンと揃える・ON状態） */
+#${BTN_ID}{
+  position: relative;
+}
+#${BTN_ID}.on{
+  outline: 3px solid rgba(255,64,64,.55);
+  outline-offset: 2px;
+  box-shadow: 0 10px 26px rgba(255,64,64,.18);
+}
 `;
     document.head.appendChild(s);
   }
@@ -108,9 +121,45 @@ body.departModeOn .bunnyWrap:hover{
     el.className = "tabidatiToast";
     el.textContent = text;
     document.body.appendChild(el);
-    setTimeout(() => {
-      try { el.remove(); } catch {}
-    }, 1800);
+    setTimeout(() => { try { el.remove(); } catch {} }, 1800);
+  }
+
+  /* =========================
+   * HUD Button（お迎えと同じように置く）
+   * ========================= */
+  function ensureDepartBtn() {
+    ensureToastStyles();
+
+    // すでにあるならそれを使う
+    let btn = document.getElementById(BTN_ID);
+    if (btn) return btn;
+
+    btn = document.createElement("button");
+    btn.id = BTN_ID;
+    btn.type = "button";
+    btn.textContent = "旅立ち";
+
+    // 置き場所：#hudButtons が最優先
+    const hudButtons = document.getElementById("hudButtons");
+    const hud = document.getElementById("hud") || document.body;
+
+    if (hudButtons) hudButtons.appendChild(btn);
+    else hud.appendChild(btn);
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { WB.unlockAudioOnce?.(); } catch {}
+      toggleDepartMode();
+    });
+
+    return btn;
+  }
+
+  function updateBtnUI() {
+    // WB.departBtn（既存）と新ボタンの両方を同期
+    try { WB.departBtn?.classList.toggle("on", departMode); } catch {}
+    try { document.getElementById(BTN_ID)?.classList.toggle("on", departMode); } catch {}
   }
 
   /* =========================
@@ -119,7 +168,7 @@ body.departModeOn .bunnyWrap:hover{
   function setDepartMode(on) {
     departMode = !!on;
 
-    try { WB.departBtn?.classList.toggle("on", departMode); } catch {}
+    updateBtnUI();
     try { document.body.classList.toggle("departModeOn", departMode); } catch {}
 
     if (departMode) startClamp();
@@ -129,7 +178,6 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   function toggleDepartMode() {
-    WB.unlockAudioOnce?.();
     setDepartMode(!departMode);
   }
 
@@ -222,6 +270,7 @@ body.departModeOn .bunnyWrap:hover{
     // ✅ 旅立ちアニメ中に hart が残らないよう、先に消す
     try { bunny.hideHeart?.(); } catch {}
     try { bunny.hartEl?.remove?.(); } catch {}
+    try { bunny.wrap?.querySelector?.(".wbChargeHart")?.remove?.(); } catch {}
 
     // アニメ
     const w = bunny.wrap;
@@ -235,11 +284,7 @@ body.departModeOn .bunnyWrap:hover{
     // ✅ 正攻法：WB.removeBunnyInstance を優先（wrap/hart/配列/保存/emitまで）
     let removed = false;
     if (typeof WB.removeBunnyInstance === "function") {
-      try {
-        removed = !!WB.removeBunnyInstance(bunny);
-      } catch {
-        removed = false;
-      }
+      try { removed = !!WB.removeBunnyInstance(bunny); } catch { removed = false; }
     }
 
     // フォールバック（旧環境）
@@ -275,7 +320,7 @@ body.departModeOn .bunnyWrap:hover{
 
     e.preventDefault();
     e.stopPropagation();
-    e.stopImmediatePropagation();
+    e.stopImmediatePropagation?.();
 
     const list = getBunnyList();
     const bunny = list.find((b) => b && b.wrap === wrap);
@@ -287,7 +332,12 @@ body.departModeOn .bunnyWrap:hover{
   /* =========================
    * Bind
    * ========================= */
-  if (WB.departBtn) {
+  // ✅ ボタンをHUDに作る（お迎えと同じ列）
+  ensureDepartBtn();
+
+  // 既存の WB.departBtn がある環境でも動かす（互換）
+  if (WB.departBtn && !WB.departBtn.__tabidatiBound) {
+    WB.departBtn.__tabidatiBound = true;
     WB.departBtn.addEventListener("click", (e) => {
       e.preventDefault();
       toggleDepartMode();
@@ -304,5 +354,6 @@ body.departModeOn .bunnyWrap:hover{
     toggleDepartMode,
     departBunny,
     get departMode() { return departMode; },
+    btnId: BTN_ID,
   };
 })();
