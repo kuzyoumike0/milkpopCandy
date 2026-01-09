@@ -20,30 +20,162 @@
           script-src 'self' 'unsafe-inline';
           font-src 'self' data:;
         ">
+
+  <!-- ✅ ハンバーガーメニュー用の最小CSS（style.cssに移してもOK） -->
+  <style>
+    /* HUDのレイアウト（右上ハンバーガー） */
+    #hud{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    /* 左側（コイン＋通常ボタン置き場） */
+    #hudLeft{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      min-width:0;
+      flex:1;
+    }
+
+    /* ここに「お迎え」と「花火（hanabi.jsが追加）」だけ残す */
+    #hudButtons{
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex-wrap:wrap;
+      min-width:0;
+    }
+
+    /* 右側（タイトル＋ハンバーガー） */
+    #hudRight{
+      margin-left:auto;
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    #menuBtn{
+      width:42px;
+      height:38px;
+      border:0;
+      border-radius:12px;
+      cursor:pointer;
+      background:rgba(255,255,255,.65);
+      box-shadow:0 8px 20px rgba(0,0,0,.08);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      user-select:none;
+    }
+
+    /* 三本線 */
+    #menuBtn .bars{
+      width:18px; height:14px; position:relative;
+    }
+    #menuBtn .bars::before,
+    #menuBtn .bars::after,
+    #menuBtn .bars span{
+      content:"";
+      position:absolute; left:0; right:0;
+      height:2px; border-radius:2px;
+      background:#333;
+      opacity:.9;
+    }
+    #menuBtn .bars::before{ top:0; }
+    #menuBtn .bars span{ top:6px; }
+    #menuBtn .bars::after{ bottom:0; }
+
+    /* メニュー（右上からドロップ） */
+    #menuBackdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,.25);
+      z-index:2147483000;
+      display:none;
+    }
+
+    #menuPanel{
+      position:fixed;
+      top:56px;
+      right:12px;
+      width:min(240px, 72vw);
+      background:rgba(255,255,255,.98);
+      border-radius:16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.22);
+      z-index:2147483001;
+      padding:10px;
+      display:none;
+    }
+
+    #menuPanel .menuTitle{
+      font-weight:900;
+      font-size:13px;
+      opacity:.85;
+      padding:6px 8px 8px;
+    }
+
+    #menuPanel .menuGrid{
+      display:grid;
+      grid-template-columns: 1fr;
+      gap:8px;
+    }
+
+    #menuPanel button{
+      width:100%;
+      border:0;
+      border-radius:12px;
+      padding:10px 10px;
+      font-weight:900;
+      cursor:pointer;
+      background:#ffd6e7;
+    }
+
+    #menuPanel button.secondary{
+      background:rgba(0,0,0,.06);
+    }
+  </style>
 </head>
 
 <body>
 
   <!-- ===== HUD ===== -->
   <header id="hud">
-    <div id="coin">🪙 <span id="coinValue">0</span></div>
+    <div id="hudLeft">
+      <div id="coin">🪙 <span id="coinValue">0</span></div>
 
-    <div id="hudButtons">
-      <!-- ✅ omukae と shop は別ボタン -->
-      <button id="omukaeBtn" type="button">お迎え</button>
-      <button id="shopBtn" type="button">ショップ</button>
-
-      <button id="slotBtn" type="button">スロット</button>
-      <button id="departBtn" type="button">旅立ち</button>
-      <button id="resetBtn" type="button">リセット</button>
+      <!-- ✅ ここには「お迎え」と「花火」だけ置く -->
+      <div id="hudButtons">
+        <button id="omukaeBtn" type="button">お迎え</button>
+        <!-- hanabi.js が #hanabiBtn をここに追加する想定 -->
+      </div>
     </div>
 
-    <div id="title" aria-label="current-title"></div>
+    <div id="hudRight">
+      <div id="title" aria-label="current-title"></div>
+
+      <!-- ✅ 右上ハンバーガー -->
+      <button id="menuBtn" type="button" aria-label="menu" aria-expanded="false">
+        <div class="bars"><span></span></div>
+      </button>
+    </div>
   </header>
+
+  <!-- ✅ メニュー（ここに “全部のボタン” を入れる：お迎え/花火以外） -->
+  <div id="menuBackdrop"></div>
+  <nav id="menuPanel" aria-label="menu">
+    <div class="menuTitle">メニュー</div>
+    <div class="menuGrid" id="menuButtons">
+      <button id="shopBtn" type="button">ショップ</button>
+      <button id="slotBtn" type="button">スロット</button>
+      <button id="departBtn" type="button">旅立ち</button>
+      <button id="resetBtn" type="button" class="secondary">リセット</button>
+    </div>
+  </nav>
 
   <!-- ===== メインフィールド ===== -->
   <main id="field">
-    <!-- ✅ bgLayer は「背景専用」：ここにミラーボール/スポット/背景系が乗る -->
     <div id="bgLayer"></div>
 
     <div id="tenkiLayer"></div>
@@ -51,26 +183,25 @@
     <div id="coinLayer"></div>
   </main>
 
-  <!-- ✅ WBを先に用意（WB not found を根絶） -->
+  <!-- ✅ WBを先に用意 -->
   <script src="./wb_boot.js?v=20260109_2"></script>
 
   <!-- ===== コア（WBを作る） ===== -->
   <script src="./app.js?v=20260109_2"></script>
 
-  <!-- ✅ 背景（朝昼夜 + ミラーボール/スポット）※WBが出来た後の方が安定 -->
+  <!-- 背景 -->
   <script src="./bgcolor.js?v=20260109_2"></script>
 
   <!-- 天気 -->
   <script src="./tenki.js?v=20260109_2"></script>
 
-  <!-- 花火 -->
+  <!-- 花火（#hanabiBtn は hudButtons に出る想定） -->
   <script src="./hanabi.js?v=20260109_2"></script>
 
-  <!-- ✅ BGM：必ず app.js の後 -->
+  <!-- BGM -->
   <script src="./BGM.js?v=20260109_2"></script>
 
-  <!-- ✅ 背景ショップ（ミラーボール/ベッド購入＋設置ON/OFF） -->
-  <!-- ★重要：v を最新に揃える（古いままだと「直ってない」現象になる） -->
+  <!-- ショップ（#shopBtnはメニュー内でもIDが同じなのでそのまま動く） -->
   <script src="./shop.js?v=20260109_2"></script>
 
   <!-- ===== 拡張（WB依存） ===== -->
@@ -78,13 +209,58 @@
   <script src="./zisseki.js?v=20260109_2"></script>
   <script src="./syougou.js?v=20260109_2"></script>
 
-  <!-- ✅ お迎え（omukaeBtnで開く） -->
+  <!-- ✅ omukae は #omukaeBtn で開く実装にしてね -->
   <script src="./omukae.js?v=20260109_2"></script>
 
   <script src="./zukan.js?v=20260109_2"></script>
   <script src="./farewell_messages.js?v=20260109_2"></script>
   <script src="./tabidati.js?v=20260109_2"></script>
   <script src="./slot.js?v=20260109_2"></script>
+
+  <!-- ✅ ハンバーガーメニュー動作 -->
+  <script>
+    (() => {
+      const btn = document.getElementById("menuBtn");
+      const bd  = document.getElementById("menuBackdrop");
+      const panel = document.getElementById("menuPanel");
+      if (!btn || !bd || !panel) return;
+
+      function openMenu(){
+        bd.style.display = "block";
+        panel.style.display = "block";
+        btn.setAttribute("aria-expanded", "true");
+      }
+      function closeMenu(){
+        bd.style.display = "none";
+        panel.style.display = "none";
+        btn.setAttribute("aria-expanded", "false");
+      }
+      function isOpen(){
+        return panel.style.display === "block";
+      }
+
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isOpen()) closeMenu(); else openMenu();
+      });
+
+      bd.addEventListener("click", closeMenu);
+
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") closeMenu();
+      });
+
+      // ✅ メニュー内ボタンを押したらメニュー閉じる（任意）
+      const menuButtons = document.getElementById("menuButtons");
+      if (menuButtons) {
+        menuButtons.addEventListener("click", (e) => {
+          const t = e.target;
+          if (t && t.tagName === "BUTTON") closeMenu();
+        });
+      }
+    })();
+  </script>
 
   <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
   <script>
