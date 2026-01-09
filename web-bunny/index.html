@@ -29,16 +29,9 @@
     <div id="coin">🪙 <span id="coinValue">0</span></div>
 
     <div id="hudButtons">
-      <!-- ✅ HUDに残すのは「お迎え」「花火」だけ（他は gameMenu.js が非表示） -->
+      <!-- ✅ HUDに残すのは「お迎え」「花火」だけ -->
       <button id="omukaeBtn" type="button">お迎え</button>
-      <!-- hanabi.js が自動生成する場合もあるけど、固定で置いてOK（重複生成しないなら） -->
       <button id="hanabiBtn" type="button">🎆 花火</button>
-
-      <!-- ✅ 既存ボタンは残してOK（表示は gameMenu.js が消す / メニューから click() で呼ぶ） -->
-      <button id="shopBtn" type="button">ショップ</button>
-      <button id="slotBtn" type="button">スロット</button>
-      <button id="departBtn" type="button">旅立ち</button>
-      <button id="resetBtn" type="button">リセット</button>
     </div>
 
     <div id="title" aria-label="current-title"></div>
@@ -69,27 +62,31 @@
   <!-- ===== コア（WBを作る） ===== -->
   <script src="./app.js?v=20260109_3"></script>
 
-  <!-- ✅ BGM（モーダル版） -->
+  <!-- ✅ BGM（モーダル版：WB.bgm.openModal() 提供） -->
   <script src="./BGM.js?v=20260109_3"></script>
-
-  <!-- ✅ 右上ハンバーガーメニュー（お迎え/花火以外をここに集約） -->
-  <script src="./gameMenu.js?v=20260109_1"></script>
 
   <!-- ✅ ショップ（ミラーボール購入＋設置ON/OFF） -->
   <script src="./shop.js?v=20260109_3"></script>
 
   <!-- ===== 拡張（WB依存） ===== -->
-  <script src="./isyou.js?v=20260109_3"></script>
   <script src="./zisseki.js?v=20260109_3"></script>
   <script src="./syougou.js?v=20260109_3"></script>
 
-  <!-- ✅ omukae は「お迎えボタン」で開く（omukae.js側対応） -->
+  <!-- ✅ omukae は「お迎えボタン」で開く -->
   <script src="./omukae.js?v=20260109_3"></script>
 
+  <!-- お洒落（※HUDボタンは出さず ISYOU.openModal() だけ使う想定） -->
+  <script src="./isyou.js?v=20260109_3"></script>
+
+  <!-- 図鑑（※HUDボタンは出さず WB.zukan.open() だけ使う想定） -->
   <script src="./zukan.js?v=20260109_3"></script>
+
   <script src="./farewell_messages.js?v=20260109_3"></script>
   <script src="./tabidati.js?v=20260109_3"></script>
   <script src="./slot.js?v=20260109_3"></script>
+
+  <!-- ✅ 右上ハンバーガーメニュー（最後に読み込む：起動先APIが揃ってから） -->
+  <script src="./gameMenu.js?v=20260109_3"></script>
 
   <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
   <script>
