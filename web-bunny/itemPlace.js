@@ -1,6 +1,6 @@
-// itemPlace.js（V8：bed/oak は “うさぎと同じくらい” スケール + 🛏 bed 地面吸着）
+// itemPlace.js（V9：bed/oak は “うさぎと同じくらい” スケール + 🛏 bed 地面吸着 + 🪩 mirrorball 設置ON/OFF + 虹スポット）
 // ✅ アイテム配置は itemPlace のみで行う（shop.js は購入のみ）
-// ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う（mirrorballは除外）
+// ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う（★mirrorball も扱う）
 // ✅ oak.png などアイテムが増えても自動対応：SHOP.items() / WB.shop.items() / fallback の順で吸収
 // ✅ 設置ON/OFFは itemPlace.js が管理（LS: milkpop_itemplace_enabled_v1）
 // ✅ 拡大縮小UIは無し
@@ -13,22 +13,27 @@
 // ✅ うさぎの裏：wrap を #bunnyLayer の直前へ（DOM順）＋低z-index
 // ✅ クリックできない問題根絶：編集中だけ pointer-events:auto
 // ✅ 🛏 bed を地面吸着（bottom基準）：置いた/ドラッグした後に “床” に吸着（y固定）
+// ✅ 🪩 mirrorball：設置時、ミラーボール位置から「幅広の虹スポットライト」2本を左右にゆらす（常時）
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V8", Date.now());
+  console.log("[itemPlace] LOADED V9", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
-  const LS_STATE_KEY   = "milkpop_itemplace_v8";          // { key:{x,y,rot,placed} }
+  const LS_STATE_KEY   = "milkpop_itemplace_v9";          // { key:{x,y,rot,placed} }
   const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // { key:boolean }
 
   const HOST_ID  = "field";
 
-  const WRAP_ID  = "itemPlaceWrapV8";
-  const STYLE_ID = "itemPlaceStyleV8";
-  const PANEL_ID = "itemPlacePanelV8";
-  const GHOST_ID = "itemPlaceGhostV8";
+  const WRAP_ID  = "itemPlaceWrapV9";
+  const STYLE_ID = "itemPlaceStyleV9";
+  const PANEL_ID = "itemPlacePanelV9";
+  const GHOST_ID = "itemPlaceGhostV9";
   const TOAST_ID = "itemPlaceToastV1";
+
+  const FX_ID    = "itemPlaceFXV1";
+  const FX_L_ID  = "ipFxBeamL";
+  const FX_R_ID  = "ipFxBeamR";
 
   // ✅ 基本は少し大きめ（他アイテム用）
   const DISPLAY_SCALE_DEFAULT = 1.18;
@@ -37,10 +42,35 @@
   const ITEM_SCALE_OVERRIDE = {
     bed: 1.00,
     oak: 1.00,
+    // mirrorball は雰囲気優先で少し大きめにしたければ 1.1 とかにしてOK
+    mirrorball: 1.00,
   };
 
   // ✅ 🛏 bed 地面吸着：床からの余白（px）
   const BED_GROUND_MARGIN_PX = 0;
+
+  // ✅ 🪩 虹スポットライト設定
+  const MIRRORBALL_KEY = "mirrorball";
+  const SPOT = {
+    // beams (px) ※広め
+    width: 320,
+    height: 520,
+    // 出力点（ミラーボール画像内の割合）
+    anchorX: 0.50,
+    anchorY: 0.28,
+    // 初期角度（左右）
+    baseAngleL: -18,
+    baseAngleR:  18,
+    // ゆらぎの振れ幅
+    swayDeg: 10,
+    // ゆらぎ速度（大きいほど早い）
+    swaySpeed: 0.0016,
+    // 透明度
+    opacityDay: 0.52,
+    opacityNight: 0.72,
+    // blur
+    blurPx: 2.8,
+  };
 
   const $ = (q, p = document) => p.querySelector(q);
   const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
@@ -75,6 +105,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   const FALLBACK_ITEMS = [
     { key: "bed", label: "ベッド", img: "./assets/bg/bed.png", placeable: true },
     { key: "oak", label: "オーク", img: "./assets/bg/oak.png", placeable: true },
+    { key: "mirrorball", label: "ミラーボール", img: "./assets/bg/mirrorball.png", placeable: true },
   ];
 
   function normalizeShopItem(it) {
@@ -102,6 +133,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   function getDefaultForKey(key) {
+    // 初期位置は適当に中央寄り
     return { x: 180, y: 280, rot: 0, placed: false };
   }
 
@@ -124,7 +156,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const out = {};
     for (const it of items) {
       if (!it.placeable) continue;
-      if (it.key === "mirrorball") continue;
       if (!it.src) continue;
 
       out[it.key] = {
@@ -136,7 +167,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         displayScale:
           it.displayScaleFromShop ??
           (Number.isFinite(+ITEM_SCALE_OVERRIDE[it.key]) ? +ITEM_SCALE_OVERRIDE[it.key] : DISPLAY_SCALE_DEFAULT),
-        // ✅ 地面吸着したいか（今は bed のみ）
         groundSnap: (it.key === "bed"),
       };
     }
@@ -202,6 +232,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       saveState(st);
       removeObj(key);
     }
+
+    // 🪩 mirrorball のFXも即反映
+    syncFX();
 
     try { window.WB?.emit?.("itemplace:enabled_changed", { key, enabled: !!en[key] }); } catch {}
   }
@@ -290,11 +323,140 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!s || !s.placed) return;
 
     const wh = getDisplayWH(key);
-    // ✅ bottom 基準：y を “床（hostの高さ - 物体高さ - margin）” に固定
     s.y = (r.height - wh.h - BED_GROUND_MARGIN_PX);
-
-    // ついでに左右のはみ出しを少しガード（任意）
     s.x = clamp(s.x, -wh.w * 0.2, r.width - wh.w * 0.8);
+  }
+
+  /* =========================
+   * 🪩 Mirrorball FX (虹スポットライト)
+   * ========================= */
+
+  function isNightNow() {
+    const h = new Date().getHours();
+    return (h < 6 || h >= 18);
+  }
+
+  function ensureFX() {
+    ensureStyle();
+    let fx = document.getElementById(FX_ID);
+    if (!fx) {
+      fx = document.createElement("div");
+      fx.id = FX_ID;
+      fx.innerHTML = `<div id="${FX_L_ID}"></div><div id="${FX_R_ID}"></div>`;
+      ensureWrap()?.appendChild(fx);
+    }
+    return fx;
+  }
+
+  function getMirrorballAnchor() {
+    // st座標は hostローカル。FXも wrap 内 absolute なので同座標でOK
+    const s = st[MIRRORBALL_KEY];
+    if (!s || !s.placed) return null;
+
+    const wh = getDisplayWH(MIRRORBALL_KEY);
+    const ax = s.x + wh.w * SPOT.anchorX;
+    const ay = s.y + wh.h * SPOT.anchorY;
+    return { x: ax, y: ay, w: wh.w, h: wh.h };
+  }
+
+  function shouldShowFX() {
+    if (!(MIRRORBALL_KEY in PLACE_ITEMS)) return false;
+    if (!isOwned(MIRRORBALL_KEY)) return false;
+    if (!isEnabled(MIRRORBALL_KEY)) return false;
+    const s = st[MIRRORBALL_KEY];
+    if (!s || !s.placed) return false;
+    return true;
+  }
+
+  function syncFX() {
+    const wrap = ensureWrap();
+    if (!wrap) return;
+
+    const show = shouldShowFX();
+    const fx = ensureFX();
+    fx.style.display = show ? "block" : "none";
+    if (!show) return;
+
+    const a = getMirrorballAnchor();
+    if (!a) return;
+
+    const L = document.getElementById(FX_L_ID);
+    const R = document.getElementById(FX_R_ID);
+    if (!L || !R) return;
+
+    const op = isNightNow() ? SPOT.opacityNight : SPOT.opacityDay;
+
+    // 位置をアンカーへ
+    fx.style.left = "0px";
+    fx.style.top = "0px";
+
+    // beams 共通スタイル（毎回合わせ直してズレ根絶）
+    const common = (el) => {
+      el.style.position = "absolute";
+      el.style.left = `${Math.round(a.x)}px`;
+      el.style.top = `${Math.round(a.y)}px`;
+      el.style.width = `${SPOT.width}px`;
+      el.style.height = `${SPOT.height}px`;
+      el.style.transformOrigin = "50% 0%";
+      el.style.pointerEvents = "none";
+      el.style.opacity = String(op);
+      el.style.filter = `blur(${SPOT.blurPx}px) saturate(1.35)`;
+      el.style.mixBlendMode = "screen";
+      el.style.borderRadius = "18px";
+      el.style.clipPath = "polygon(50% 0%, 0% 100%, 100% 100%)";
+      // 虹（横グラデ）＋うっすら中心強調
+      el.style.background =
+        "linear-gradient(90deg," +
+        "rgba(255,0,80,.92) 0%," +
+        "rgba(255,140,0,.92) 14%," +
+        "rgba(255,230,0,.92) 28%," +
+        "rgba(0,255,120,.92) 42%," +
+        "rgba(0,210,255,.92) 56%," +
+        "rgba(0,120,255,.92) 70%," +
+        "rgba(170,70,255,.92) 84%," +
+        "rgba(255,0,180,.92) 100%)";
+      el.style.boxShadow = "0 0 40px rgba(255,255,255,.15) inset";
+    };
+
+    common(L);
+    common(R);
+
+    // 左右の “基準角度” はアニメで毎フレ更新する（ここでは初期だけ）
+    L.style.transform = `translateX(-50%) rotate(${SPOT.baseAngleL}deg)`;
+    R.style.transform = `translateX(-50%) rotate(${SPOT.baseAngleR}deg)`;
+  }
+
+  let __fxRAF = 0;
+  function startFXLoop() {
+    cancelAnimationFrame(__fxRAF);
+
+    const tick = (t) => {
+      __fxRAF = requestAnimationFrame(tick);
+
+      if (!shouldShowFX()) return;
+
+      const L = document.getElementById(FX_L_ID);
+      const R = document.getElementById(FX_R_ID);
+      if (!L || !R) return;
+
+      // ゆらぎ（左右で位相を変える）
+      const s1 = Math.sin(t * SPOT.swaySpeed);
+      const s2 = Math.sin(t * (SPOT.swaySpeed * 1.12) + 1.7);
+
+      const angL = SPOT.baseAngleL + s1 * SPOT.swayDeg;
+      const angR = SPOT.baseAngleR - s2 * SPOT.swayDeg;
+
+      L.style.transform = `translateX(-50%) rotate(${angL.toFixed(2)}deg)`;
+      R.style.transform = `translateX(-50%) rotate(${angR.toFixed(2)}deg)`;
+
+      // 虹色の変化（hue-rotate）
+      const hue = (t * 0.02) % 360;
+      const f = `blur(${SPOT.blurPx}px) saturate(1.35) hue-rotate(${hue.toFixed(1)}deg)`;
+      L.style.filter = f;
+      R.style.filter = f;
+    };
+
+    __fxRAF = requestAnimationFrame(tick);
   }
 
   /* =========================
@@ -331,6 +493,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   cursor: grab;
 }
 .itemPlaceObj.selected:active{ cursor: grabbing; }
+
+#${FX_ID}{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:0; /* アイテムより後ろ（=さらに奥） */
+}
+#${FX_ID} > div{
+  pointer-events:none;
+}
 
 #${GHOST_ID}{
   position:fixed;
@@ -439,6 +611,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     }
 
     wrap.style.zIndex = "1";
+
+    // FXはwrapの先頭に（さらに奥）
+    ensureFX();
     return wrap;
   }
 
@@ -505,6 +680,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
   function removeObj(key) {
     try { document.getElementById(`itemPlace_${key}`)?.remove(); } catch {}
+    if (key === MIRRORBALL_KEY) syncFX();
   }
 
   function applyTransform(img, s, key) {
@@ -548,7 +724,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         設置後はドラッグで移動。<br>
         <b>配置物をクリック</b>で選択できます。<br>
         （bed / oak は <b>うさぎと同じくらい</b>）<br>
-        🛏 bed は <b>床に吸着</b>します。
+        🛏 bed は <b>床に吸着</b>します。<br>
+        🪩 mirrorball は <b>虹スポット</b>が出ます。
       </div>
     </div>
 
@@ -577,7 +754,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       if (!selectedKey) return;
       const s = st[selectedKey]; if (!s) return;
       s.rot -= 5;
-      // bedは回転しても床吸着は維持（yだけ固定）
       snapGroundIfNeeded(selectedKey);
       saveState(st); syncOne(selectedKey);
     });
@@ -605,6 +781,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       s.placed = false;
       saveState(st);
       syncOne(selectedKey);
+      syncFX();
     });
 
     byId("ipDone").addEventListener("click", () => setEditing(false));
@@ -714,7 +891,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       return;
     }
 
-    // ✅ bed は常に床吸着（描画前に確定）
     snapGroundIfNeeded(key);
 
     const img = ensureObj(key);
@@ -724,6 +900,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     const isSel = editing && key === selectedKey;
     img.classList.toggle("selected", isSel);
+
+    // 🪩 mirrorball: 描画が変わったらFXも再同期
+    if (key === MIRRORBALL_KEY) syncFX();
   }
 
   function syncAll() {
@@ -738,6 +917,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     });
 
     for (const k of Object.keys(PLACE_ITEMS)) syncOne(k);
+
+    // FXも常に整える
+    syncFX();
   }
 
   function isOverUI(target) {
@@ -784,7 +966,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     s.x = localX - wh.w / 2;
     s.y = localY - wh.h / 2;
 
-    // ✅ bed は “置いた瞬間” に床へ吸着
     snapGroundIfNeeded(selectedKey);
 
     saveState(st);
@@ -838,7 +1019,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     s.x = drag.baseX + dx;
     s.y = drag.baseY + dy;
 
-    // ✅ bed はドラッグしても床に吸着し続ける（y固定、xだけ動く感じ）
     snapGroundIfNeeded(drag.key);
 
     syncOne(drag.key);
@@ -848,10 +1028,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!drag.active) return;
     drag.active = false;
 
-    // ✅ bed は離した瞬間も床へ確定
     snapGroundIfNeeded(drag.key);
 
     saveState(st);
+
+    // 🪩 drag後もFX更新
+    if (drag.key === MIRRORBALL_KEY) syncFX();
   }
 
   function onKey(e) {
@@ -892,9 +1074,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
       window.removeEventListener("keydown", onKey);
 
-      // ✅ 閉じる時に bed を床へ確定
       try { snapGroundIfNeeded("bed"); } catch {}
-
       saveState(st);
     }
 
@@ -920,7 +1100,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     st = loadState();
 
-    // ✅ 開いた瞬間も bed は床へ
     try { snapGroundIfNeeded("bed"); } catch {}
 
     setEditing(true);
@@ -942,10 +1121,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     saveState(st);
     saveEnabled(loadEnabled());
 
-    // ✅ 初期も床吸着
     try { snapGroundIfNeeded("bed"); } catch {}
 
     syncAll();
+    startFXLoop();
 
     const reSync = async () => {
       refreshItems();
@@ -978,6 +1157,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       }
     });
 
+    // レイアウト変化でもFX位置を合わせる
+    window.addEventListener("resize", () => syncFX(), { passive: true });
+    window.addEventListener("scroll", () => syncFX(), { passive: true });
+
     window.ITEMPLACE = {
       openModal,
       open: openModal,
@@ -991,6 +1174,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       _scaleDefault: DISPLAY_SCALE_DEFAULT,
       _scaleOverride: { ...ITEM_SCALE_OVERRIDE },
       _bedGroundMargin: BED_GROUND_MARGIN_PX,
+      _fx: { SPOT: { ...SPOT } },
     };
 
     try {
