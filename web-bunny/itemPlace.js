@@ -1,6 +1,7 @@
-// itemPlace.js（V5：実寸固定版）
-// ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う
-// ✅ ミラーボール(mirrorball)は配置しない（候補にも出さない）
+// itemPlace.js（V6：実寸固定＋自動アイテム追従版）
+// ✅ アイテム配置は itemPlace のみで行う（shop.js は購入のみ）
+// ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う（mirrorballは除外）
+// ✅ oak.png などアイテムが増えても自動対応：SHOP.items() / WB.shop.items() / 既定一覧の順で吸収
 // ✅ 設置ON/OFFは itemPlace.js が管理（LS: milkpop_itemplace_enabled_v1）
 // ✅ 実寸サイズ：画像の naturalWidth/Height を読んで “常に実寸” で表示（scale完全撤廃）
 // ✅ ゴースト枠も実寸
@@ -10,35 +11,23 @@
 // ✅ アイテム選択も itemPlace で完結（セレクト + 配置物クリックで選択）
 // ✅ うさぎの裏に行く：wrap を #bunnyLayer の直前に差し込む（DOM順）＋ z-index低固定
 // ✅ クリックできない問題根絶：編集中は wrap と obj を pointer-events:auto にする
+// ✅ 増えたアイテムの state/enabled は自動で初期化（破壊的変更なし）
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V5", Date.now());
+  console.log("[itemPlace] LOADED V6", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
-  const LS_STATE_KEY   = "milkpop_itemplace_v5";          // 位置/回転/placed（scaleなし）
-  const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // ON/OFF はここ
+  const LS_STATE_KEY   = "milkpop_itemplace_v6";          // { key:{x,y,rot,placed} }
+  const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // { key:boolean }
 
-  // ✅ クリック座標の基準は field
-  const HOST_ID = "field";
+  const HOST_ID  = "field";
 
-  const WRAP_ID  = "itemPlaceWrapV5";
-  const STYLE_ID = "itemPlaceStyleV5";
-  const PANEL_ID = "itemPlacePanelV5";
-  const GHOST_ID = "itemPlaceGhostV5";
+  const WRAP_ID  = "itemPlaceWrapV6";
+  const STYLE_ID = "itemPlaceStyleV6";
+  const PANEL_ID = "itemPlacePanelV6";
+  const GHOST_ID = "itemPlaceGhostV6";
   const TOAST_ID = "itemPlaceToastV1";
-
-  // ✅ 配置できる実体アイテムだけ（mirrorballは絶対入れない）
-  // 追加したい場合はここに増やす（keyは shop.js の owned と一致）
-  const PLACE_ITEMS = {
-    bed: {
-      key: "bed",
-      label: "ベッド",
-      src: "./assets/bg/bed.png",
-      z: 1,
-      default: { x: 180, y: 280, rot: 0, placed: false },
-    },
-  };
 
   const $ = (q, p = document) => p.querySelector(q);
 
@@ -65,7 +54,109 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     el.__t = setTimeout(() => { el.style.opacity = "0"; }, 1200);
   }
 
-  // ===== Owned =====
+  /* =========================
+   * Items source (増えても追従)
+   * ========================= */
+
+  // ✅ 既定（SHOP.items が無い時の保険）
+  // - shop.js 側で oak を増やしても、理想は SHOP.items() に出る
+  // - もし出ない環境でも、ここに増やせば確実に拾える
+  const FALLBACK_ITEMS = [
+    { key: "bed", label: "ベッド", img: "./assets/bg/bed.png", placeable: true },
+    { key: "oak", label: "オーク", img: "./assets/bg/oak.png", placeable: true },
+    // mirrorball は placeable:false か、そもそも入れない
+  ];
+
+  function normalizeShopItem(it) {
+    const key = String(it?.key || "").trim();
+    if (!key) return null;
+
+    const label = String(it?.label ?? key);
+    const src = String(it?.img ?? it?.src ?? "");
+
+    return {
+      key,
+      label,
+      src,
+      placeable: !!it?.placeable,
+    };
+  }
+
+  // ✅ shop.js が提供する items() を優先的に読む（無ければ WB.shop.items）
+  function readShopItemsMap() {
+    try {
+      const fn = window.SHOP?.items || window.WB?.shop?.items;
+      if (typeof fn === "function") {
+        const obj = fn();
+        if (obj && typeof obj === "object") return obj;
+      }
+    } catch {}
+    return null;
+  }
+
+  function buildPlaceItems() {
+    // 1) shop.js から取得できるならそれを土台にする
+    const map = readShopItemsMap();
+    const items = [];
+
+    if (map) {
+      for (const k of Object.keys(map)) {
+        const n = normalizeShopItem(map[k]);
+        if (n) items.push(n);
+      }
+    } else {
+      // 2) fallback
+      for (const x of FALLBACK_ITEMS) {
+        const n = normalizeShopItem({ key: x.key, label: x.label, img: x.img, placeable: x.placeable });
+        if (n) items.push(n);
+      }
+    }
+
+    // placeable:true だけ + mirrorball除外（安全）
+    const out = {};
+    for (const it of items) {
+      if (!it.placeable) continue;
+      if (it.key === "mirrorball") continue; // 絶対除外
+      if (!it.src) continue;
+
+      // 追加アイテムが増えても OK
+      out[it.key] = {
+        key: it.key,
+        label: it.label,
+        src: it.src,
+        z: 1, // “うさぎの裏”固定（低め）
+        default: { x: 180, y: 280, rot: 0, placed: false },
+      };
+    }
+
+    // 表示順（安定させる：キー昇順）
+    const order = Object.keys(out).sort();
+    return { out, order };
+  }
+
+  // 現在の PLACE_ITEMS / ORDER（動的）
+  let PLACE_ITEMS = {};
+  let PLACE_ORDER = [];
+
+  function refreshItems() {
+    const built = buildPlaceItems();
+    PLACE_ITEMS = built.out;
+    PLACE_ORDER = built.order;
+
+    // 新アイテムが増えたら state/enabled を補完
+    st = loadState();         // loadが補完してくれる
+    saveState(st);
+
+    const en = loadEnabled();
+    saveEnabled(en);
+
+    // サイズもプリロード（あとで）
+  }
+
+  /* =========================
+   * Owned
+   * ========================= */
+
   function loadOwned() { return safeParse(localStorage.getItem(SHOP_OWNED_KEY)) || {}; }
 
   function isOwned(key) {
@@ -73,23 +164,51 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     return !!loadOwned()?.[key];
   }
 
-  // ===== Enabled (ON/OFF) =====
+  /* =========================
+   * Enabled (ON/OFF)
+   * ========================= */
+
   function loadEnabled() {
     const j = safeParse(localStorage.getItem(LS_ENABLED_KEY)) || {};
-    const out = {};
+    const out = { ...j };
+    // 追加されたキーを補完（デフォON）
     for (const k of Object.keys(PLACE_ITEMS)) {
-      out[k] = (typeof j[k] === "boolean") ? j[k] : true; // デフォON
+      if (typeof out[k] !== "boolean") out[k] = true;
+    }
+    // 消えたキーは掃除（任意：残しても害はないが、ここで軽く掃除）
+    for (const k of Object.keys(out)) {
+      if (!(k in PLACE_ITEMS)) delete out[k];
     }
     return out;
   }
+
   function saveEnabled(en) { try { localStorage.setItem(LS_ENABLED_KEY, JSON.stringify(en)); } catch {} }
   function isEnabled(key) { return !!loadEnabled()?.[key]; }
 
-  // ===== State (位置/回転/placed) =====
-  // 旧stateに scale が残っていても無視する（読み込みだけして捨てる）
+  function setEnabled(key, v) {
+    const en = loadEnabled();
+    en[key] = !!v;
+    saveEnabled(en);
+
+    // OFFにしたら即撤去（placedも落とす）
+    if (!en[key]) {
+      st[key] = st[key] || { ...PLACE_ITEMS[key]?.default };
+      if (st[key]) st[key].placed = false;
+      saveState(st);
+      removeObj(key);
+    }
+
+    try { window.WB?.emit?.("itemplace:enabled_changed", { key, enabled: !!en[key] }); } catch {}
+  }
+
+  /* =========================
+   * State
+   * ========================= */
+
   function loadState() {
     const j = safeParse(localStorage.getItem(LS_STATE_KEY)) || {};
     const out = {};
+
     for (const k of Object.keys(PLACE_ITEMS)) {
       const def = PLACE_ITEMS[k].default;
       const cur = j?.[k] || {};
@@ -100,12 +219,18 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         placed: (typeof cur.placed === "boolean") ? cur.placed : !!def.placed,
       };
     }
+
+    // 余計なキーを掃除（任意）
     return out;
   }
+
   function saveState(st0) { try { localStorage.setItem(LS_STATE_KEY, JSON.stringify(st0)); } catch {} }
 
-  // ===== 画像実寸（naturalWidth/Height）=====
-  const imgSize = {}; // { key: { w, h } }
+  /* =========================
+   * Image natural size
+   * ========================= */
+
+  const imgSize = {}; // { key:{w,h} }
 
   function preloadSize(key) {
     const it = PLACE_ITEMS[key];
@@ -131,7 +256,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     for (const k of Object.keys(PLACE_ITEMS)) await preloadSize(k);
   }
 
-  // ===== DOM/Layer =====
+  /* =========================
+   * DOM / Layer
+   * ========================= */
+
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
     const stEl = document.createElement("style");
@@ -246,14 +374,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     return document.getElementById(HOST_ID) || document.body;
   }
 
-  // ✅ wrap を bunnyLayer の直前へ（DOM順で裏）
+  // ✅ wrap を bunnyLayer の直前へ（DOM順で“裏”）
   function ensureWrap() {
     ensureStyle();
 
     const host = getHost();
     if (!host) return null;
 
-    // hostがrelativeじゃないと inset:0 が効かない
     try {
       const cs = getComputedStyle(host);
       if (cs.position === "static") host.style.position = "relative";
@@ -276,7 +403,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         parent.insertBefore(wrap, bunny);
       }
     } else {
-      if (wrap.parentElement !== host || host.firstChild !== wrap) {
+      if (wrap.parentElement !== host) {
         host.insertBefore(wrap, host.firstChild);
       }
     }
@@ -316,7 +443,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     g.style.transform = "translate3d(-9999px,-9999px,0)";
   }
 
-  // ===== Object =====
+  /* =========================
+   * Objects
+   * ========================= */
+
   function ensureObj(key) {
     const it = PLACE_ITEMS[key];
     if (!it) return null;
@@ -353,16 +483,24 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     img.style.transform = `rotate(${s.rot}deg)`; // ✅ 実寸固定（scaleなし）
   }
 
-  // ===== 編集モード =====
-  let editing = false;
-  let selectedKey = "bed";
-  let st = loadState();
+  /* =========================
+   * Editing
+   * ========================= */
 
-  // ドラッグ（一本化）
+  let editing = false;
+  let selectedKey = "";
+  let st = {}; // loadState later
+
   const drag = { active:false, key:"", startX:0, startY:0, baseX:0, baseY:0 };
 
   function ownedKeys() {
-    return Object.keys(PLACE_ITEMS).filter(k => isOwned(k));
+    // 所持している & placeableのものだけ（enabledは選択肢では表示）
+    const o = [];
+    for (const k of PLACE_ORDER) {
+      if (!isOwned(k)) continue;
+      o.push(k);
+    }
+    return o;
   }
 
   function ensurePanel() {
@@ -408,27 +546,35 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const byId = (id) => document.getElementById(id);
 
     byId("ipRotL").addEventListener("click", () => {
+      if (!selectedKey) return;
       const s = st[selectedKey]; if (!s) return;
       s.rot -= 5;
       saveState(st); syncOne(selectedKey);
     });
+
     byId("ipRotR").addEventListener("click", () => {
+      if (!selectedKey) return;
       const s = st[selectedKey]; if (!s) return;
       s.rot += 5;
       saveState(st); syncOne(selectedKey);
     });
+
     byId("ipReset").addEventListener("click", () => {
+      if (!selectedKey) return;
       const def = PLACE_ITEMS[selectedKey]?.default; if (!def) return;
       const keepPlaced = st[selectedKey]?.placed ?? false;
       st[selectedKey] = { ...def, placed: keepPlaced };
       saveState(st); syncOne(selectedKey);
     });
+
     byId("ipRemove").addEventListener("click", () => {
+      if (!selectedKey) return;
       const s = st[selectedKey]; if (!s) return;
       s.placed = false;
       saveState(st);
       syncOne(selectedKey);
     });
+
     byId("ipDone").addEventListener("click", () => setEditing(false));
 
     byId("ipToggle").addEventListener("click", () => {
@@ -548,13 +694,22 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   function syncAll() {
     const wrap = ensureWrap();
     if (wrap) wrap.classList.toggle("ipEditing", !!editing);
+
+    // いま存在しない古いDOMを掃除（念のため）
+    document.querySelectorAll(`[id^="itemPlace_"]`).forEach(el => {
+      const key = el.id.replace(/^itemPlace_/, "");
+      if (!(key in PLACE_ITEMS)) {
+        try { el.remove(); } catch {}
+      }
+    });
+
     for (const k of Object.keys(PLACE_ITEMS)) syncOne(k);
   }
 
   function isOverUI(target) {
     return !!(
       target?.closest?.(
-        `#${PANEL_ID}, #gameMenuPanelV1, #gameHamburgerV1, #isyouModal, #isyouConfirmBar, #bgShopModalV1, #bgShopBackdropV1, #bgShopModalV2, #bgShopBackdropV2`
+        `#${PANEL_ID}, #gameMenuPanelV1, #gameHamburgerV1, #isyouModal, #isyouConfirmBar, #bgShopModalV1, #bgShopBackdropV1, #bgShopModalV2, #bgShopBackdropV2, #bgShopModalV3, #bgShopBackdropV3`
       )
     );
   }
@@ -702,8 +857,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     syncAll();
   }
 
-  // ===== Public =====
+  /* =========================
+   * Public
+   * ========================= */
+
   async function openModal() {
+    // 最新のアイテムを反映（oak追加等）
+    refreshItems();
     await preloadAll();
 
     const owned = ownedKeys();
@@ -721,31 +881,51 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
   function close() { setEditing(false); }
 
-  // ===== boot =====
+  /* =========================
+   * Boot
+   * ========================= */
+
   (async function boot() {
     ensureStyle();
+
+    // 初回：アイテム生成
+    refreshItems();
     await preloadAll();
+
     st = loadState();
+    saveState(st);
+    saveEnabled(loadEnabled());
+
     syncAll();
 
     // shop変更で即反映（購入されたら候補に出る）
+    const reSync = async () => {
+      refreshItems();
+      await preloadAll();
+      st = loadState();
+      syncAll();
+      if (editing) refreshSelect();
+    };
+
     const hookWB = () => {
       if (!window.WB?.on) return false;
       try {
-        window.WB.on("shop:changed", () => { st = loadState(); syncAll(); });
-        window.WB.on("shop:owned_changed", () => { st = loadState(); syncAll(); });
-        window.WB.on("core:ready", () => { st = loadState(); syncAll(); });
+        window.WB.on("shop:changed", reSync);
+        window.WB.on("itemplace:owned_changed", reSync);
+        window.WB.on("core:ready", reSync);
       } catch {}
       return true;
     };
     hookWB();
     setTimeout(hookWB, 300);
 
+    // LS同期
     window.addEventListener("storage", (e) => {
       if (!e) return;
       if (e.key === SHOP_OWNED_KEY || e.key === LS_STATE_KEY || e.key === LS_ENABLED_KEY) {
         st = loadState();
         syncAll();
+        if (editing) refreshSelect();
       }
     });
 
@@ -755,7 +935,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       open: openModal,
       close,
       select: (key) => selectKey(key),
-      _items: PLACE_ITEMS,
+      refresh: reSync,
+      _getItems: () => ({ ...PLACE_ITEMS }),
+      _order: () => PLACE_ORDER.slice(),
       _enabledKey: LS_ENABLED_KEY,
       _stateKey: LS_STATE_KEY,
     };
@@ -767,6 +949,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       window.WB.itemplace.openModal = openModal;
       window.WB.itemplace.close = close;
       window.WB.itemplace.select = (key) => selectKey(key);
+      window.WB.itemplace.refresh = reSync;
     } catch {}
   })();
 })();
