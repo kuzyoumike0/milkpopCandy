@@ -9,12 +9,11 @@
 // ✅ WB差し替え耐性 / unlockAudioOnce 連結
 // ✅ 外部：WB.bgm.openModal() / closeModal() を提供（gameMenu.jsから呼ぶ）
 //
-// ★追加：全SE音量も下げられるようにする（グローバルSEボリューム）
-// - LS: milkpop_se_volume_v1 （0..1）
-// - 既存の playSE / oneShot / coinBurst 等は「WB.getSEVolume()」参照で追従させられる
-// - このBGMモーダル内で SE 音量スライダーを提供
-// - 互換：WB.playSE(a) を上書きして volume を掛けて再生（a.volume を一時変更）
-// - 互換：window.__milkpopSeVolume (0..1) を公開
+// ✅ 追加：SE音量も下げられる（BGM.js準拠）
+// - localStorage: milkpop_se_volume_v1（0..1）
+// - BGMミュートはSEもミュート扱い（同一トグル）
+// - 外部API: WB.setSEVolume(v) / WB.getSEVolume() / window.__milkpopSeVolume
+// - 変更通知: window.dispatchEvent(new CustomEvent("milkpop:seVolume",{detail:{volume}}))
 
 (() => {
   "use strict";
@@ -23,8 +22,8 @@
   const LS_KEY_OWNED    = "milkpop_bgm_owned_v2";
   const LS_KEY_SELECT   = "milkpop_bgm_selected_v2";
 
-  // ★SE音量
-  const LS_KEY_SE_VOL   = "milkpop_se_volume_v1";
+  // ✅ SE 音量
+  const LS_KEY_SE_VOL   = "milkpop_se_volume_v1"; // 0..1
 
   /* =========================
    * Tracks（✅ assets/BGM/ に統一）
@@ -120,24 +119,40 @@
   }
   function saveSelected(sel) { try { localStorage.setItem(LS_KEY_SELECT, JSON.stringify(sel)); } catch {} }
 
-  // ★SE volume
-  function loadSEVol() {
+  // ✅ SE volume
+  function loadSEVolume() {
     try {
       const raw = localStorage.getItem(LS_KEY_SE_VOL);
-      if (!raw) return 0.85; // 初期は少し下げめ
+      if (raw == null) return 0.85;
       const v = Number(raw);
       return clamp(Number.isFinite(v) ? v : 0.85, 0, 1);
-    } catch { return 0.85; }
+    } catch {
+      return 0.85;
+    }
   }
-  function saveSEVol(v) { try { localStorage.setItem(LS_KEY_SE_VOL, String(clamp(v, 0, 1))); } catch {} }
+  function saveSEVolume(v) {
+    try { localStorage.setItem(LS_KEY_SE_VOL, String(clamp(Number(v) || 0, 0, 1))); } catch {}
+  }
 
   let settings = loadSettings();
   let owned = loadOwned();
   let selected = loadSelected();
-  let seVolume = loadSEVol();
+  let seVolume = loadSEVolume();
 
-  // どこからでも参照できるように公開（他JSでoneShot等に掛けられる）
+  // グローバルでも参照できるように（app.js側が拾える）
   window.__milkpopSeVolume = seVolume;
+
+  function setSEVolume(v, silent = false) {
+    seVolume = clamp(Number(v) || 0, 0, 1);
+    saveSEVolume(seVolume);
+    window.__milkpopSeVolume = seVolume;
+    if (!silent) {
+      try {
+        window.dispatchEvent(new CustomEvent("milkpop:seVolume", { detail: { volume: seVolume } }));
+      } catch {}
+    }
+  }
+  function getSEVolume() { return seVolume; }
 
   let unlocked = false;
   let currentKey = null;
@@ -150,7 +165,7 @@
     audio = new Audio();
     audio.loop = true;
     audio.preload = "auto";
-    applyBgmVolume();
+    applyVolume();
 
     audio.addEventListener("error", () => {
       try {
@@ -162,7 +177,7 @@
     return audio;
   }
 
-  function applyBgmVolume() {
+  function applyVolume() {
     ensureAudio();
     audio.volume = settings.muted ? 0 : settings.volume;
   }
@@ -284,7 +299,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       audio.currentTime = 0;
     }
 
-    applyBgmVolume();
+    applyVolume();
     if (!settings.enabled) return false;
     if (!unlocked) return false;
 
@@ -371,35 +386,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   /* =========================
-   * ★SE volume API
-   * ========================= */
-  function setSEVolume(v01) {
-    seVolume = clamp(Number(v01) || 0, 0, 1);
-    saveSEVol(seVolume);
-    window.__milkpopSeVolume = seVolume;
-    try { window.dispatchEvent(new CustomEvent("milkpop:seVolume", { detail: { volume: seVolume } })); } catch {}
-    toast(`🔊 SE音量：${Math.round(seVolume * 100)}%`);
-  }
-
-  function getSEVolume() {
-    return clamp(Number(window.__milkpopSeVolume ?? seVolume) || 0, 0, 1);
-  }
-
-  // 既存Audioの音量を一時的に掛けて再生（WB.playSE互換）
-  function playSEWithGlobalVol(a, base = 1.0) {
-    if (!a) return;
-    try {
-      const vol = clamp((Number(a.volume) || 1) * base * getSEVolume(), 0, 1);
-      const prev = a.volume;
-      a.volume = vol;
-      a.currentTime = 0;
-      a.play().catch(() => {});
-      // 戻す（次の再生に影響しないように）
-      setTimeout(() => { try { a.volume = prev; } catch {} }, 0);
-    } catch {}
-  }
-
-  /* =========================
    * WB patch (swap-safe)
    * ========================= */
   let lastWBRef = null;
@@ -416,21 +402,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       try { prevUnlock?.(); } catch {}
       await unlockBgmOnce();
     };
-
-    // ★既存のWB.playSEをラップして、SE音量を掛ける
-    const prevPlaySE = (typeof WB.playSE === "function") ? WB.playSE : null;
-    WB.playSE = (a) => {
-      try {
-        if (a && a instanceof Audio) return playSEWithGlobalVol(a, 1.0);
-        // Audioじゃない/不明なら元を呼ぶ（保険）
-        return prevPlaySE ? prevPlaySE(a) : undefined;
-      } catch {
-        try { return prevPlaySE ? prevPlaySE(a) : undefined; } catch {}
-      }
-    };
-
-    WB.getSEVolume = getSEVolume;
-    WB.setSEVolume = setSEVolume;
 
     WB.bgm = WB.bgm || {};
 
@@ -450,9 +421,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     WB.bgm.getSelected = () => selected?.selectedKey ?? null;
     WB.bgm.getCoins = () => getCoinsWB();
 
-    // ★SE音量操作もここから
-    WB.bgm.getSEVolume = getSEVolume;
-    WB.bgm.setSEVolume = setSEVolume;
+    // ✅ SE音量API（app.jsが準拠できるように）
+    WB.setSEVolume = (v) => { setSEVolume(v); };
+    WB.getSEVolume = () => getSEVolume();
+    WB.se = WB.se || {};
+    WB.se.setVolume = WB.setSEVolume;
+    WB.se.getVolume = WB.getSEVolume;
 
     // ✅ モーダル操作API
     WB.bgm.openModal = openModal;
@@ -560,6 +534,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   opacity:.75;
   letter-spacing:.03em;
 }
+
+#${UI.modal} .miniLabel{
+  font-size:12px;
+  font-weight:900;
+  opacity:.75;
+  margin-top:6px;
+}
 `;
     document.head.appendChild(style);
   }
@@ -613,17 +594,21 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const toggle = $("#bgmToggleModal", modal);
     const mute = $("#bgmMuteModal", modal);
     const vol = $("#bgmVolModal", modal);
-    const coinTag = $("#bgmCoinTagModal", modal);
     const seVol = $("#bgmSeVolModal", modal);
-    const seText = $("#bgmSeTextModal", modal);
+    const seVolText = $("#bgmSeVolTextModal", modal);
+    const coinTag = $("#bgmCoinTagModal", modal);
 
-    if (!stateText || !info || !selText || !toggle || !mute || !vol || !coinTag || !seVol || !seText) return;
+    if (!stateText || !info || !selText || !toggle || !mute || !vol || !coinTag || !seVol || !seVolText) return;
 
     vol.value = String(Math.round(settings.volume * 100));
     toggle.textContent = settings.enabled ? "ON" : "OFF";
     toggle.style.opacity = settings.enabled ? "1" : "0.6";
     mute.textContent = settings.muted ? "ミュート中" : "ミュート";
     mute.style.opacity = settings.muted ? "0.75" : "1";
+
+    // ✅ SE volume
+    seVol.value = String(Math.round(getSEVolume() * 100));
+    seVolText.textContent = `SE音量：${Math.round(getSEVolume() * 100)}%`;
 
     const c = getCoinsWB();
     coinTag.textContent = `🪙 ${c}`;
@@ -639,10 +624,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
     const playing = audio && !audio.paused && unlocked && settings.enabled && !settings.muted && audio.volume > 0;
     stateText.textContent = playing ? "再生中" : "停止中（クリックで開始）";
-
-    // ★SE UI
-    seVol.value = String(Math.round(getSEVolume() * 100));
-    seText.textContent = `SE音量：${Math.round(getSEVolume() * 100)}%`;
 
     for (const k of Object.keys(PRICES)) {
       const own = isOwned(k);
@@ -685,15 +666,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     <div class="tag" id="bgmCoinTagModal">🪙 0</div>
   </div>
 
-  <div class="fine">BGM音量</div>
+  <div class="miniLabel">BGM音量</div>
   <input class="slider" id="bgmVolModal" type="range" min="0" max="100" step="1" />
 
-  <div class="fine" id="bgmInfoModal"></div>
-
-  <div class="sep"></div>
-
-  <div class="fine" id="bgmSeTextModal">SE音量：${Math.round(getSEVolume() * 100)}%</div>
+  <div class="miniLabel" id="bgmSeVolTextModal">SE音量：--%</div>
   <input class="slider" id="bgmSeVolModal" type="range" min="0" max="100" step="1" />
+
+  <div class="fine" id="bgmInfoModal"></div>
 
   <div class="sep"></div>
 
@@ -738,14 +717,20 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     $("#bgmMuteModal", modal)?.addEventListener("click", () => {
       settings.muted = !settings.muted;
       saveSettings(settings);
-      applyBgmVolume();
+      applyVolume();
+
+      // ✅ ミュート切り替えはSEにも影響（app.js側はBGM設定を見てミュートする想定）
+      try {
+        window.dispatchEvent(new CustomEvent("milkpop:seVolume", { detail: { volume: getSEVolume(), muted: settings.muted } }));
+      } catch {}
+
       refreshUI();
     });
 
     $("#bgmVolModal", modal)?.addEventListener("input", async () => {
       settings.volume = clamp(Number($("#bgmVolModal", modal).value) / 100, 0, 1);
       saveSettings(settings);
-      applyBgmVolume();
+      applyVolume();
       if (settings.enabled) {
         patchWB(window.WB);
         try { await window.WB?.unlockAudioOnce?.(); } catch {}
@@ -754,7 +739,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       refreshUI();
     });
 
-    // ★SE音量スライダー
+    // ✅ SE音量スライダー
     $("#bgmSeVolModal", modal)?.addEventListener("input", () => {
       const v = clamp(Number($("#bgmSeVolModal", modal).value) / 100, 0, 1);
       setSEVolume(v);
@@ -799,6 +784,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       });
     }
 
+    // 定期更新（コイン表示など）
     clearInterval(__uiTimer);
     __uiTimer = setInterval(refreshUI, 500);
     refreshUI();
@@ -851,6 +837,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   (async function boot() {
     ensureAudio();
+
+    // 起動時はSE音量を静かに同期（通知は不要）
+    setSEVolume(loadSEVolume(), true);
+
     startWBWatcher();
     setupAutoplayUnlock();
     startBgm(false);
