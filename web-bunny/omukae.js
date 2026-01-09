@@ -1,107 +1,22 @@
+// omukae.js（うさぎお迎え専用・非module）
+// ✅ #shopBtn（お迎え）専用
+// ✅ 背景ショップ（bgShopBtn）とは完全分離
+// ✅ shop.js の capture / stopImmediatePropagation に影響されない
+// ✅ WB.on("omukae:open") にも対応（他JSから開ける）
+
 (() => {
   if (!window.WB) return;
 
   const WB = window.WB;
 
-  // 価格インフレ
+  /* =========================
+   * 設定
+   * ========================= */
   const PRICE_INFLATION_PER_BUNNY = 0.08; // 1匹ごとに +8%
   const PRICE_ROUND_UNIT = 10;            // 10単位丸め
 
   let shopBackdrop = null;
   let shopModal = null;
-function syAdd(key, n = 1) {
-  try {
-    if (window.SYOUGOU?.add) return window.SYOUGOU.add(key, n);
-  } catch {}
-  // syougou.js がまだ来てない時の保険
-  window.__syougouQueue = window.__syougouQueue || [];
-  window.__syougouQueue.push([key, n]);
-}
-
-  /* =========================
-   * CSS（サムネ化：小さく見やすく）
-   * ========================= */
-  function injectShopThumbCssOnce() {
-    if (document.getElementById("wbShopThumbCss")) return;
-    const st = document.createElement("style");
-    st.id = "wbShopThumbCss";
-    st.textContent = `
-      /* グリッドをカードっぽく */
-      .shopGrid{
-        display:grid;
-        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-        gap:10px;
-      }
-      .shopCard{
-        display:flex;
-        gap:10px;
-        align-items:flex-start;
-        padding:10px;
-        border-radius:12px;
-        background: rgba(255,255,255,.65);
-        border: 1px solid rgba(0,0,0,.08);
-        box-shadow: 0 6px 18px rgba(0,0,0,.06);
-      }
-      .shopCard.disabled{ opacity:.55; filter:saturate(.7); }
-
-      /* ✅ サムネ：小さく固定 */
-      .shopThumb{
-        width:64px;
-        height:64px;
-        object-fit:contain;
-        flex:0 0 64px;
-        border-radius:12px;
-        background: rgba(255,255,255,.7);
-        border:1px solid rgba(0,0,0,.08);
-        padding:6px;
-      }
-
-      /* 右側の情報 */
-      .shopInfo{
-        flex:1;
-        min-width:0;
-        display:flex;
-        flex-direction:column;
-        gap:4px;
-      }
-      .shopName{
-        font-weight:700;
-        font-size:14px;
-        line-height:1.2;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-      .shopDesc{
-        font-size:12px;
-        opacity:.85;
-        line-height:1.35;
-        display:-webkit-box;
-        -webkit-line-clamp:2;      /* 2行で省略 */
-        -webkit-box-orient:vertical;
-        overflow:hidden;
-      }
-      .shopPrice{
-        font-weight:700;
-        margin-top:4px;
-      }
-      .shopPrice.bad{ color:#b00020; }
-
-      .shopCard button{
-        margin-top:6px;
-        align-self:flex-start;
-        padding:6px 10px;
-        border-radius:10px;
-        border:0;
-        cursor:pointer;
-      }
-      .shopCard button:disabled{
-        cursor:not-allowed;
-        opacity:.6;
-      }
-    `;
-    document.head.appendChild(st);
-  }
 
   /* =========================
    * WB互換ヘルパ
@@ -115,7 +30,8 @@ function syAdd(key, n = 1) {
   function getCoins() {
     if (typeof WB.getCoin === "function") return WB.getCoin();
     if (typeof WB.coins === "number") return WB.coins;
-    return 0;
+    const el = document.getElementById("coinValue");
+    return el ? Number(el.textContent || "0") : 0;
   }
 
   function spendCoins(amount) {
@@ -123,13 +39,16 @@ function syAdd(key, n = 1) {
 
     if (typeof WB.coins === "number" && WB.coins >= amount) {
       WB.coins -= amount;
-      if (typeof WB.saveCoins === "function") WB.saveCoins();
-      if (typeof WB.updateHud === "function") WB.updateHud();
+      WB.saveCoins?.();
+      WB.updateHud?.();
       return true;
     }
     return false;
   }
 
+  /* =========================
+   * Bunny定義
+   * ========================= */
   function getDefs() {
     if (Array.isArray(WB.omukaeCatalog) && WB.omukaeCatalog.length) {
       const map = {};
@@ -174,6 +93,9 @@ function syAdd(key, n = 1) {
     return ["bunny1", "bunny3", "bunny4", "bunny5"];
   }
 
+  /* =========================
+   * UI
+   * ========================= */
   function closeShopModal() {
     try { shopBackdrop?.remove(); } catch {}
     shopBackdrop = null;
@@ -190,46 +112,19 @@ function syAdd(key, n = 1) {
     const fx = document.createElement("div");
     fx.className = "adoptFx";
 
-    const box = document.createElement("div");
-    box.className = "adoptBox";
-
-    const lid = document.createElement("div");
-    lid.className = "adoptLid";
-
     const thumb = document.createElement("img");
     thumb.className = "adoptThumb";
     thumb.src = def.img;
-
-    fx.appendChild(box);
-    fx.appendChild(lid);
     fx.appendChild(thumb);
-
-    const sparkCount = 18;
-    for (let i = 0; i < sparkCount; i++) {
-      const s = document.createElement("div");
-      s.className = "adoptSpark";
-      const dx = (Math.random() * 2 - 1) * 130;
-      const dy = (Math.random() * 2 - 1) * 130 - 70;
-      s.style.setProperty("--dx", `${dx}px`);
-      s.style.setProperty("--dy", `${dy}px`);
-      const h = Math.floor(Math.random() * 360);
-      s.style.background = `hsla(${h}, 92%, 72%, .95)`;
-      s.style.boxShadow = `0 0 14px hsla(${h}, 92%, 72%, .65)`;
-      s.style.left = "50%";
-      s.style.top = "55%";
-      s.style.transform = "translate(-50%,-50%)";
-      s.style.animationDelay = `${120 + Math.random() * 220}ms`;
-      fx.appendChild(s);
-    }
 
     overlay.appendChild(fx);
     document.body.appendChild(overlay);
 
     setTimeout(() => {
       try { overlay.remove(); } catch {}
-    }, 900);
+    }, 800);
 
-    return 520;
+    return 500;
   }
 
   function buyBunny(kind) {
@@ -240,7 +135,6 @@ function syAdd(key, n = 1) {
 
     const priceNow = calcDynamicPrice(kind);
     if (getCoins() < priceNow) return false;
-
     if (!spendCoins(priceNow)) return false;
 
     const waitMs = showAdoptEffect(kind);
@@ -252,13 +146,8 @@ function syAdd(key, n = 1) {
           targetAdultSrc: def.adultSrc || def.img,
         });
       } else if (typeof WB.spawnBunny === "function") {
-        try {
-          WB.spawnBunny(kind, Date.now(), { targetAdultSrc: def.adultSrc || def.img });
-        } catch {
-          WB.spawnBunny(kind, Date.now());
-        }
+        WB.spawnBunny(kind, Date.now(), { targetAdultSrc: def.adultSrc || def.img });
       }
-
       refreshShopUI();
     }, waitMs);
 
@@ -266,17 +155,13 @@ function syAdd(key, n = 1) {
   }
 
   function buildShopModal() {
-    injectShopThumbCssOnce(); // ✅ ここでサムネCSS注入
-
     if (!shopBackdrop) {
       shopBackdrop = document.createElement("div");
-      shopBackdrop.id = "shopBackdrop";
       shopBackdrop.className = "modalBackdrop";
       document.body.appendChild(shopBackdrop);
     }
     if (!shopModal) {
       shopModal = document.createElement("div");
-      shopModal.id = "shopModal";
       shopModal.className = "modal";
       shopBackdrop.appendChild(shopModal);
     }
@@ -291,7 +176,7 @@ function syAdd(key, n = 1) {
       const canBuy = getCoins() >= priceNow;
       return `
         <div class="shopCard ${canBuy ? "" : "disabled"}">
-          <img src="${def.img}" class="shopThumb" alt="${def.label}">
+          <img src="${def.img}" class="shopThumb">
           <div class="shopInfo">
             <div class="shopName">${def.label}</div>
             <div class="shopDesc">${def.desc || ""}</div>
@@ -302,41 +187,23 @@ function syAdd(key, n = 1) {
       `;
     }).join("");
 
-    const nowCount = getBunnyCount();
-    const unlocked = WB.zisseki?.isUnlocked?.("unlock_bunny4");
-    const need = WB.zisseki?.UNLOCK_BUNNY4_NEED ?? 10;
-
-    const progText = unlocked
-      ? `✅ 解放済み`
-      : `🔒 解放条件：同時うさぎ数 ${nowCount}/${need}`;
-
     shopModal.innerHTML = `
       <div class="modalHeader">
         <div class="modalTitle">🐰 お迎え</div>
-        <button class="modalClose" id="closeShopBtn" aria-label="close">×</button>
+        <button class="modalClose" id="closeShopBtn">×</button>
       </div>
-
-      <div style="font-size:12px;opacity:.85;margin-bottom:10px;line-height:1.5;">
-        ${progText}<br>
-        お迎えした子は <b>baby</b> で来て、<b>3分</b>で成長します。<br>
-        <span style="opacity:.85;">※現在の匹数に応じて価格が上がります</span>
-      </div>
-
       <div class="shopGrid">${cards}</div>
-
       <div style="margin-top:10px;font-size:12px;opacity:.9;">
-        所持：<b>${getCoins()}🪙</b> / 現在：<b>${nowCount}匹</b>
+        所持：<b>${getCoins()}🪙</b> / 現在：<b>${getBunnyCount()}匹</b>
       </div>
     `;
 
     shopModal.querySelector("#closeShopBtn").onclick = closeShopModal;
     shopBackdrop.onclick = (e) => { if (e.target === shopBackdrop) closeShopModal(); };
 
-    // ★連続購入：閉じない
-    shopModal.querySelectorAll("[data-buy]").forEach((btn) => {
+    shopModal.querySelectorAll("[data-buy]").forEach(btn => {
       btn.onclick = () => {
-        const kind = btn.getAttribute("data-buy");
-        buyBunny(kind);
+        buyBunny(btn.dataset.buy);
         refreshShopUI();
       };
     });
@@ -352,27 +219,37 @@ function syAdd(key, n = 1) {
   }
 
   /* =========================
-   * 起動：omukae:open を優先して受ける
+   * 起動 / バインド
    * ========================= */
-  if (typeof WB.on === "function") {
-    WB.on("omukae:open", () => {
+
+  // 外部から開く（推奨）
+  WB.on?.("omukae:open", () => {
+    WB.unlockAudioOnce?.();
+    openShopModal();
+  });
+
+  // #shopBtn に直接バインド（captureは使わない）
+  function bindShopBtn() {
+    const btn = WB.shopBtn || document.getElementById("shopBtn");
+    if (!btn) return false;
+
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
       WB.unlockAudioOnce?.();
       openShopModal();
     });
+    return true;
   }
 
-  if (WB.shopBtn) {
-    WB.shopBtn.addEventListener("click", () => {
-      WB.unlockAudioOnce?.();
-      openShopModal();
-    });
-  }
+  let tries = 0;
+  const t = setInterval(() => {
+    tries++;
+    if (bindShopBtn() || tries > 80) clearInterval(t);
+  }, 100);
 
-  if (typeof WB.on === "function") {
-    WB.on("achievementUnlocked", () => refreshShopUI());
-    WB.on("bunnyCountChanged", () => refreshShopUI());
-  }
-
+  /* =========================
+   * 公開API
+   * ========================= */
   WB.omukae = {
     openShopModal,
     closeShopModal,
