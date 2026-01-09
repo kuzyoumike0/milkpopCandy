@@ -1,10 +1,28 @@
-// tenki.js（UFOレア飛来 + UFO出現中はSEループ再生）
+// tenki.js（UFO対応版）
+// ✅ 太陽＆雲（HUD下に収める）
+// ✅ レア確率でUFO.pngを左→右に画面外まで浮かせる
+// ✅ UFO出現中はUFO.mp3を「ずっと」鳴らし続ける（ループSE）
+// ✅ UFO SE音量は BGM.js の「SE音量スライダー」に追従（WB.se.loop / getSEVolume）
+// ✅ UFO SEが爆音でも base=0.25 で抑える（必要なら調整）
+
 (() => {
+  "use strict";
+
   const FIELD_ID = "tenkiLayer";
   const HUD_ID = "hud";
 
-  const SUNNY_SRC = "./assets/tenki/Sunny.gif";
+  const SUNNY_SRC  = "./assets/tenki/Sunny.gif";
   const CLOUDY_SRC = "./assets/tenki/cloudy_1.gif";
+
+  // ★UFO
+  const UFO_IMG_SRC = "./assets/tenki/UFO.png";
+  const UFO_SE_SRC  = "./assets/UFO.mp3";
+  const UFO_SE_BASE = 0.25;      // ★爆音対策（BGM.jsのSE音量×この係数）
+  const UFO_CHANCE_PER_SEC = 0.012; // ★レア度：1秒あたり（例）1.2%（好みで下げてOK）
+  const UFO_SPEED_PX_PER_SEC = 90;  // UFO横移動速度
+  const UFO_SIZE_PX = 140;          // UFOサイズ
+  const UFO_TOP_RATIO_MIN = 0.08;   // 上側の出現位置（field高さ比）
+  const UFO_TOP_RATIO_MAX = 0.28;
 
   const CLOUD_COUNT = 6;
 
@@ -17,33 +35,6 @@
   const SUN_BASE_OPACITY = 1.0;
   const SUN_HIDE_OPACITY = 0.25;
   const SUN_FADE_SPEED = 0.06;
-
-  /* =========================
-   * 👽 UFO（レアで左→右に画面外から画面外へ）
-   * ========================= */
-  const UFO_IMG_SRC = "./assets/tenki/UFO.png";
-  const UFO_SE_SRC  = "./assets/UFO.mp3";
-
-  // レア確率：この間隔ごとに判定
-  const UFO_CHECK_MS = 6000;
-
-  // 1回の判定で出る確率（例：0.06=約6%）
-  const UFO_CHANCE = 0.06;
-
-  // 同時に複数出さない
-  let ufoActive = false;
-
-  // ふわふわ設定
-  const UFO_MIN_SIZE = 70;
-  const UFO_MAX_SIZE = 120;
-
-  // 速度（px/s）
-  const UFO_MIN_SPEED = 55;
-  const UFO_MAX_SPEED = 120;
-
-  // ふわふわ振幅（px）
-  const UFO_MIN_BOB = 8;
-  const UFO_MAX_BOB = 18;
 
   const field = document.getElementById(FIELD_ID);
   if (!field) return;
@@ -81,75 +72,6 @@
   };
 
   /* =========================
-   * Audio（UFO SE：UFO出現中はループ）
-   * - iOS等で自動再生ブロックがあるので「最初のタッチで解錠」
-   * ========================= */
-  let audioUnlocked = false;
-  let ufoLoop = null;
-
-  function ensureUfoAudio() {
-    if (ufoLoop) return ufoLoop;
-    try {
-      const a = new Audio(UFO_SE_SRC);
-      a.preload = "auto";
-      a.loop = true;       // ★ループ
-      a.volume = 0.85;
-      ufoLoop = a;
-      return a;
-    } catch {
-      ufoLoop = null;
-      return null;
-    }
-  }
-
-  function unlockAudioOnce() {
-    if (audioUnlocked) return;
-    audioUnlocked = true;
-
-    const a = ensureUfoAudio();
-    if (!a) return;
-
-    // 解錠（無音→再生→停止）
-    try {
-      a.muted = true;
-      a.currentTime = 0;
-      a.play()
-        .then(() => {
-          a.pause();
-          a.currentTime = 0;
-          a.muted = false;
-        })
-        .catch(() => {
-          try { a.muted = false; } catch {}
-        });
-    } catch {}
-  }
-
-  window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
-
-  function startUfoLoop() {
-    const a = ensureUfoAudio();
-    if (!a) return;
-    try {
-      a.loop = true;
-      a.volume = 0.85;
-      // すでに再生中なら何もしない
-      if (!a.paused) return;
-      a.currentTime = 0;
-      a.play().catch(() => {});
-    } catch {}
-  }
-
-  function stopUfoLoop() {
-    const a = ufoLoop;
-    if (!a) return;
-    try {
-      a.pause();
-      a.currentTime = 0;
-    } catch {}
-  }
-
-  /* =========================
      ☀️ 太陽（にじみ演出なし）
   ========================= */
   const sunny = document.createElement("img");
@@ -169,6 +91,7 @@
   // 太陽の位置（HUDの下）
   const layoutSun = () => {
     const top = computeTopOffset();
+    // 右上寄せ：tenkiLayer内で right を使うとズレにくい
     sunny.style.top = `${top}px`;
     sunny.style.right = `20px`;
   };
@@ -193,7 +116,7 @@
     Object.assign(cloud.style, {
       position: "absolute",
       left: "0px",
-      top: `${pickCloudYpx()}px`,
+      top: `${pickCloudYpx()}px`,          // ★HUDの下から出す
       width: `${size}px`,
       pointerEvents: "none",
       zIndex: String(cloud._z),
@@ -216,109 +139,138 @@
   }, 7000);
 
   /* =========================
-   * 👽 UFO 生成（左画面外→右画面外） + 出現中SEループ
-   * ========================= */
-  function spawnUFO() {
-    if (ufoActive) return;
-    ufoActive = true;
+     🛸 UFO
+  ========================= */
+  let ufoEl = null;
+  let ufoX = 0;
+  let ufoY = 0;
+  let ufoActive = false;
 
-    // ★UFO出現中はSEを鳴らし続ける
-    startUfoLoop();
+  function ensureUFOEl() {
+    if (ufoEl && ufoEl.isConnected) return ufoEl;
 
-    const fr = fieldRect();
-    const top = computeTopOffset();
+    const img = document.createElement("img");
+    img.src = UFO_IMG_SRC;
+    img.draggable = false;
 
-    const ufo = document.createElement("img");
-    ufo.src = UFO_IMG_SRC;
-    ufo.draggable = false;
-
-    const size = UFO_MIN_SIZE + Math.random() * (UFO_MAX_SIZE - UFO_MIN_SIZE);
-    const speed = UFO_MIN_SPEED + Math.random() * (UFO_MAX_SPEED - UFO_MIN_SPEED);
-    const bobAmp = UFO_MIN_BOB + Math.random() * (UFO_MAX_BOB - UFO_MIN_BOB);
-    const bobSpeed = 0.9 + Math.random() * 1.3;
-
-    const minY = top + 10;
-    const maxY = Math.max(minY + 20, top + fr.height * 0.30);
-    const baseY = Math.floor(minY + Math.random() * (maxY - minY));
-
-    let x = -size - 40;
-    const endX = fr.width + size + 60;
-
-    const z = 5;
-
-    Object.assign(ufo.style, {
+    Object.assign(img.style, {
       position: "absolute",
-      left: "0px",
-      top: `${baseY}px`,
-      width: `${size}px`,
+      width: `${UFO_SIZE_PX}px`,
+      height: "auto",
       pointerEvents: "none",
-      zIndex: String(z),
-      opacity: "0.0",
-      transform: `translateX(${x}px) translateY(0px)`,
-      filter: "drop-shadow(0 10px 14px rgba(0,0,0,.18))",
-      willChange: "transform,opacity",
+      zIndex: 5, // 雲より前
+      opacity: "0",
+      transform: "translate3d(0,0,0)",
+      filter: "drop-shadow(0 12px 18px rgba(0,0,0,.18))",
+      transition: "opacity .25s ease",
     });
 
-    field.appendChild(ufo);
-
-    let startedAt = performance.now();
-    let lastTs = startedAt;
-
-    function step(ts) {
-      const dt = Math.min(0.05, (ts - lastTs) / 1000);
-      lastTs = ts;
-
-      x += speed * dt;
-
-      const t = (ts - startedAt) / 1000;
-      const bob = Math.sin(t * bobSpeed * Math.PI * 2) * bobAmp;
-
-      const startX = -size - 40;
-      const dist = endX - startX;
-      const p = clamp01((x - startX) / Math.max(1, dist));
-      let op = 1;
-      if (p < 0.12) op = p / 0.12;
-      if (p > 0.88) op = (1 - p) / 0.12;
-
-      ufo.style.opacity = String(clamp01(op));
-      ufo.style.transform = `translateX(${x}px) translateY(${bob}px)`;
-
-      if (x >= endX) {
-        try { ufo.remove(); } catch {}
-        ufoActive = false;
-
-        // ★UFOが消えたらループ停止
-        stopUfoLoop();
-        return;
-      }
-      requestAnimationFrame(step);
-    }
-
-    requestAnimationFrame(step);
+    field.appendChild(img);
+    ufoEl = img;
+    return ufoEl;
   }
 
-  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
+  function pickUFOY() {
+    const fr = fieldRect();
+    const top = computeTopOffset();
+    const min = top + fr.height * UFO_TOP_RATIO_MIN;
+    const max = top + fr.height * UFO_TOP_RATIO_MAX;
+    const y = min + Math.random() * Math.max(10, (max - min));
+    return Math.floor(y);
+  }
 
-  // レア判定タイマー
-  setInterval(() => {
+  function startUFOSound() {
+    // ✅ BGM.jsがあれば「SEスライダー」に追従（ループSE）
+    try {
+      const WB = window.WB;
+      if (WB?.se?.loop) {
+        // baseで爆音抑制（さらにSEスライダーで調整）
+        WB.se.loop("ufo", UFO_SE_SRC, UFO_SE_BASE);
+        return;
+      }
+    } catch {}
+
+    // フォールバック（BGM.js無しでも一応鳴る）
+    try {
+      const a = new Audio();
+      a.preload = "auto";
+      a.loop = true;
+      a.src = encodeURI(UFO_SE_SRC);
+      // ここは固定で小さめ（BGM.js無し想定）
+      a.volume = 0.25;
+      a.play().catch(() => {});
+      window.__ufoFallbackAudio = a;
+    } catch {}
+  }
+
+  function stopUFOSound() {
+    try {
+      const WB = window.WB;
+      if (WB?.se?.stop) {
+        WB.se.stop("ufo");
+      }
+    } catch {}
+    try {
+      if (window.__ufoFallbackAudio) {
+        window.__ufoFallbackAudio.pause();
+      }
+    } catch {}
+  }
+
+  function startUFO() {
     if (ufoActive) return;
-    if (Math.random() < UFO_CHANCE) spawnUFO();
-  }, UFO_CHECK_MS);
+
+    const fr = fieldRect();
+    const el = ensureUFOEl();
+
+    ufoActive = true;
+    ufoX = -UFO_SIZE_PX - 40; // 画面外左
+    ufoY = pickUFOY();
+
+    el.style.left = `${ufoX}px`;
+    el.style.top = `${ufoY}px`;
+    el.style.opacity = "1";
+
+    startUFOSound();
+  }
+
+  function stopUFO() {
+    if (!ufoActive) return;
+
+    ufoActive = false;
+
+    if (ufoEl) {
+      ufoEl.style.opacity = "0";
+      // 少し遅れて消す（残してもOK）
+      setTimeout(() => {
+        try { ufoEl?.remove(); } catch {}
+        ufoEl = null;
+      }, 350);
+    }
+
+    stopUFOSound();
+  }
 
   /* =========================
      アニメーション
   ========================= */
-  function animate() {
-    const fr = fieldRect();
+  let lastT = performance.now();
 
+  function animate(t) {
+    const fr = fieldRect();
+    const dt = Math.min(0.05, (t - lastT) / 1000);
+    lastT = t;
+
+    // 位置がズレないよう、太陽の基準を更新（HUDの高さ変化対策）
     layoutSun();
 
+    // 雲移動
     clouds.forEach(c => {
       c._x += c._speed;
 
       if (c._x > fr.width + 150) {
         c._x = -200;
-        c.style.top = `${pickCloudYpx()}px`;
+        c.style.top = `${pickCloudYpx()}px`;  // ★再出現もHUD下へ
       }
       c.style.transform = `translateX(${c._x}px)`;
     });
@@ -326,6 +278,7 @@
     const cloudRects = clouds.map(c => c.getBoundingClientRect());
     const sunRect = sunny.getBoundingClientRect();
 
+    // 雲同士の透け
     clouds.forEach((a, i) => {
       let overlap = false;
       for (let j = 0; j < clouds.length; j++) {
@@ -340,6 +293,7 @@
       a.style.opacity = String(a._opacity);
     });
 
+    // 太陽が雲の後ろに隠れる（雲が太陽より前＆重なり）
     let sunCovered = false;
     for (let i = 0; i < clouds.length; i++) {
       const c = clouds[i];
@@ -353,8 +307,32 @@
     sunny._opacity = approach(sunny._opacity, sunTarget, SUN_FADE_SPEED);
     sunny.style.opacity = String(sunny._opacity);
 
+    // 🛸 UFO：レア抽選（アクティブ中は抽選しない）
+    if (!ufoActive) {
+      const p = 1 - Math.pow(1 - UFO_CHANCE_PER_SEC, dt); // dtに依存しない近似
+      if (Math.random() < p) startUFO();
+    } else {
+      // UFO移動
+      ufoX += UFO_SPEED_PX_PER_SEC * dt;
+      if (ufoEl) {
+        ufoEl.style.left = `${ufoX}px`;
+        // ふわふわ
+        const bob = Math.sin(t / 220) * 6;
+        ufoEl.style.top = `${ufoY + bob}px`;
+      }
+      // 画面外右まで行ったら終了
+      if (ufoX > fr.width + UFO_SIZE_PX + 60) {
+        stopUFO();
+      }
+    }
+
     requestAnimationFrame(animate);
   }
 
-  animate();
+  requestAnimationFrame(animate);
+
+  // 画面リサイズ時：太陽はlayoutSunで追従、UFOはそのままでOK
+  window.addEventListener("resize", () => {
+    layoutSun();
+  }, { passive: true });
 })();
