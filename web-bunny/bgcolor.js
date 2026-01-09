@@ -128,13 +128,15 @@
    * Disco overlay
    * ========================= */
   const DISCO = {
-    styleId: "mirrorballDiscoStyleV2",
-    wrapId:  "mirrorballDiscoWrapV2",
-    spinId:  "mirrorballDiscoSpinV2",
-    beamsId: "mirrorballDiscoBeamsV2",
-    dustId:  "mirrorballDiscoDustV2",
-    z: 6,
-  };
+  styleId: "mirrorballDiscoStyleV2",
+  wrapId:  "mirrorballDiscoWrapV2",
+  spinId:  "mirrorballDiscoSpinV2",
+  beamsId: "mirrorballDiscoBeamsV2",
+  dustId:  "mirrorballDiscoDustV2",
+  spotId:  "mirrorballDiscoSpotV2", // ★追加
+  z: 6,
+};
+
 
   function ensureDiscoStyle() {
     if (document.getElementById(DISCO.styleId)) return;
