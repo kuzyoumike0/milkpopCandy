@@ -1,6 +1,8 @@
 // BGM.js（非module / ✅朝昼夜は自動・別枠で「購入した曲を好きな時に流す」）
+// ✅ 修正：404根絶（assets/BGM/ に合わせる / 大文字小文字一致）
+// ✅ 修正：日本語ファイル名を encodeURI して確実に読み込む
 // ✅ 通常BGM：朝/昼/夜 は時間帯で自動（買ってれば自動で鳴る）
-// ✅ いつでもBGM：添付曲（Stream / おもしろすぎてどっかん / Cocktail_Glass）を購入して任意に選択して流せる
+// ✅ いつでもBGM：Stream / おもしろすぎてどっかん / Cocktail_Glass を購入して任意に選択して流せる
 // ✅ 「いつでもBGM」を選択中は、時間帯切替より優先
 // ✅ 自動に戻すあり
 // ✅ 既存UIがあっても削除して作り直す（購入メニュー出ない問題根絶）
@@ -15,27 +17,26 @@
   const LS_KEY_SELECT   = "milkpop_bgm_selected_v2";
 
   /* =========================
-   * Tracks
+   * Tracks（✅ assets/BGM/ に統一）
    * ========================= */
-
   // ✅ 通常BGM（時間帯で自動）
   const BASE_TRACKS = {
-    morning: "./assets/bgm/bgm_morning.mp3",
-    day:     "./assets/bgm/bgm_day.mp3",
-    night:   "./assets/bgm/bgm_night.mp3",
+    morning: "./assets/BGM/bgm_morning.mp3",
+    day:     "./assets/BGM/bgm_day.mp3",
+    night:   "./assets/BGM/bgm_night.mp3",
   };
 
   // ✅ 特別（演出用に呼び出す用：任意）
+  // ※無いなら購入しても鳴らないので、使わないならこの行はそのままでもOK
   const SPECIAL_TRACKS = {
-    depart:  "./assets/bgm_depart.mp3",
+    depart:  "./assets/BGM/bgm_depart.mp3",
   };
 
-  // ✅ いつでもBGM（添付曲：購入して自由に流す）
-  // 置き場所：./assets/ に入れてください
+  // ✅ いつでもBGM（GitHubにあるファイル名に完全一致）
   const ANYTIME_TRACKS = {
-    stream:   "./assets/bgm_stream.mp3",          // Stream.mp3
-    dokkan:   "./assets/bgm_dokkan.mp3",          // おもしろすぎてどっかん.mp3
-    cocktail: "./assets/bgm_cocktail_glass.mp3",  // Cocktail_Glass.mp3
+    stream:   "./assets/BGM/Stream.mp3",
+    dokkan:   "./assets/BGM/おもしろすぎてどっかん.mp3",
+    cocktail: "./assets/BGM/Cocktail_Glass.mp3",
   };
 
   // 全トラック（内部判定用）
@@ -50,22 +51,19 @@
     // 特別
     depart:  8000,
 
-    // いつでも（価格は好きに変更OK）
+    // いつでも
     stream:   12000,
     dokkan:   15000,
     cocktail: 10000,
   };
 
   const LABELS = {
-    // 通常
     morning: "朝BGM",
     day:     "昼BGM",
     night:   "夜BGM",
 
-    // 特別
     depart:  "旅立ちBGM",
 
-    // いつでも
     stream:   "Stream（いつでも）",
     dokkan:   "おもしろすぎてどっかん（いつでも）",
     cocktail: "Cocktail_Glass（いつでも）",
@@ -137,6 +135,15 @@
     audio.loop = true;
     audio.preload = "auto";
     applyVolume();
+
+    // ★ 失敗が見えるようにする
+    audio.addEventListener("error", () => {
+      try {
+        const err = audio.error ? `${audio.error.code}` : "unknown";
+        console.warn("[BGM] audio error:", err, "src=", audio.src);
+      } catch {}
+    });
+
     return audio;
   }
 
@@ -145,10 +152,20 @@
     audio.volume = settings.muted ? 0 : settings.volume;
   }
 
+  // ✅ 日本語ファイル名でも確実に（/おもしろすぎてどっかん.mp3 など）
+  function normalizeSrc(src) {
+    if (!src) return src;
+    // すでに % が入ってる（エンコード済み）ならそのまま
+    if (src.includes("%")) return src;
+    return encodeURI(src);
+  }
+
+  // ✅ JSTじゃなくてもいいならこれでOK（端末の時間で切替）
+  // もし JST で統一したいなら Intl.DateTimeFormat(timeZone:"Asia/Tokyo") に置き換えてOK
   function pickByTime() {
     const h = new Date().getHours();
-    if (h >= 5 && h <= 10) return "morning";
-    if (h >= 11 && h <= 17) return "day";
+    if (h >= 5 && h < 10) return "morning"; // 05:00-09:59
+    if (h >= 10 && h < 17) return "day";    // 10:00-16:59
     return "night";
   }
 
@@ -244,10 +261,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const key = keyHint || resolveKeyBySrc(src);
     if (key && !isOwned(key)) { stop(); return false; }
 
-    const nextHref = new URL(src, location.href).href;
+    const normalized = normalizeSrc(src);
+    const nextHref = new URL(normalized, location.href).href;
+
     if (audio.src !== nextHref) {
       try { audio.pause(); } catch {}
-      audio.src = src;
+      audio.src = normalized;
       audio.currentTime = 0;
     }
 
@@ -396,7 +415,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function removeOldUI() {
-    // 過去UIを根こそぎ削除（購入メニュー出ない問題を根絶）
     const ids = [
       "bgmHamburgerV1","bgmPanelV1",
       "bgmHamburgerV2","bgmPanelV2",
@@ -563,7 +581,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 <div id="bgmShopV3">
   <div class="sectionTitle">▼ 通常BGM（朝昼夜：自動）</div>
   ${renderItem("morning", LABELS.morning, "朝の時間帯（5-10時）")}
-  ${renderItem("day",     LABELS.day,     "昼の時間帯（11-17時）")}
+  ${renderItem("day",     LABELS.day,     "昼の時間帯（10-17時）")}
   ${renderItem("night",   LABELS.night,   "夜の時間帯（それ以外）")}
 
   <div class="sectionTitle">▼ いつでもBGM（購入して好きな時に流す）</div>
@@ -678,7 +696,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     });
 
     for (const k of Object.keys(PRICES)) {
-      buyBtns[k].addEventListener("click", async () => {
+      buyBtns[k]?.addEventListener("click", async () => {
         patchWB(window.WB);
         try { await window.WB?.unlockAudioOnce?.(); } catch {}
 
@@ -687,13 +705,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
           if (r.reason === "coins") toast(`🪙 足りない！ ${r.have} / ${r.need}`);
           else toast("購入できませんでした");
         } else {
-          // ✅ 購入したらそのまま選択して流す
           selectBgm(k);
         }
         refresh();
       });
 
-      selectBtns[k].addEventListener("click", async () => {
+      selectBtns[k]?.addEventListener("click", async () => {
         patchWB(window.WB);
         try { await window.WB?.unlockAudioOnce?.(); } catch {}
         const r = selectBgm(k);
@@ -732,7 +749,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function startTimeWatcher() {
-    // ✅ 時間帯チェック（選択中が無ければ勝手に朝昼夜へ切替）
     setInterval(() => startBgm(false), 30_000);
   }
 
@@ -743,7 +759,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     startBgm(false);
     startTimeWatcher();
 
-    // ✅ body待ち＋旧UI削除して、購入メニュー付きUIを必ず出す
     try { await waitForBody(); } catch {}
     mountUI({ position: "top-right", title: "BGM" });
   })();
