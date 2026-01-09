@@ -2,8 +2,7 @@
 // ✅ 朝昼夜(JST)で背景色
 // ✅ mirrorball 購入済み + 設置ON のときだけ：
 //    - 上中央に mirrorball.png を表示
-//    - ディスコ背景（回転ライト＋走るビーム＋キラ粒）
-//    - 中央上スポットライト（太め）
+//    - 中央上スポットライト（太め）だけON（ディスコ回転色やビームや粒は無し）
 // ✅ 背景黒化を避ける（bgLayer/field 両方に適用）
 
 (() => {
@@ -13,6 +12,9 @@
   const bgLayer = document.getElementById("bgLayer");
   if (!field || !bgLayer) return;
 
+  /* =========================
+   * Time themes (JST)
+   * ========================= */
   const MORNING = { start: 5,  end: 10 };
   const DAY     = { start: 10, end: 17 };
 
@@ -37,6 +39,9 @@
     return "night";
   }
 
+  /* =========================
+   * Mirrorball owned/enabled
+   * ========================= */
   function hasMirrorballOwned() {
     try { if (window.WB?.shop?.isOwned?.("mirrorball")) return true; } catch {}
     try {
@@ -46,7 +51,7 @@
     } catch { return false; }
   }
 
-  // ★ここ重要：読めない/無い/壊れてる時は OFF（勝手にONへ戻さない）
+  // 壊れてる/無い時はOFF（勝手にONへ戻さない）
   function isMirrorballEnabled() {
     try {
       const v = window.WB?.shop?.isMirrorballEnabled?.();
@@ -58,13 +63,10 @@
       const j = JSON.parse(raw);
       if (!j || typeof j !== "object") return false;
       return !!j.mirrorballEnabled;
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   }
 
   function ensureBaseLayout() {
-    // bgLayer は children を載せるので relative 化（style.cssで absolute済みでもOK）
     const bcs = getComputedStyle(bgLayer);
     if (bcs.position === "static") bgLayer.style.position = "absolute";
     bgLayer.style.inset = "0";
@@ -80,7 +82,7 @@
     src: "./assets/bg/mirrorball.png",
     top: 8,
     size: 140,
-    z: 5, // FXより上
+    z: 5, // spotlightより上にしたいなら大きく
   };
 
   function ensureMirrorStyle() {
@@ -128,180 +130,75 @@
   }
 
   /* =========================
-   * Disco FX + Spotlight
+   * Spotlight only (NO disco color)
    * ========================= */
-  const FX = {
-    styleId: "mirrorballFxStyleV3",
-    wrapId:  "mirrorballFxWrapV3",
-    spinId:  "mirrorballFxSpinV3",
-    beamsId: "mirrorballFxBeamsV3",
-    dustId:  "mirrorballFxDustV3",
-    spotId:  "mirrorballFxSpotV3",
-    z: 4, // ミラーボール画像より下
+  const SPOT = {
+    styleId: "mirrorballSpotStyleV3",
+    id: "mirrorballSpotV3",
+    z: 4, // bgLayer内：ミラーボール画像より下
+    width: 980, // ★幅（大きくしたいならここ）
   };
 
-  function ensureFxStyle() {
-    if (document.getElementById(FX.styleId)) return;
+  function ensureSpotStyle() {
+    if (document.getElementById(SPOT.styleId)) return;
     const st = document.createElement("style");
-    st.id = FX.styleId;
+    st.id = SPOT.styleId;
     st.textContent = `
-@keyframes mbSpinHueV3 {
-  0%   { transform: rotate(0deg) scale(1.05); filter: hue-rotate(0deg) saturate(1.7) brightness(1.18); }
-  100% { transform: rotate(360deg) scale(1.05); filter: hue-rotate(360deg) saturate(1.7) brightness(1.18); }
-}
-@keyframes mbBeamSweepV3 {
-  0%   { transform: translate3d(-45%, -25%, 0) rotate(22deg); opacity: .10; }
-  25%  { opacity: .34; }
-  50%  { transform: translate3d( 45%,  12%, 0) rotate(22deg); opacity: .16; }
-  75%  { opacity: .36; }
-  100% { transform: translate3d(-45%, -25%, 0) rotate(22deg); opacity: .10; }
-}
-@keyframes mbDustDriftV3 {
-  0%   { transform: translate3d(-2%, -1%, 0); opacity: .22; }
-  50%  { transform: translate3d( 2%,  1%, 0); opacity: .45; }
-  100% { transform: translate3d(-2%, -1%, 0); opacity: .22; }
-}
-@keyframes mbSpotPulseV3 {
-  0%,100% { opacity:.38; filter: hue-rotate(0deg) saturate(1.9) brightness(1.15); }
-  50%     { opacity:.72; filter: hue-rotate(180deg) saturate(1.9) brightness(1.22); }
+@keyframes mbSpotPulseOnlyV3 {
+  0%,100% { opacity:.35; }
+  50%     { opacity:.70; }
 }
 
-#${FX.wrapId}{
-  position:absolute;
-  inset:0;
-  z-index:${FX.z};
-  pointer-events:none;
-  overflow:hidden;
-  opacity:0;
-  transition: opacity .25s ease;
-}
-
-#${FX.spinId}{
-  position:absolute;
-  left:50%;
-  top:-20vmax;
-  width:140vmax;
-  height:140vmax;
-  transform: translateX(-50%);
-  transform-origin: 50% 20%;
-  mix-blend-mode: screen;
-  opacity:.55;
-  background:
-    radial-gradient(circle at 50% 18%, rgba(255,255,255,.55) 0 12%, rgba(255,255,255,0) 38%),
-    conic-gradient(from 0deg,
-      rgba(255,  0,160,.22),
-      rgba(255,180,  0,.22),
-      rgba(255,255,  0,.22),
-      rgba(  0,255,180,.22),
-      rgba(  0,180,255,.22),
-      rgba(140,  0,255,.22),
-      rgba(255,  0,160,.22)
-    );
-  animation: mbSpinHueV3 5.2s linear infinite;
-  will-change: transform, filter;
-}
-
-#${FX.beamsId}{
-  position:absolute;
-  inset:-35%;
-  mix-blend-mode: screen;
-  background:
-    repeating-linear-gradient(
-      115deg,
-      rgba(255,255,255,0) 0px,
-      rgba(255,255,255,0) 24px,
-      rgba(255,255,255,.18) 34px,
-      rgba(255,255,255,0) 52px,
-      rgba(255,255,255,0) 74px
-    );
-  filter: saturate(1.35) contrast(1.08);
-  animation: mbBeamSweepV3 2.8s ease-in-out infinite;
-  will-change: transform, opacity;
-}
-
-#${FX.dustId}{
-  position:absolute;
-  inset:-12%;
-  mix-blend-mode: screen;
-  background:
-    radial-gradient(circle at 20% 18%, rgba(255,255,255,.55) 0 2px, rgba(255,255,255,0) 3px) 0 0 / 120px 120px,
-    radial-gradient(circle at 65% 52%, rgba(255,255,255,.38) 0 1.5px, rgba(255,255,255,0) 3px) 0 0 / 160px 160px,
-    radial-gradient(circle at 45% 78%, rgba(255,255,255,.35) 0 1.5px, rgba(255,255,255,0) 3px) 0 0 / 140px 140px,
-    radial-gradient(circle at 80% 30%, rgba(255,255,255,.30) 0 1.2px, rgba(255,255,255,0) 3px) 0 0 / 180px 180px;
-  animation: mbDustDriftV3 1.7s ease-in-out infinite;
-  will-change: transform, opacity;
-}
-
-/* ★中央上スポットライト（太め） */
-#${FX.spotId}{
+#${SPOT.id}{
   position:absolute;
   left:50%;
   top:-10px;
 
-  width:min(980px, 98vw);
+  width:min(${SPOT.width}px, 98vw);
   height:92vh;
 
   transform: translateX(-50%);
-  mix-blend-mode: screen;
+  z-index:${SPOT.z};
   pointer-events:none;
-  opacity:0;
 
+  /* ★白いスポットライトだけ */
   background:
     radial-gradient(circle at 50% 0%,
-      rgba(255,255,255,.78) 0%,
-      rgba(255,255,255,.38) 18%,
-      rgba(255,255,255,.14) 46%,
+      rgba(255,255,255,.85) 0%,
+      rgba(255,255,255,.45) 18%,
+      rgba(255,255,255,.18) 46%,
       rgba(255,255,255,0) 74%
-    ),
-    conic-gradient(from 90deg at 50% 0%,
-      rgba(255,  0,160,.18),
-      rgba(255,180,  0,.18),
-      rgba(255,255,  0,.18),
-      rgba(  0,255,180,.18),
-      rgba(  0,180,255,.18),
-      rgba(140,  0,255,.18),
-      rgba(255,  0,160,.18)
     );
 
+  /* ★光の形（上が細く、下が広い） */
   clip-path: polygon(50% 0%, 86% 100%, 14% 100%);
+
+  mix-blend-mode: screen;
   filter: blur(1px);
-  animation: mbSpotPulseV3 2.4s ease-in-out infinite;
-  will-change: opacity, filter;
+  opacity:0;
+  animation: mbSpotPulseOnlyV3 2.4s ease-in-out infinite;
+  will-change: opacity;
 }
 `;
     document.head.appendChild(st);
   }
 
-  function ensureFxWrap() {
+  function ensureSpotEl() {
     ensureBaseLayout();
-    ensureFxStyle();
-
-    let wrap = document.getElementById(FX.wrapId);
-    if (!wrap) {
-      wrap = document.createElement("div");
-      wrap.id = FX.wrapId;
-
-      const spin  = document.createElement("div"); spin.id  = FX.spinId;
-      const beams = document.createElement("div"); beams.id = FX.beamsId;
-      const dust  = document.createElement("div"); dust.id  = FX.dustId;
-      const spot  = document.createElement("div"); spot.id  = FX.spotId;
-
-      wrap.appendChild(spin);
-      wrap.appendChild(beams);
-      wrap.appendChild(dust);
-      wrap.appendChild(spot);
-
-      // 背景の中で後ろ側に入れたい：先頭に
-      bgLayer.insertBefore(wrap, bgLayer.firstChild);
+    ensureSpotStyle();
+    let el = document.getElementById(SPOT.id);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = SPOT.id;
+      // ★ミラーボール画像より後ろにしたいので先頭に
+      bgLayer.insertBefore(el, bgLayer.firstChild);
     }
-    return wrap;
+    return el;
   }
 
-  function setFxEnabled(on) {
-    const wrap = ensureFxWrap();
-    wrap.style.opacity = on ? "1" : "0";
-    const spot = document.getElementById(FX.spotId);
-    if (spot) spot.style.opacity = on ? "1" : "0";
+  function setSpotEnabled(on) {
+    const el = ensureSpotEl();
+    el.style.opacity = on ? "1" : "0";
   }
 
   /* =========================
@@ -327,7 +224,7 @@
     const on = hasMirrorballOwned() && isMirrorballEnabled();
 
     setMirrorVisible(on);
-    setFxEnabled(on);
+    setSpotEnabled(on);
   }
 
   // 初回
