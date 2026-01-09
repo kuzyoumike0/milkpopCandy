@@ -1,17 +1,9 @@
-// shop.js（購入専用：#shopBtn専用 → ✅ハンバーガーメニュー対応 / 設置はしない）
-// ✅ #shopBtn クリックは「メニューから呼ぶ」想定（index.htmlでは非表示でもOK）
-// ✅ ハンバーガーメニュー側が呼べるように window.SHOP.open() / WB.shop.open() を提供
-// ✅ もし #shopBtn が存在するなら従来通りクリックで開く（互換）
-// ✅ owned（購入済み）保存 & 即通知
-// ✅ 設置（placed）や配置DOMは一切やらない（itemPlace.js 側で管理）
-// ✅ ITEMを増やしやすい：配列→自動正規化→ITEMS辞書化（表示順も配列順）
-// ✅ assets/bg/oak.png を追加
-// ✅ 二重起動・二重リスナー根絶
+// shop.js（購入専用：ハンバーガーメニュー対応 / 設置はしない）
+// ✅ mirrorball を placeable:true に変更（itemPlaceで配置できるようにする）
 
 (() => {
   "use strict";
 
-  // 二重読み込み防止
   if (window.__BGSHOP_BUYONLY_V3_INITED__) {
     console.warn("[shop.js] already inited; skip re-init");
     return;
@@ -20,22 +12,14 @@
 
   const LS_OWNED = "milkpop_shop_owned_v1"; // { key:true }
 
-  /* =========================
-   * Items (増やしやすい形)
-   * =========================
-   * ✅ ここに1行追加するだけでOK
-   * - key: 一意キー（LS保存・通知に使う）
-   * - label/desc/price/img
-   * - placeable: 配置メニューに出すか（shop.jsは“配置はしない”が情報は持てる）
-   */
   const ITEM_LIST = [
     {
       key: "mirrorball",
       label: "ミラーボール",
-      desc: "夜の演出は bgcolor.js が見る（設置不要）",
+      desc: "購入すると、アイテム配置メニューで置ける（虹スポット演出）",
       price: 9000,
       img: "./assets/bg/mirrorball.png",
-      placeable: false,
+      placeable: true, // ✅ ここ重要
     },
     {
       key: "bed",
@@ -55,13 +39,9 @@
     },
   ];
 
-  /* =========================
-   * Normalize / Build
-   * ========================= */
   function normalizeItem(it) {
     const key = String(it?.key || "").trim();
     if (!key) return null;
-
     return {
       key,
       label: String(it?.label ?? key),
@@ -72,15 +52,12 @@
     };
   }
 
-  // 表示順を保持するためのキー配列
   const ITEM_ORDER = [];
-  // key→item の辞書
   const ITEMS = (() => {
     const map = {};
     for (const raw of ITEM_LIST) {
       const it = normalizeItem(raw);
       if (!it) continue;
-
       if (map[it.key]) {
         console.warn("[shop.js] duplicate item key ignored:", it.key);
         continue;
@@ -99,11 +76,9 @@
   };
 
   const $ = (q, p = document) => p.querySelector(q);
-
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
   function loadOwned() { return safeParse(localStorage.getItem(LS_OWNED)) || {}; }
   function saveOwned(o) { try { localStorage.setItem(LS_OWNED, JSON.stringify(o)); } catch {} }
-
   let owned = loadOwned();
 
   function getCoinsWB() {
@@ -231,8 +206,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   margin-left:auto;
   display:flex; gap:8px; flex-wrap:wrap;
   align-items:center; justify-content:flex-end;
-}
-`;
+}`;
     document.head.appendChild(st);
   }
 
@@ -266,10 +240,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   function renderItemHTML(it, own) {
     const badge = own ? "購入済み" : "未購入";
     const price = `<div class="meta">価格：<b>${it.price}🪙</b></div>`;
-    const placeInfo = it.placeable
-      ? `<div class="tag">配置OK</div>`
-      : `<div class="tag">配置なし</div>`;
-
+    const placeInfo = it.placeable ? `<div class="tag">配置OK</div>` : `<div class="tag">配置なし</div>`;
     return `
     <div class="item">
       <div class="thumb"><img src="${it.img}" alt="${it.key}"></div>
@@ -284,6 +255,18 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         <button class="btn" data-buy="${it.key}" ${own ? "disabled" : ""}>購入</button>
       </div>
     </div>`;
+  }
+
+  function emitChanged(key) {
+    try {
+      const isOwn = !!loadOwned()?.[key];
+      window.WB?.emit?.("shop:changed", { key, owned: isOwn });
+
+      const it = ITEMS[key];
+      if (it?.placeable) {
+        window.WB?.emit?.("itemplace:owned_changed", { key, owned: isOwn });
+      }
+    } catch {}
   }
 
   function openModal() {
@@ -358,23 +341,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     }, { once: true });
   }
 
-  // ✅ ownedだけ通知（placedは出さない）
-  function emitChanged(key) {
-    try {
-      const isOwn = !!loadOwned()?.[key];
-      window.WB?.emit?.("shop:changed", { key, owned: isOwn });
-
-      if (key === "mirrorball") {
-        window.WB?.emit?.("bg:mirrorball_changed", { owned: !!loadOwned()?.mirrorball });
-      }
-
-      const it = ITEMS[key];
-      if (it?.placeable) {
-        window.WB?.emit?.("itemplace:owned_changed", { key, owned: isOwn });
-      }
-    } catch {}
-  }
-
   function patchWB() {
     const WB = window.WB;
     if (!WB || typeof WB !== "object") return;
@@ -402,14 +368,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     ensureStyle();
     patchWB();
 
-    // WB後追い
     const start = Date.now();
     const wbTimer = setInterval(() => {
       patchWB();
       if (Date.now() - start > 15000) clearInterval(wbTimer);
     }, 200);
 
-    // ✅ グローバルAPI
     window.SHOP = {
       open: () => openModal(),
       close: () => closeModal(),
@@ -419,7 +383,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       order: () => ITEM_ORDER.slice(),
     };
 
-    // ✅ #shopBtn 互換
     try {
       const shopBtn = await waitForElm(() => document.getElementById("shopBtn"), 12000);
       if (shopBtn && !shopBtn.__bgshopBound) {
@@ -427,7 +390,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         shopBtn.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+          e.stopImmediatePropagation?.();
           openModal();
         }, true);
       }
@@ -435,7 +398,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       console.warn("[shop.js] #shopBtn not found (menu-open only)");
     }
 
-    // 初期通知（購入済みだけ）
     owned = loadOwned();
     for (const k of Object.keys(owned)) {
       if (owned[k]) emitChanged(k);
