@@ -1,13 +1,12 @@
 // gameMenu.js（非module）
 // ✅ 右上にハンバーガーメニュー1個だけ作る
-// ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🛏️ベッド配置 / 📖図鑑 / 🎵BGM
+// ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🧸アイテム配置 / 📖図鑑 / 🎵BGM
 // ✅ 呼び出し：
-//   - shop   : WB.shop.open()
-//   - isyou  : ISYOU.openModal()
-//   - bed    : HAIKEI.openBedPlacer()（haikei.js V4+）
-//   - zukan  : WB.zukan.open("bunny")
-//   - bgm    : WB.bgm.openModal()
-// ✅ 他スクリプトより先に読み込まれてもOK（呼び出しはクリック時）
+//   - shop     : WB.shop.open()
+//   - isyou    : ISYOU.openModal()
+//   - itemplace: ITEMPLACE.openModal()
+//   - zukan    : WB.zukan.open("bunny")
+//   - bgm      : WB.bgm.openModal()
 // ✅ 外側クリックで閉じる
 
 (() => {
@@ -18,8 +17,6 @@
     panel: "gameMenuPanelV1",
     style: "gameMenuStyleV1",
   };
-
-  const $ = (q, p = document) => p.querySelector(q);
 
   function ensureStyle() {
     if (document.getElementById(UI.style)) return;
@@ -48,7 +45,7 @@
 #${UI.panel}{
   position:fixed; top:62px; right:10px;
   z-index:2147483101;
-  width:min(270px, 92vw);
+  width:min(280px, 92vw);
   background:rgba(255,255,255,.98);
   border-radius:16px;
   box-shadow:0 18px 44px rgba(0,0,0,.22);
@@ -105,13 +102,13 @@
         <div class="list">
           <button class="item" type="button" data-act="shop">🛒 ショップ</button>
           <button class="item" type="button" data-act="isyou">🎀 お洒落</button>
-          <button class="item" type="button" data-act="bed">🛏️ ベッド配置</button>
+          <button class="item" type="button" data-act="itemplace">🧸 アイテム配置</button>
           <button class="item" type="button" data-act="zukan">📖 図鑑</button>
           <button class="item" type="button" data-act="bgm">🎵 BGM</button>
         </div>
         <div class="note">
-          ※ 画面クリックで音が解放されます（BGMは一度クリックが必要）<br>
-          ※ ベッド配置：モードに入ったら「置きたい場所をクリック」で確定（Escで中止）
+          ※ BGMは一度クリックが必要です。<br>
+          ※ アイテム配置：選んだアイテムが赤枠で出ます → 置きたい場所をクリックで確定。
         </div>
       `;
       document.body.appendChild(panel);
@@ -120,7 +117,6 @@
     return { btn, panel };
   }
 
-  function openPanel(panel) { panel.style.display = "block"; }
   function closePanel(panel) { panel.style.display = "none"; }
   function togglePanel(panel) {
     panel.style.display = (panel.style.display === "block") ? "none" : "block";
@@ -133,7 +129,6 @@
 
   function handleAction(act) {
     if (act === "shop") {
-      // shop.js が WB.shop.open を提供
       safeCall(() => window.WB?.shop?.open?.());
       return;
     }
@@ -141,13 +136,12 @@
       safeCall(() => window.ISYOU?.openModal?.());
       return;
     }
-    if (act === "bed") {
-      // haikei.js が HAIKEI.openBedPlacer を提供
-      safeCall(() => window.HAIKEI?.openBedPlacer?.());
-      // 互換（WBに生えてる場合）
+    if (act === "itemplace") {
+      safeCall(() => window.ITEMPLACE?.openModal?.());
+      // 互換：WBに生えてる場合
       setTimeout(() => {
-        if (window.HAIKEI?.openBedPlacer) return;
-        try { window.WB?.haikei?.openBedPlacer?.(); } catch {}
+        if (window.ITEMPLACE?.openModal) return;
+        try { window.WB?.itemplace?.openModal?.(); } catch {}
       }, 0);
       return;
     }
