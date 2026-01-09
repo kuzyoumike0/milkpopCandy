@@ -1,33 +1,37 @@
-// itemPlace.js（V6：実寸固定＋自動アイテム追従版）
+// itemPlace.js（V7：固定スケール版＝「うさぎより少し大きい」）
 // ✅ アイテム配置は itemPlace のみで行う（shop.js は購入のみ）
 // ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う（mirrorballは除外）
-// ✅ oak.png などアイテムが増えても自動対応：SHOP.items() / WB.shop.items() / 既定一覧の順で吸収
+// ✅ oak.png などアイテムが増えても自動対応：SHOP.items() / WB.shop.items() / fallback の順で吸収
 // ✅ 設置ON/OFFは itemPlace.js が管理（LS: milkpop_itemplace_enabled_v1）
-// ✅ 実寸サイズ：画像の naturalWidth/Height を読んで “常に実寸” で表示（scale完全撤廃）
-// ✅ ゴースト枠も実寸
+// ✅ サイズはユーザー操作で拡大縮小しない（UI無し）
+// ✅ ただし表示サイズは「うさぎより少し大きい」くらいに固定倍率で拡大（DISPLAY_SCALE）
+// ✅ ゴースト枠も同じ倍率
 // ✅ 座標基準は #field に固定（bgLayerが0サイズでもOK）
 // ✅ 配置モード：赤枠（透明）→ クリックで設置 → ドラッグ移動 → 完了
 // ✅ OFFにした瞬間に撤去（残骸ゼロ）
 // ✅ アイテム選択も itemPlace で完結（セレクト + 配置物クリックで選択）
 // ✅ うさぎの裏に行く：wrap を #bunnyLayer の直前に差し込む（DOM順）＋ z-index低固定
 // ✅ クリックできない問題根絶：編集中は wrap と obj を pointer-events:auto にする
-// ✅ 増えたアイテムの state/enabled は自動で初期化（破壊的変更なし）
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V6", Date.now());
+  console.log("[itemPlace] LOADED V7", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
-  const LS_STATE_KEY   = "milkpop_itemplace_v6";          // { key:{x,y,rot,placed} }
+  const LS_STATE_KEY   = "milkpop_itemplace_v7";          // { key:{x,y,rot,placed} } ※stateにscaleは持たない
   const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // { key:boolean }
 
   const HOST_ID  = "field";
 
-  const WRAP_ID  = "itemPlaceWrapV6";
-  const STYLE_ID = "itemPlaceStyleV6";
-  const PANEL_ID = "itemPlacePanelV6";
-  const GHOST_ID = "itemPlaceGhostV6";
+  const WRAP_ID  = "itemPlaceWrapV7";
+  const STYLE_ID = "itemPlaceStyleV7";
+  const PANEL_ID = "itemPlacePanelV7";
+  const GHOST_ID = "itemPlaceGhostV7";
   const TOAST_ID = "itemPlaceToastV1";
+
+  // ✅ うさぎより少し大きいくらい（必要ならここだけ調整）
+  // 例：1.12〜1.25 あたりで好み調整
+  const DISPLAY_SCALE = 1.18;
 
   const $ = (q, p = document) => p.querySelector(q);
 
@@ -59,12 +63,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
    * ========================= */
 
   // ✅ 既定（SHOP.items が無い時の保険）
-  // - shop.js 側で oak を増やしても、理想は SHOP.items() に出る
-  // - もし出ない環境でも、ここに増やせば確実に拾える
   const FALLBACK_ITEMS = [
     { key: "bed", label: "ベッド", img: "./assets/bg/bed.png", placeable: true },
     { key: "oak", label: "オーク", img: "./assets/bg/oak.png", placeable: true },
-    // mirrorball は placeable:false か、そもそも入れない
   ];
 
   function normalizeShopItem(it) {
@@ -74,15 +75,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const label = String(it?.label ?? key);
     const src = String(it?.img ?? it?.src ?? "");
 
-    return {
-      key,
-      label,
-      src,
-      placeable: !!it?.placeable,
-    };
+    // shop.jsがもし per-item 表示倍率を渡すなら拾えるように（任意）
+    // 例: { displayScale: 1.2 } など
+    const ds = Number(it?.displayScale);
+    const displayScale = Number.isFinite(ds) && ds > 0 ? ds : DISPLAY_SCALE;
+
+    return { key, label, src, placeable: !!it?.placeable, displayScale };
   }
 
-  // ✅ shop.js が提供する items() を優先的に読む（無ければ WB.shop.items）
   function readShopItemsMap() {
     try {
       const fn = window.SHOP?.items || window.WB?.shop?.items;
@@ -95,7 +95,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   function buildPlaceItems() {
-    // 1) shop.js から取得できるならそれを土台にする
     const map = readShopItemsMap();
     const items = [];
 
@@ -105,36 +104,38 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         if (n) items.push(n);
       }
     } else {
-      // 2) fallback
       for (const x of FALLBACK_ITEMS) {
-        const n = normalizeShopItem({ key: x.key, label: x.label, img: x.img, placeable: x.placeable });
+        const n = normalizeShopItem({
+          key: x.key,
+          label: x.label,
+          img: x.img,
+          placeable: x.placeable,
+          displayScale: DISPLAY_SCALE,
+        });
         if (n) items.push(n);
       }
     }
 
-    // placeable:true だけ + mirrorball除外（安全）
     const out = {};
     for (const it of items) {
       if (!it.placeable) continue;
-      if (it.key === "mirrorball") continue; // 絶対除外
+      if (it.key === "mirrorball") continue;
       if (!it.src) continue;
 
-      // 追加アイテムが増えても OK
       out[it.key] = {
         key: it.key,
         label: it.label,
         src: it.src,
-        z: 1, // “うさぎの裏”固定（低め）
+        z: 1, // “うさぎの裏”固定
+        displayScale: it.displayScale, // ✅ 表示倍率（固定）
         default: { x: 180, y: 280, rot: 0, placed: false },
       };
     }
 
-    // 表示順（安定させる：キー昇順）
     const order = Object.keys(out).sort();
     return { out, order };
   }
 
-  // 現在の PLACE_ITEMS / ORDER（動的）
   let PLACE_ITEMS = {};
   let PLACE_ORDER = [];
 
@@ -143,14 +144,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     PLACE_ITEMS = built.out;
     PLACE_ORDER = built.order;
 
-    // 新アイテムが増えたら state/enabled を補完
-    st = loadState();         // loadが補完してくれる
+    st = loadState();
     saveState(st);
 
     const en = loadEnabled();
     saveEnabled(en);
-
-    // サイズもプリロード（あとで）
   }
 
   /* =========================
@@ -171,11 +169,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   function loadEnabled() {
     const j = safeParse(localStorage.getItem(LS_ENABLED_KEY)) || {};
     const out = { ...j };
-    // 追加されたキーを補完（デフォON）
+
     for (const k of Object.keys(PLACE_ITEMS)) {
       if (typeof out[k] !== "boolean") out[k] = true;
     }
-    // 消えたキーは掃除（任意：残しても害はないが、ここで軽く掃除）
     for (const k of Object.keys(out)) {
       if (!(k in PLACE_ITEMS)) delete out[k];
     }
@@ -190,7 +187,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     en[key] = !!v;
     saveEnabled(en);
 
-    // OFFにしたら即撤去（placedも落とす）
     if (!en[key]) {
       st[key] = st[key] || { ...PLACE_ITEMS[key]?.default };
       if (st[key]) st[key].placed = false;
@@ -219,8 +215,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         placed: (typeof cur.placed === "boolean") ? cur.placed : !!def.placed,
       };
     }
-
-    // 余計なキーを掃除（任意）
     return out;
   }
 
@@ -256,6 +250,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     for (const k of Object.keys(PLACE_ITEMS)) await preloadSize(k);
   }
 
+  function getDisplayScale(key) {
+    const it = PLACE_ITEMS[key];
+    const ds = Number(it?.displayScale);
+    if (Number.isFinite(ds) && ds > 0) return ds;
+    return DISPLAY_SCALE;
+  }
+
   /* =========================
    * DOM / Layer
    * ========================= */
@@ -269,20 +270,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   position:absolute;
   inset:0;
   overflow:visible;
-
-  /* 通常はクリックを邪魔しない */
   pointer-events:none;
-
-  /* “裏”に固定（低め） */
-  z-index:1;
+  z-index:1; /* うさぎの裏 */
 }
-
-#${WRAP_ID}.ipEditing{
-  pointer-events:auto;
-}
-#${WRAP_ID}.ipEditing .itemPlaceObj{
-  pointer-events:auto;
-}
+#${WRAP_ID}.ipEditing{ pointer-events:auto; }
+#${WRAP_ID}.ipEditing .itemPlaceObj{ pointer-events:auto; }
 
 .itemPlaceObj{
   position:absolute;
@@ -292,7 +284,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   -webkit-user-drag:none;
   pointer-events:none;
 }
-
 .itemPlaceObj.selected{
   outline: 3px solid rgba(255,0,0,.95);
   outline-offset: 2px;
@@ -374,7 +365,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     return document.getElementById(HOST_ID) || document.body;
   }
 
-  // ✅ wrap を bunnyLayer の直前へ（DOM順で“裏”）
   function ensureWrap() {
     ensureStyle();
 
@@ -425,9 +415,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
   function setGhostSizeFor(key) {
     const g = ensureGhost();
-    const s = imgSize[key] || { w: 120, h: 90 };
-    g.style.width  = `${Math.max(8, s.w)}px`;
-    g.style.height = `${Math.max(8, s.h)}px`;
+    const base = imgSize[key] || { w: 120, h: 90 };
+    const ds = getDisplayScale(key);
+    g.style.width  = `${Math.max(8, base.w * ds)}px`;
+    g.style.height = `${Math.max(8, base.h * ds)}px`;
   }
 
   function showGhostAt(clientX, clientY, key) {
@@ -477,10 +468,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     try { document.getElementById(`itemPlace_${key}`)?.remove(); } catch {}
   }
 
-  function applyTransform(img, s) {
+  function applyTransform(img, s, key) {
+    const ds = getDisplayScale(key);
     img.style.left = `${Math.round(s.x)}px`;
     img.style.top  = `${Math.round(s.y)}px`;
-    img.style.transform = `rotate(${s.rot}deg)`; // ✅ 実寸固定（scaleなし）
+    // ✅ 固定倍率で「少し大きい」＋回転
+    img.style.transform = `scale(${ds}) rotate(${s.rot}deg)`;
   }
 
   /* =========================
@@ -489,12 +482,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
   let editing = false;
   let selectedKey = "";
-  let st = {}; // loadState later
+  let st = {};
 
   const drag = { active:false, key:"", startX:0, startY:0, baseX:0, baseY:0 };
 
   function ownedKeys() {
-    // 所持している & placeableのものだけ（enabledは選択肢では表示）
     const o = [];
     for (const k of PLACE_ORDER) {
       if (!isOwned(k)) continue;
@@ -520,7 +512,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         透明赤枠の位置をクリックで設置。<br>
         設置後はドラッグで移動。<br>
         <b>配置物をクリック</b>で選択できます。<br>
-        （サイズは常に<b>実寸</b>です）
+        （サイズは<b>固定で少し大きい</b>）
       </div>
     </div>
 
@@ -685,7 +677,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const img = ensureObj(key);
     if (!img) return;
 
-    applyTransform(img, s);
+    applyTransform(img, s, key);
 
     const isSel = editing && key === selectedKey;
     img.classList.toggle("selected", isSel);
@@ -695,7 +687,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const wrap = ensureWrap();
     if (wrap) wrap.classList.toggle("ipEditing", !!editing);
 
-    // いま存在しない古いDOMを掃除（念のため）
     document.querySelectorAll(`[id^="itemPlace_"]`).forEach(el => {
       const key = el.id.replace(/^itemPlace_/, "");
       if (!(key in PLACE_ITEMS)) {
@@ -722,12 +713,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     showGhostAt(e.clientX, e.clientY, selectedKey);
   }
 
-  // ✅ 置く（空間クリック）：captureで拾う
+  // 置く（空間クリック）
   function onPlaceDownCapture(e) {
     if (!editing) return;
     if (isOverUI(e.target)) return;
 
-    // 物体クリックは別処理（選択/ドラッグ）
     const hit = e.target?.closest?.(".itemPlaceObj");
     if (hit && hit.dataset?.ipKey) return;
 
@@ -748,10 +738,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const s = st[selectedKey] || (st[selectedKey] = { ...PLACE_ITEMS[selectedKey].default });
     s.placed = true;
 
-    // ✅ 実寸で中心に置く
-    const size = imgSize[selectedKey] || { w: 120, h: 90 };
-    s.x = localX - size.w / 2;
-    s.y = localY - size.h / 2;
+    // ✅ 固定倍率込みで中心に置く
+    const base = imgSize[selectedKey] || { w: 120, h: 90 };
+    const ds = getDisplayScale(selectedKey);
+    const w = base.w * ds;
+    const h = base.h * ds;
+
+    s.x = localX - w / 2;
+    s.y = localY - h / 2;
 
     saveState(st);
     syncOne(selectedKey);
@@ -761,7 +755,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     e.stopImmediatePropagation?.();
   }
 
-  // ✅ 物体クリック：選択 + ドラッグ開始
+  // 物体クリック：選択 + ドラッグ開始
   function onObjDown(e) {
     if (!editing) return;
 
@@ -862,7 +856,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
    * ========================= */
 
   async function openModal() {
-    // 最新のアイテムを反映（oak追加等）
     refreshItems();
     await preloadAll();
 
@@ -888,7 +881,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   (async function boot() {
     ensureStyle();
 
-    // 初回：アイテム生成
     refreshItems();
     await preloadAll();
 
@@ -898,7 +890,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     syncAll();
 
-    // shop変更で即反映（購入されたら候補に出る）
     const reSync = async () => {
       refreshItems();
       await preloadAll();
@@ -919,7 +910,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     hookWB();
     setTimeout(hookWB, 300);
 
-    // LS同期
     window.addEventListener("storage", (e) => {
       if (!e) return;
       if (e.key === SHOP_OWNED_KEY || e.key === LS_STATE_KEY || e.key === LS_ENABLED_KEY) {
@@ -929,20 +919,28 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       }
     });
 
-    // グローバル公開（gameMenu.js から呼ぶ）
     window.ITEMPLACE = {
       openModal,
       open: openModal,
       close,
       select: (key) => selectKey(key),
       refresh: reSync,
+      setScale: (v) => { // 任意：外から倍率を変えたい時用（UIは無い）
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return;
+        // グローバル定数は変えられないので、各アイテムに反映
+        for (const k of Object.keys(PLACE_ITEMS)) {
+          PLACE_ITEMS[k].displayScale = n;
+        }
+        syncAll();
+      },
       _getItems: () => ({ ...PLACE_ITEMS }),
       _order: () => PLACE_ORDER.slice(),
       _enabledKey: LS_ENABLED_KEY,
       _stateKey: LS_STATE_KEY,
+      _displayScaleDefault: DISPLAY_SCALE,
     };
 
-    // WB互換
     try {
       window.WB = window.WB || {};
       window.WB.itemplace = window.WB.itemplace || {};
