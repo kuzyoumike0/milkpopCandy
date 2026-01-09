@@ -1,72 +1,38 @@
-// itemPlace.js（V10：✅ミラーボール設置ON/OFF + ✅背景で虹スポットライト + ✅左右ゆらゆら）
-// ✅ アイテム配置は itemPlace のみ（shop.jsは購入のみ）
-// ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う
-// ✅ oak等が増えても自動追従：SHOP.items() / WB.shop.items() / fallback
-// ✅ 設置ON/OFFは itemPlace.js が管理（LS: milkpop_itemplace_enabled_v1）
-// ✅ ミラーボール(mirrorball)も設置ON/OFFできる（OFFで撤去＆ライト停止）
-// ✅ ミラーボール設置中：背景レイヤー上で「幅広い虹色スポットライト」2本を出して左右に揺らす
-// ✅ bedは地面吸着（y固定）
-// ✅ クリックできない問題根絶：編集中だけ pointer-events:auto
+// itemPlace.js（V10：mirrorball/bed/oak 置ける + bed地面吸着）
+// ✅ mirrorball も配置対象（設置ON/OFF + placed）
+// ✅ stateKey を milkpop_itemplace_v10 に統一（bgcolor.jsと一致）
+// ✅ 配置できない系を根絶：host rect / pointer / capture / UI判定 強化
 
 (() => {
   "use strict";
   console.log("[itemPlace] LOADED V10", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
-  const LS_STATE_KEY   = "milkpop_itemplace_v10";         // { key:{x,y,rot,placed} }
+  const LS_STATE_KEY   = "milkpop_itemplace_v10";         // ✅ v10
   const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // { key:boolean }
 
-  const HOST_ID   = "field";
-  const BG_ID     = "bgLayer"; // ✅ 背景ライトは可能ならここへ
+  const HOST_ID  = "field";
 
-  const WRAP_ID   = "itemPlaceWrapV10";
-  const STYLE_ID  = "itemPlaceStyleV10";
-  const PANEL_ID  = "itemPlacePanelV10";
-  const GHOST_ID  = "itemPlaceGhostV10";
-  const TOAST_ID  = "itemPlaceToastV1";
+  const WRAP_ID  = "itemPlaceWrapV10";
+  const STYLE_ID = "itemPlaceStyleV10";
+  const PANEL_ID = "itemPlacePanelV10";
+  const GHOST_ID = "itemPlaceGhostV10";
+  const TOAST_ID = "itemPlaceToastV1";
 
-  // ✅ 背景スポットライトDOM
-  const FX_WRAP_ID = "ipMirrorFXWrapV10";
-  const FX_L_ID    = "ipMirrorFXL_V10";
-  const FX_R_ID    = "ipMirrorFXR_V10";
-
-  // ✅ 基本は少し大きめ（他アイテム用）
   const DISPLAY_SCALE_DEFAULT = 1.18;
 
-  // ✅ bed / oak / mirrorball は “うさぎと同じくらい” を基準に
   const ITEM_SCALE_OVERRIDE = {
     bed: 1.00,
     oak: 1.00,
     mirrorball: 1.00,
   };
 
-  // ✅ 🛏 bed 地面吸着：床からの余白（px）
   const BED_GROUND_MARGIN_PX = 0;
-
-  // ✅ 🪩 ミラーボール設定
-  const MIRRORBALL_KEY = "mirrorball";
-
-  // ✅ 虹スポット設定（背景）
-  const SPOT = {
-    width: 360,      // 幅広く
-    height: 620,     // 長め
-    anchorX: 0.50,   // ミラーボール画像の中心寄り
-    anchorY: 0.22,   // 少し上寄り（球の位置）
-    baseAngleL: -18,
-    baseAngleR:  18,
-    swayDeg: 12,     // 揺れ幅
-    swaySpeed: 0.0015,
-    blurPx: 3.2,
-    opacityDay: 0.50,
-    opacityNight: 0.72,
-    hueSpeed: 0.03,  // 虹の色変化
-  };
 
   const $ = (q, p = document) => p.querySelector(q);
   const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
 
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
   function toast(msg) {
     let el = document.getElementById(TOAST_ID);
@@ -90,13 +56,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   /* =========================
-   * Items source (増えても追従)
+   * Items source
    * ========================= */
 
   const FALLBACK_ITEMS = [
-    { key: "bed",        label: "ベッド",        img: "./assets/bg/bed.png",        placeable: true },
-    { key: "oak",        label: "オーク",        img: "./assets/bg/oak.png",        placeable: true },
-    { key: "mirrorball", label: "ミラーボール",   img: "./assets/bg/mirrorball.png", placeable: true },
+    { key: "mirrorball", label: "ミラーボール", img: "./assets/bg/mirrorball.png", placeable: true },
+    { key: "bed",        label: "ベッド",       img: "./assets/bg/bed.png",        placeable: true },
+    { key: "oak",        label: "オーク",       img: "./assets/bg/oak.png",        placeable: true },
   ];
 
   function normalizeShopItem(it) {
@@ -105,11 +71,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     const label = String(it?.label ?? key);
     const src = String(it?.img ?? it?.src ?? "");
-
     const ds = Number(it?.displayScale);
     const displayScaleFromShop = (Number.isFinite(ds) && ds > 0) ? ds : null;
 
-    return { key, label, src, placeable: !!it?.placeable, displayScaleFromShop };
+    // ✅ mirrorball は shop 側が placeable:false でも、ここでは “配置OK” にする（最終決定は itemPlace）
+    const placeable = (key === "mirrorball") ? true : !!it?.placeable;
+
+    return { key, label, src, placeable, displayScaleFromShop };
   }
 
   function readShopItemsMap() {
@@ -124,10 +92,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   function getDefaultForKey(key) {
-    // ざっくり初期位置
-    if (key === MIRRORBALL_KEY) return { x: 260, y: 60, rot: 0, placed: false };
-    if (key === "bed") return { x: 180, y: 280, rot: 0, placed: false };
-    return { x: 180, y: 220, rot: 0, placed: false };
+    return { x: 180, y: 280, rot: 0, placed: false };
   }
 
   function buildPlaceItems() {
@@ -146,16 +111,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       }
     }
 
-    // ✅ map由来に mirrorball が無い環境でも fallback を足して救済
-    const hasKey = new Set(items.map(x => x.key));
-    for (const fb of FALLBACK_ITEMS) {
-      if (!hasKey.has(fb.key)) items.push(normalizeShopItem(fb));
+    // ✅ fallbackにあるのに shop map 側に無い場合も拾う（堅牢）
+    const keysInMap = new Set(items.map(i => i.key));
+    for (const f of FALLBACK_ITEMS) {
+      if (!keysInMap.has(f.key)) items.push(normalizeShopItem(f));
     }
 
     const out = {};
     for (const it of items) {
-      if (!it?.placeable) continue;
-      if (!it?.src) continue;
+      if (!it.placeable) continue;
+      if (!it.src) continue;
 
       out[it.key] = {
         key: it.key,
@@ -170,7 +135,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       };
     }
 
-    const order = Object.keys(out).sort();
+    const order = Object.keys(out).sort((a,b) => {
+      // できれば mirrorball を上に
+      const pr = { mirrorball: 0, bed: 1, oak: 2 };
+      return (pr[a] ?? 999) - (pr[b] ?? 999) || a.localeCompare(b);
+    });
+
     return { out, order };
   }
 
@@ -201,7 +171,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   /* =========================
-   * Enabled (ON/OFF)
+   * Enabled
    * ========================= */
 
   function loadEnabled() {
@@ -225,15 +195,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     en[key] = !!v;
     saveEnabled(en);
 
-    // ✅ OFFにした瞬間に撤去（残骸ゼロ）
     if (!en[key]) {
       st[key] = st[key] || { ...PLACE_ITEMS[key]?.default };
       if (st[key]) st[key].placed = false;
       saveState(st);
       removeObj(key);
     }
-
-    syncFX();
 
     try { window.WB?.emit?.("itemplace:enabled_changed", { key, enabled: !!en[key] }); } catch {}
   }
@@ -305,8 +272,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   /* =========================
-   * 🛏 bed 地面吸着
+   * bed ground snap
    * ========================= */
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function getHost() {
+    return document.getElementById(HOST_ID) || document.body;
+  }
 
   function snapGroundIfNeeded(key) {
     const it = PLACE_ITEMS[key];
@@ -338,7 +311,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   inset:0;
   overflow:visible;
   pointer-events:none;
-  z-index:1; /* うさぎより後ろにしたいならDOM順でbunnyLayer前へ */
+  z-index:1;
 }
 #${WRAP_ID}.ipEditing{ pointer-events:auto; }
 #${WRAP_ID}.ipEditing .itemPlaceObj{ pointer-events:auto; }
@@ -358,34 +331,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   cursor: grab;
 }
 .itemPlaceObj.selected:active{ cursor: grabbing; }
-
-#${FX_WRAP_ID}{
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  z-index:0; /* 背景側に置く */
-  display:none;
-}
-#${FX_WRAP_ID} .beam{
-  position:absolute;
-  left:0; top:0;
-  transform-origin:50% 0%;
-  pointer-events:none;
-  mix-blend-mode: screen;
-  border-radius: 18px;
-  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
-  background: linear-gradient(90deg,
-    rgba(255,0,80,.92) 0%,
-    rgba(255,140,0,.92) 14%,
-    rgba(255,230,0,.92) 28%,
-    rgba(0,255,120,.92) 42%,
-    rgba(0,210,255,.92) 56%,
-    rgba(0,120,255,.92) 70%,
-    rgba(170,70,255,.92) 84%,
-    rgba(255,0,180,.92) 100%
-  );
-  box-shadow: 0 0 40px rgba(255,255,255,.15) inset;
-}
 
 #${GHOST_ID}{
   position:fixed;
@@ -454,15 +399,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 #${PANEL_ID} .mini img{ width:100%; height:100%; object-fit:contain; }
 `;
     document.head.appendChild(stEl);
-  }
-
-  function getHost() {
-    return document.getElementById(HOST_ID) || document.body;
-  }
-
-  function getBgLayerOrHost() {
-    // ✅ 背景スポットライトは bgLayer があればそこ（背景扱い）
-    return document.getElementById(BG_ID) || getHost();
   }
 
   function ensureWrap() {
@@ -534,136 +470,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   /* =========================
-   * 🪩 Mirrorball FX（背景で虹スポット）
-   * ========================= */
-
-  function isNightNow() {
-    const h = new Date().getHours();
-    return (h < 6 || h >= 18);
-  }
-
-  function ensureFX() {
-    ensureStyle();
-
-    const container = getBgLayerOrHost();
-    if (!container) return null;
-
-    try {
-      const cs = getComputedStyle(container);
-      if (cs.position === "static") container.style.position = "relative";
-    } catch {}
-
-    let fx = document.getElementById(FX_WRAP_ID);
-    if (!fx) {
-      fx = document.createElement("div");
-      fx.id = FX_WRAP_ID;
-      fx.innerHTML = `<div class="beam" id="${FX_L_ID}"></div><div class="beam" id="${FX_R_ID}"></div>`;
-      // ✅ 背景側：できるだけ前に入れる（bgLayerの先頭）
-      container.insertBefore(fx, container.firstChild);
-    } else {
-      // ✅ どこかに飛んでも必ず戻す
-      if (fx.parentElement !== container) container.insertBefore(fx, container.firstChild);
-      else if (container.firstChild !== fx) container.insertBefore(fx, container.firstChild);
-    }
-
-    fx.style.zIndex = "0";
-    return fx;
-  }
-
-  function getMirrorballAnchor() {
-    const s = st?.[MIRRORBALL_KEY];
-    if (!s || !s.placed) return null;
-
-    const wh = getDisplayWH(MIRRORBALL_KEY);
-    const ax = s.x + wh.w * SPOT.anchorX;
-    const ay = s.y + wh.h * SPOT.anchorY;
-    return { x: ax, y: ay };
-  }
-
-  function shouldShowFX() {
-    if (!(MIRRORBALL_KEY in PLACE_ITEMS)) return false;
-    if (!isOwned(MIRRORBALL_KEY)) return false;
-    if (!isEnabled(MIRRORBALL_KEY)) return false;
-    const s = st?.[MIRRORBALL_KEY];
-    if (!s || !s.placed) return false;
-    return true;
-  }
-
-  function syncFX() {
-    const fx = ensureFX();
-    if (!fx) return;
-
-    const show = shouldShowFX();
-    fx.style.display = show ? "block" : "none";
-    if (!show) return;
-
-    const a = getMirrorballAnchor();
-    if (!a) return;
-
-    const L = document.getElementById(FX_L_ID);
-    const R = document.getElementById(FX_R_ID);
-    if (!L || !R) return;
-
-    const op = isNightNow() ? SPOT.opacityNight : SPOT.opacityDay;
-
-    const common = (el) => {
-      el.style.left = `${Math.round(a.x)}px`;
-      el.style.top  = `${Math.round(a.y)}px`;
-      el.style.width  = `${SPOT.width}px`;
-      el.style.height = `${SPOT.height}px`;
-      el.style.opacity = String(op);
-      el.style.filter = `blur(${SPOT.blurPx}px) saturate(1.35)`;
-    };
-
-    common(L);
-    common(R);
-
-    L.style.transform = `translateX(-50%) rotate(${SPOT.baseAngleL}deg)`;
-    R.style.transform = `translateX(-50%) rotate(${SPOT.baseAngleR}deg)`;
-  }
-
-  let __fxRAF = 0;
-  function startFXLoop() {
-    cancelAnimationFrame(__fxRAF);
-
-    const tick = (t) => {
-      __fxRAF = requestAnimationFrame(tick);
-
-      // 表示条件外なら何もしない（syncFXがdisplay切り替える）
-      if (!shouldShowFX()) return;
-
-      // アンカーは移動に追従させたいので毎フレ軽く補正
-      const a = getMirrorballAnchor();
-      const L = document.getElementById(FX_L_ID);
-      const R = document.getElementById(FX_R_ID);
-      if (!a || !L || !R) return;
-
-      // 位置追従
-      L.style.left = `${Math.round(a.x)}px`;
-      L.style.top  = `${Math.round(a.y)}px`;
-      R.style.left = `${Math.round(a.x)}px`;
-      R.style.top  = `${Math.round(a.y)}px`;
-
-      // 揺れ
-      const s1 = Math.sin(t * SPOT.swaySpeed);
-      const s2 = Math.sin(t * (SPOT.swaySpeed * 1.09) + 1.7);
-      const angL = SPOT.baseAngleL + s1 * SPOT.swayDeg;
-      const angR = SPOT.baseAngleR - s2 * SPOT.swayDeg;
-
-      L.style.transform = `translateX(-50%) rotate(${angL.toFixed(2)}deg)`;
-      R.style.transform = `translateX(-50%) rotate(${angR.toFixed(2)}deg)`;
-
-      // 虹色変化
-      const hue = (t * SPOT.hueSpeed) % 360;
-      const f = `blur(${SPOT.blurPx}px) saturate(1.35) hue-rotate(${hue.toFixed(1)}deg)`;
-      L.style.filter = f;
-      R.style.filter = f;
-    };
-
-    __fxRAF = requestAnimationFrame(tick);
-  }
-
-  /* =========================
    * Objects
    * ========================= */
 
@@ -695,7 +501,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
   function removeObj(key) {
     try { document.getElementById(`itemPlace_${key}`)?.remove(); } catch {}
-    if (key === MIRRORBALL_KEY) syncFX();
   }
 
   function applyTransform(img, s, key) {
@@ -738,9 +543,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         透明赤枠の位置をクリックで設置。<br>
         設置後はドラッグで移動。<br>
         <b>配置物をクリック</b>で選択できます。<br>
-        （bed / oak / mirrorball は <b>うさぎと同じくらい</b>）<br>
-        🛏 bed は <b>床に吸着</b>します。<br>
-        🪩 mirrorball は <b>背景で虹スポット</b>が揺れます。
+        （mirrorball / bed / oak は <b>うさぎと同じくらい</b>）<br>
+        🛏 bed は <b>床に吸着</b>します。
       </div>
     </div>
 
@@ -771,7 +575,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       s.rot -= 5;
       snapGroundIfNeeded(selectedKey);
       saveState(st); syncOne(selectedKey);
-      syncFX();
     });
 
     byId("ipRotR").addEventListener("click", () => {
@@ -780,7 +583,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       s.rot += 5;
       snapGroundIfNeeded(selectedKey);
       saveState(st); syncOne(selectedKey);
-      syncFX();
     });
 
     byId("ipReset").addEventListener("click", () => {
@@ -790,7 +592,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       st[selectedKey] = { ...def, placed: keepPlaced };
       snapGroundIfNeeded(selectedKey);
       saveState(st); syncOne(selectedKey);
-      syncFX();
     });
 
     byId("ipRemove").addEventListener("click", () => {
@@ -799,7 +600,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       s.placed = false;
       saveState(st);
       syncOne(selectedKey);
-      syncFX();
+      try { window.WB?.emit?.("itemplace:state_changed", { key: selectedKey }); } catch {}
     });
 
     byId("ipDone").addEventListener("click", () => setEditing(false));
@@ -812,6 +613,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       syncAll();
       toast(!now ? "✅ 設置ON" : "⛔ 設置OFF（撤去）");
       refreshSelect();
+      try { window.WB?.emit?.("itemplace:state_changed", { key: selectedKey }); } catch {}
     });
 
     return p;
@@ -918,8 +720,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     const isSel = editing && key === selectedKey;
     img.classList.toggle("selected", isSel);
-
-    if (key === MIRRORBALL_KEY) syncFX();
   }
 
   function syncAll() {
@@ -934,15 +734,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     });
 
     for (const k of Object.keys(PLACE_ITEMS)) syncOne(k);
-
-    // ✅ 置いた瞬間にスポットが出るように必ず同期
-    syncFX();
   }
 
   function isOverUI(target) {
     return !!(
       target?.closest?.(
-        `#${PANEL_ID}, #gameMenuPanelV1, #gameHamburgerV1, #isyouModal, #isyouConfirmBar, #bgShopModalV1, #bgShopBackdropV1, #bgShopModalV2, #bgShopBackdropV2, #bgShopModalV3, #bgShopBackdropV3`
+        `#${PANEL_ID}, #gameMenuPanelV1, #gameHamburgerV1, #isyouModal, #isyouConfirmBar, #bgShopModalV1, #bgShopBackdropV1, #bgShopModalV2, #bgShopBackdropV2, #bgShopModalV3, #bgShopBackdropV3, #bgmBackdropModalV1, #bgmModalModalV1`
       )
     );
   }
@@ -959,18 +756,19 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!editing) return;
     if (isOverUI(e.target)) return;
 
-    // 配置物をクリックした場合は置かない（ドラッグ側）
+    // 既存配置物クリックは「選択/ドラッグ」で処理
     const hit = e.target?.closest?.(".itemPlaceObj");
     if (hit && hit.dataset?.ipKey) return;
 
     if (!selectedKey) return;
-    if (!isOwned(selectedKey)) return;
+    if (!isOwned(selectedKey)) { toast("未購入です"); return; }
     if (!isEnabled(selectedKey)) { toast("⛔ 設置OFFです"); return; }
 
     const host = getHost();
     const r = host.getBoundingClientRect();
-    if (r.width <= 2 || r.height <= 2) {
+    if (r.width <= 8 || r.height <= 8) {
       console.warn("[itemPlace] host rect is too small:", r);
+      toast("配置エリアが小さい（#field確認）");
       return;
     }
 
@@ -988,7 +786,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     saveState(st);
     syncOne(selectedKey);
-    syncFX();
+
+    try { window.WB?.emit?.("itemplace:state_changed", { key: selectedKey }); } catch {}
 
     e.preventDefault();
     e.stopPropagation();
@@ -1041,18 +840,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     snapGroundIfNeeded(drag.key);
 
     syncOne(drag.key);
-    if (drag.key === MIRRORBALL_KEY) syncFX();
   }
 
   function onObjUp() {
     if (!drag.active) return;
-    const key = drag.key;
     drag.active = false;
 
-    snapGroundIfNeeded(key);
-    saveState(st);
+    snapGroundIfNeeded(drag.key);
 
-    if (key === MIRRORBALL_KEY) syncFX();
+    saveState(st);
+    try { window.WB?.emit?.("itemplace:state_changed", { key: drag.key }); } catch {}
   }
 
   function onKey(e) {
@@ -1118,12 +915,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!owned.includes(selectedKey)) selectedKey = owned[0];
 
     st = loadState();
-
-    // ✅ 開いた瞬間も床へ
     try { snapGroundIfNeeded("bed"); } catch {}
 
     setEditing(true);
-    syncAll();
   }
 
   function close() { setEditing(false); }
@@ -1144,9 +938,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
     try { snapGroundIfNeeded("bed"); } catch {}
 
-    ensureFX();
     syncAll();
-    startFXLoop();
 
     const reSync = async () => {
       refreshItems();
@@ -1179,30 +971,21 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       }
     });
 
-    // 位置ズレ対策（ホストが動いたりしたとき）
-    window.addEventListener("resize", () => syncFX(), { passive: true });
-    window.addEventListener("scroll", () => syncFX(), { passive: true });
-
     window.ITEMPLACE = {
       openModal,
-      open: openModal,
+      open: openModal, // ✅ gameMenu.js がこれを呼ぶ
       close,
       select: (key) => selectKey(key),
       refresh: reSync,
-      _getItems: () => ({ ...PLACE_ITEMS }),
-      _order: () => PLACE_ORDER.slice(),
-      _enabledKey: LS_ENABLED_KEY,
       _stateKey: LS_STATE_KEY,
-      _scaleDefault: DISPLAY_SCALE_DEFAULT,
-      _scaleOverride: { ...ITEM_SCALE_OVERRIDE },
-      _bedGroundMargin: BED_GROUND_MARGIN_PX,
-      _fx: { SPOT: { ...SPOT }, container: BG_ID },
+      _enabledKey: LS_ENABLED_KEY,
     };
 
     try {
       window.WB = window.WB || {};
       window.WB.itemplace = window.WB.itemplace || {};
       window.WB.itemplace.openModal = openModal;
+      window.WB.itemplace.open = openModal;
       window.WB.itemplace.close = close;
       window.WB.itemplace.select = (key) => selectKey(key);
       window.WB.itemplace.refresh = reSync;
