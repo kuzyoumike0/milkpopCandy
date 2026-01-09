@@ -1,48 +1,23 @@
-// zukan.js（互換強化版）
-// 図鑑 + 実績 + 称号 UI（スクショ風のカードUI）
-// - ✅ HUDボタンは作らない（ハンバーガーメニューから呼ぶ）
-// - タブ：うさぎ / 実績 / 称号
-// - SYOUGOU, zisseki があれば自動連動
-// - 旅立ち回数（うさぎ別）は localStorage で保持
-// - ✅ WB新旧互換：getBunnies / getCoin など
-// - ✅ CATEGORIES 未定義バグ修正（内部定義）
-// - ✅ 旅立ちイベント(bunnyDeparted/tabidachi)で farewell 加算
+// zukan.js（ハンバーガー起動版：HUDボタンを作らない）
+// ✅ 図鑑 + 実績 + 称号 UI（スクショ風のカードUI）
+// ✅ HUD「図鑑」ボタンは作らない（gameMenu.js → WB.zukan.open() で開く）
+// ✅ WB新旧互換 / CATEGORIES内蔵 / 旅立ち加算
 
 (() => {
   if (!window.WB) return;
   const WB = window.WB;
 
-  /* =========================
-   * Storage
-   * ========================= */
-  const LS = {
-    zukan: "wb_zukan_v1", // { discovered: { bunny1:true ... }, farewellByType: { bunny1: 0 ... } }
-  };
+  const LS = { zukan: "wb_zukan_v1" };
 
   function loadJson(key, def) {
-    try {
-      const v = JSON.parse(localStorage.getItem(key) || "null");
-      return v ?? def;
-    } catch {
-      return def;
-    }
+    try { const v = JSON.parse(localStorage.getItem(key) || "null"); return v ?? def; }
+    catch { return def; }
   }
-  function saveJson(key, v) {
-    localStorage.setItem(key, JSON.stringify(v));
-  }
+  function saveJson(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
 
-  const store = loadJson(LS.zukan, {
-    discovered: {},
-    farewellByType: {},
-  });
+  const store = loadJson(LS.zukan, { discovered: {}, farewellByType: {} });
+  function saveStore() { saveJson(LS.zukan, store); }
 
-  function saveStore() {
-    saveJson(LS.zukan, store);
-  }
-
-  /* =========================
-   * WB 互換ヘルパ
-   * ========================= */
   function getBunnies() {
     try {
       if (typeof WB.getBunnies === "function") {
@@ -50,51 +25,34 @@
         return Array.isArray(arr) ? arr : [];
       }
     } catch {}
-    try {
-      if (Array.isArray(WB.bunnies)) return WB.bunnies;
-    } catch {}
+    try { if (Array.isArray(WB.bunnies)) return WB.bunnies; } catch {}
     return [];
   }
 
-  /* =========================
-   * Bunny Master（ここ増やす）
-   * ========================= */
   const BUNNY_MASTER = [
-    {
-      key: "bunny1",
-      name: "bunny1",
-      img: "./assets/bunny.png",
-      desc: "基本のうさぎ。コインは控えめ。",
-      flavor: "数えきれない旅立ちの先で、\nここはもう帰る場所になった。",
-    },
+    { key: "bunny1", name: "bunny1", img: "./assets/bunny.png", desc: "基本のうさぎ。コインは控えめ。", flavor: "数えきれない旅立ちの先で、\nここはもう帰る場所になった。" },
     { key: "bunny3", name: "bunny3", img: "./assets/bunny3.png", desc: "安定してコインを稼ぐ中級うさぎ。" },
     { key: "bunny4", name: "bunny4", img: "./assets/bunny4.png", desc: "大量のコインを生み出す上級うさぎ。" },
     { key: "bunny5", name: "bunny5", img: "./assets/bunny5.png", desc: "牧場最上級クラス。圧倒的生産力。" },
     { key: "reabunny", name: "reabunny", img: "./assets/reabunny.png", desc: "突然変異でのみ現れる幻のうさぎ。" },
   ];
 
-  // 画像src→key推定（WB.bunnies の構造が不明でも拾えるように）
   function guessKeyFromBunnyObj(b) {
     if (!b) return null;
-
     const candidates = [];
-
     if (typeof b === "string") candidates.push(b);
-
     if (typeof b?.kind === "string") candidates.push(b.kind);
     if (typeof b?.adultSrc === "string") candidates.push(b.adultSrc);
     if (typeof b?.src === "string") candidates.push(b.src);
     if (typeof b?.image === "string") candidates.push(b.image);
     if (typeof b?.img === "string") candidates.push(b.img);
     if (typeof b?.asset === "string") candidates.push(b.asset);
-
     try {
       if (b?.el?.src) candidates.push(String(b.el.src));
       if (b?.img?.src) candidates.push(String(b.img.src));
     } catch {}
 
     const joined = candidates.filter(Boolean).join(" ").toLowerCase();
-
     if (joined.includes("reabunny")) return "reabunny";
     if (joined.includes("bunny5")) return "bunny5";
     if (joined.includes("bunny4")) return "bunny4";
@@ -130,169 +88,57 @@
     saveStore();
   }
 
-  /* =========================
-   * UI
-   * ========================= */
   const PANEL_ID = "wbZukanPanelV1";
   let panelEl = null;
 
-  function $(q, p = document) {
-    return p.querySelector(q);
-  }
+  function $(q, p = document) { return p.querySelector(q); }
 
   function ensureStyles() {
     if (document.getElementById("wbZukanStyleV1")) return;
     const s = document.createElement("style");
     s.id = "wbZukanStyleV1";
     s.textContent = `
-#${PANEL_ID}{
-  position: fixed;
-  inset: 0;
-  z-index: 2147483647;
-  display: none;
-  user-select: none;
-}
-#${PANEL_ID} .bg{
-  position:absolute; inset:0;
-  background: rgba(0,0,0,.35);
-}
+#${PANEL_ID}{position:fixed; inset:0; z-index:2147483647; display:none; user-select:none;}
+#${PANEL_ID} .bg{position:absolute; inset:0; background:rgba(0,0,0,.35);}
 #${PANEL_ID} .card{
-  position:absolute;
-  left:50%; top:50%;
-  transform: translate(-50%, -50%);
-  width: min(820px, 94vw);
-  max-height: min(82vh, 840px);
-  background: rgba(255,255,255,.97);
-  border-radius: 16px;
-  box-shadow: 0 18px 60px rgba(0,0,0,.25);
-  overflow: hidden;
-  display:flex;
-  flex-direction: column;
+  position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  width:min(820px, 94vw);
+  max-height:min(82vh, 840px);
+  background:rgba(255,255,255,.97);
+  border-radius:16px;
+  box-shadow:0 18px 60px rgba(0,0,0,.25);
+  overflow:hidden;
+  display:flex; flex-direction:column;
 }
-#${PANEL_ID} .head{
-  display:flex;
-  align-items:center;
-  justify-content: space-between;
-  padding: 12px 14px;
-}
-#${PANEL_ID} .head .title{
-  font-weight: 1000;
-  letter-spacing:.02em;
-  display:flex;
-  align-items:center;
-  gap: 10px;
-}
-#${PANEL_ID} .close{
-  width: 34px;
-  height: 34px;
-  border:none;
-  border-radius: 999px;
-  background: rgba(0,0,0,.06);
-  font-weight: 1000;
-  cursor:pointer;
-}
-#${PANEL_ID} .tabs{
-  display:flex;
-  gap: 10px;
-  padding: 0 14px 10px;
-}
-#${PANEL_ID} .tab{
-  flex:1;
-  border:none;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-weight: 1000;
-  background: rgba(0,0,0,.06);
-  cursor:pointer;
-}
-#${PANEL_ID} .tab.on{
-  background: rgba(255,255,255,.92);
-  box-shadow: 0 10px 24px rgba(0,0,0,.10);
-}
-#${PANEL_ID} .body{
-  padding: 12px 14px 16px;
-  overflow:auto;
-}
-#${PANEL_ID} .grid{
-  display:grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-}
-@media (max-width: 760px){
-  #${PANEL_ID} .grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+#${PANEL_ID} .head{display:flex; align-items:center; justify-content:space-between; padding:12px 14px;}
+#${PANEL_ID} .head .title{font-weight:1000; letter-spacing:.02em; display:flex; align-items:center; gap:10px;}
+#${PANEL_ID} .close{width:34px; height:34px; border:none; border-radius:999px; background:rgba(0,0,0,.06); font-weight:1000; cursor:pointer;}
+#${PANEL_ID} .tabs{display:flex; gap:10px; padding:0 14px 10px;}
+#${PANEL_ID} .tab{flex:1; border:none; border-radius:12px; padding:10px 12px; font-weight:1000; background:rgba(0,0,0,.06); cursor:pointer;}
+#${PANEL_ID} .tab.on{background:rgba(255,255,255,.92); box-shadow:0 10px 24px rgba(0,0,0,.10);}
+#${PANEL_ID} .body{padding:12px 14px 16px; overflow:auto;}
+#${PANEL_ID} .grid{display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px;}
+@media (max-width:760px){ #${PANEL_ID} .grid{grid-template-columns:repeat(2, minmax(0,1fr));} }
 #${PANEL_ID} .item{
-  background: rgba(255,255,255,.94);
-  border-radius: 14px;
-  padding: 12px;
-  box-shadow: 0 10px 24px rgba(0,0,0,.10);
-  display:flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 190px;
+  background:rgba(255,255,255,.94);
+  border-radius:14px;
+  padding:12px;
+  box-shadow:0 10px 24px rgba(0,0,0,.10);
+  display:flex; flex-direction:column; gap:8px;
+  min-height:190px;
 }
-#${PANEL_ID} .item.locked{
-  opacity: .62;
-}
-#${PANEL_ID} .imgBox{
-  height: 86px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
-#${PANEL_ID} .imgBox img{
-  max-height: 86px;
-  max-width: 100%;
-  object-fit: contain;
-  display:block;
-}
-#${PANEL_ID} .name{
-  font-weight: 1000;
-  text-align:center;
-}
-#${PANEL_ID} .desc{
-  font-weight: 900;
-  font-size: 12px;
-  opacity: .82;
-  text-align:center;
-  white-space: pre-line;
-}
-#${PANEL_ID} .meta{
-  margin-top:auto;
-  text-align:center;
-  font-weight: 1000;
-  font-size: 12px;
-  opacity: .85;
-}
-#${PANEL_ID} .pill{
-  display:inline-flex;
-  align-items:center;
-  gap: 6px;
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: rgba(0,0,0,.06);
-  font-weight: 1000;
-  font-size: 12px;
-}
-#${PANEL_ID} .row{
-  display:flex;
-  align-items:center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-#${PANEL_ID} .btn{
-  border:none;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-weight: 1000;
-  cursor:pointer;
-  background: #fff;
-  box-shadow: 0 10px 24px rgba(0,0,0,.10);
-}
-#${PANEL_ID} .btn.primary{ background: #ffd6e7; }
-#${PANEL_ID} .btn[disabled]{ opacity:.55; cursor:not-allowed; box-shadow:none; }
+#${PANEL_ID} .item.locked{opacity:.62;}
+#${PANEL_ID} .imgBox{height:86px; display:flex; align-items:center; justify-content:center;}
+#${PANEL_ID} .imgBox img{max-height:86px; max-width:100%; object-fit:contain; display:block;}
+#${PANEL_ID} .name{font-weight:1000; text-align:center;}
+#${PANEL_ID} .desc{font-weight:900; font-size:12px; opacity:.82; text-align:center; white-space:pre-line;}
+#${PANEL_ID} .meta{margin-top:auto; text-align:center; font-weight:1000; font-size:12px; opacity:.85;}
+#${PANEL_ID} .pill{display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:6px 10px; background:rgba(0,0,0,.06); font-weight:1000; font-size:12px;}
+#${PANEL_ID} .row{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
+#${PANEL_ID} .btn{border:none; border-radius:12px; padding:10px 12px; font-weight:1000; cursor:pointer; background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.10);}
+#${PANEL_ID} .btn.primary{background:#ffd6e7;}
+#${PANEL_ID} .btn[disabled]{opacity:.55; cursor:not-allowed; box-shadow:none;}
 `;
     document.head.appendChild(s);
   }
@@ -399,18 +245,8 @@
     const ach = z?.ach || loadJson("wb_ach_v4", loadJson("wb_ach_v3", {}));
 
     const list = master.length
-      ? master.map((a) => ({
-          id: a.id,
-          name: a.name || a.id,
-          desc: a.desc || "",
-          unlocked: !!ach?.[a.id],
-        }))
-      : Object.keys(ach || {}).map((k) => ({
-          id: k,
-          name: k,
-          desc: "",
-          unlocked: !!ach[k],
-        }));
+      ? master.map((a) => ({ id:a.id, name:a.name || a.id, desc:a.desc || "", unlocked:!!ach?.[a.id] }))
+      : Object.keys(ach || {}).map((k) => ({ id:k, name:k, desc:"", unlocked:!!ach[k] }));
 
     const unlockedCount = list.filter((x) => x.unlocked).length;
 
@@ -439,10 +275,6 @@
       render();
     });
   }
-
-  /* =========================
-   * Titles（SYOUGOU連動）
-   * ========================= */
 
   const CATEGORIES = [
     { key: "unchi",     label: "ウンチ",     emoji: "💩" },
@@ -530,7 +362,6 @@
   function open(tab = "bunny") {
     const p = buildPanel();
     p.style.display = "block";
-
     scanCurrentBunnies();
 
     p.querySelectorAll(".tab").forEach((x) => x.classList.remove("on"));
@@ -545,26 +376,19 @@
     p.style.display = "none";
   }
 
-  /* =========================
-   * Public API（他スクリプトから呼ぶ用）
-   * ========================= */
+  // ✅ HUDボタンは作らない
+  // function injectHudButton() {}
+
   WB.zukan = {
     open,
     close,
-
     discover,
     scanCurrentBunnies,
-
     addFarewellByType,
     getFarewellByType: (k) => Number(store.farewellByType[k] || 0),
-
     store,
     BUNNY_MASTER,
   };
-
-  /* =========================
-   * Hooks
-   * ========================= */
 
   try { WB.on?.("bunnyCountChanged", scanCurrentBunnies); } catch {}
 
