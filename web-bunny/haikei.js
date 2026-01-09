@@ -11,7 +11,7 @@
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
   const LS_KEY = "milkpop_haikei_v1";
 
-  const BED_SRC = "/bg/bed.png";
+  const BED_SRC = "assets/bg/bed.png";
 
   const BED_ID = "haikeiBedImage";
   const WRAP_ID = "haikeiBedWrap";
