@@ -1,13 +1,6 @@
 // BGM.js（非module / ✅朝昼夜は自動・別枠で「購入した曲を好きな時に流す」）
-// ✅ 修正：404根絶（assets/BGM/ に合わせる / 大文字小文字一致）
-// ✅ 修正：日本語ファイル名を encodeURI して確実に読み込む
-// ✅ 通常BGM：朝/昼/夜 は時間帯で自動（買ってれば自動で鳴る）
-// ✅ いつでもBGM：Stream / おもしろすぎてどっかん / Cocktail_Glass を購入して任意に選択して流せる
-// ✅ 「いつでもBGM」を選択中は、時間帯切替より優先
-// ✅ 自動に戻すあり
-// ✅ 既存UIがあっても削除して作り直す（購入メニュー出ない問題根絶）
-// ✅ body待ってからUI生成
-// ✅ WB差し替え耐性 / unlockAudioOnce 連結
+// ✅ UI変更：右上ハンバーガーは作らない → “BGMモーダル”だけ作る
+// ✅ window.BGM.open() / close() を公開 → gameMenu.js から呼ぶ
 
 (() => {
   "use strict";
@@ -16,42 +9,29 @@
   const LS_KEY_OWNED    = "milkpop_bgm_owned_v2";
   const LS_KEY_SELECT   = "milkpop_bgm_selected_v2";
 
-  /* =========================
-   * Tracks（✅ assets/BGM/ に統一）
-   * ========================= */
-  // ✅ 通常BGM（時間帯で自動）
   const BASE_TRACKS = {
     morning: "./assets/BGM/bgm_morning.mp3",
     day:     "./assets/BGM/bgm_day.mp3",
     night:   "./assets/BGM/bgm_night.mp3",
   };
 
-  // ✅ 特別（演出用に呼び出す用：任意）
-  // ※無いなら購入しても鳴らないので、使わないならこの行はそのままでもOK
   const SPECIAL_TRACKS = {
     depart:  "./assets/BGM/bgm_depart.mp3",
   };
 
-  // ✅ いつでもBGM（GitHubにあるファイル名に完全一致）
   const ANYTIME_TRACKS = {
     stream:   "./assets/BGM/Stream.mp3",
     dokkan:   "./assets/BGM/おもしろすぎてどっかん.mp3",
     cocktail: "./assets/BGM/Cocktail_Glass.mp3",
   };
 
-  // 全トラック（内部判定用）
   const TRACKS = { ...BASE_TRACKS, ...SPECIAL_TRACKS, ...ANYTIME_TRACKS };
 
   const PRICES = {
-    // 通常
     morning: 3000,
     day:     3000,
     night:   3000,
-
-    // 特別
     depart:  8000,
-
-    // いつでも
     stream:   12000,
     dokkan:   15000,
     cocktail: 10000,
@@ -61,19 +41,17 @@
     morning: "朝BGM",
     day:     "昼BGM",
     night:   "夜BGM",
-
     depart:  "旅立ちBGM",
-
     stream:   "Stream（いつでも）",
     dokkan:   "おもしろすぎてどっかん（いつでも）",
     cocktail: "Cocktail_Glass（いつでも）",
   };
 
   const UI = {
-    hamburger: "bgmHamburgerV3",
-    panel: "bgmPanelV3",
+    style: "bgmModalStyleV1",
+    backdrop: "bgmBackdropV1",
+    modal: "bgmModalV1",
     toast: "bgmToastV3",
-    style: "bgmStyleV3",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
@@ -123,10 +101,7 @@
 
   let unlocked = false;
   let currentKey = null;
-
-  // specialKey は「演出で一時的に鳴らす」用途（選択中よりさらに優先）
   let specialKey = null;
-
   let audio = null;
 
   function ensureAudio() {
@@ -135,15 +110,12 @@
     audio.loop = true;
     audio.preload = "auto";
     applyVolume();
-
-    // ★ 失敗が見えるようにする
     audio.addEventListener("error", () => {
       try {
         const err = audio.error ? `${audio.error.code}` : "unknown";
         console.warn("[BGM] audio error:", err, "src=", audio.src);
       } catch {}
     });
-
     return audio;
   }
 
@@ -152,20 +124,16 @@
     audio.volume = settings.muted ? 0 : settings.volume;
   }
 
-  // ✅ 日本語ファイル名でも確実に（/おもしろすぎてどっかん.mp3 など）
   function normalizeSrc(src) {
     if (!src) return src;
-    // すでに % が入ってる（エンコード済み）ならそのまま
     if (src.includes("%")) return src;
     return encodeURI(src);
   }
 
-  // ✅ JSTじゃなくてもいいならこれでOK（端末の時間で切替）
-  // もし JST で統一したいなら Intl.DateTimeFormat(timeZone:"Asia/Tokyo") に置き換えてOK
   function pickByTime() {
     const h = new Date().getHours();
-    if (h >= 5 && h < 10) return "morning"; // 05:00-09:59
-    if (h >= 10 && h < 17) return "day";    // 10:00-16:59
+    if (h >= 5 && h < 10) return "morning";
+    if (h >= 10 && h < 17) return "day";
     return "night";
   }
 
@@ -176,9 +144,7 @@
     return null;
   }
 
-  /* =========================
-   * WB coin compat
-   * ========================= */
+  /* ===== WB coin compat ===== */
   function getCoinsWB() {
     const WB = window.WB;
     try {
@@ -279,11 +245,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   function stop() { if (audio) try { audio.pause(); } catch {} }
 
-  // ✅ 優先順位：
-  // 1) specialKey（演出一時BGM）
-  // 2) selectedKey（いつでもBGM or 通常BGMを手動選択）
-  // 3) 時間帯（朝昼夜）
-  // 4) 持ってる中でどれか
   function decideKeyToPlay() {
     if (specialKey && TRACKS[specialKey] && isOwned(specialKey)) return specialKey;
 
@@ -350,7 +311,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     return { ok: true };
   }
 
-  // 演出などで一時的に鳴らす（手動選択より優先）
   function playSpecial(key) {
     if (!TRACKS[key]) return;
     if (!isOwned(key)) { toast("未購入です"); return; }
@@ -362,9 +322,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     startBgm(true);
   }
 
-  /* =========================
-   * WB patch (swap-safe)
-   * ========================= */
+  /* ===== WB patch ===== */
   let lastWBRef = null;
 
   function patchWB(WB) {
@@ -381,11 +339,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     };
 
     WB.bgm = WB.bgm || {};
-    WB.bgm.mountUI = mountUI;
-
     WB.bgm.start = () => startBgm(true);
     WB.bgm.stop = () => stop();
-
     WB.bgm.playSpecial = playSpecial;
     WB.bgm.clearSpecial = clearSpecial;
 
@@ -414,18 +369,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     });
   }
 
-  function removeOldUI() {
-    const ids = [
-      "bgmHamburgerV1","bgmPanelV1",
-      "bgmHamburgerV2","bgmPanelV2",
-      UI.hamburger, UI.panel,
-    ];
-    for (const id of ids) {
-      const el = document.getElementById(id);
-      try { el?.remove(); } catch {}
-    }
-  }
-
   function renderItem(key, label, desc) {
     const price = PRICES[key] ?? 0;
     return `
@@ -442,92 +385,90 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 </div>`;
   }
 
-  function mountUI({ position = "top-right", title = "BGM" } = {}) {
-    if (document.getElementById(UI.hamburger) && document.getElementById(UI.panel)) return;
-
-    removeOldUI();
-
-    if (!document.getElementById(UI.style)) {
-      const style = document.createElement("style");
-      style.id = UI.style;
-      style.textContent = `
-#${UI.hamburger}{
-  position:fixed; z-index:2147483000;
-  ${position.includes("top") ? "top:10px;" : "bottom:10px;"}
-  ${position.includes("right") ? "right:10px;" : "left:10px;"}
-  width:44px;height:44px;
-  border:none;border-radius:14px;
-  background:rgba(255,255,255,.95);
-  box-shadow:0 12px 32px rgba(0,0,0,.18);
-  cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-}
-#${UI.hamburger} .bars{ width:18px; height:14px; position:relative; }
-#${UI.hamburger} .bars i{
-  position:absolute; left:0; right:0; height:2px; border-radius:2px; background:#333;
-}
-#${UI.hamburger} .bars i:nth-child(1){ top:0; }
-#${UI.hamburger} .bars i:nth-child(2){ top:6px; }
-#${UI.hamburger} .bars i:nth-child(3){ top:12px; }
-
-#${UI.panel}{
-  position:fixed; z-index:2147483001;
-  ${position.includes("top") ? "top:62px;" : "bottom:62px;"}
-  ${position.includes("right") ? "right:10px;" : "left:10px;"}
-  width:min(380px, 92vw);
-  background:rgba(255,255,255,.98);
-  border-radius:16px;
-  box-shadow:0 18px 44px rgba(0,0,0,.22);
-  padding:12px 12px 10px;
+  /* =========================
+   * ✅ BGMモーダルUI
+   * ========================= */
+  function ensureStyle() {
+    if (document.getElementById(UI.style)) return;
+    const style = document.createElement("style");
+    style.id = UI.style;
+    style.textContent = `
+#${UI.backdrop}{
+  position:fixed; inset:0;
+  background:rgba(0,0,0,.36);
+  z-index:2147483000;
   display:none;
 }
-#${UI.panel} .row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-#${UI.panel} .ttl{ font-weight:900; }
-#${UI.panel} .sub{ font-size:12px; opacity:.75; margin-top:2px; }
-#${UI.panel} .btn{
+#${UI.modal}{
+  position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  width:min(420px, 92vw);
+  max-height:min(86vh, 820px);
+  overflow:hidden;
+  border-radius:18px;
+  background:rgba(255,255,255,.98);
+  box-shadow:0 24px 70px rgba(0,0,0,.28);
+  display:flex; flex-direction:column;
+}
+#${UI.modal} .head{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 14px;
+  border-bottom:1px solid rgba(0,0,0,.08);
+}
+#${UI.modal} .ttl{ font-weight:1000; }
+#${UI.modal} .close{
+  border:none; border-radius:12px;
+  padding:8px 10px; font-weight:1000;
+  background:rgba(0,0,0,.06);
+  cursor:pointer;
+}
+#${UI.modal} .body{ padding:12px 14px; overflow:auto; }
+#${UI.modal} .row{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+#${UI.modal} .btn{
   border:none; border-radius:12px;
   padding:8px 10px;
-  font-weight:800;
+  font-weight:900;
   background:#ffd6e7;
   cursor:pointer;
 }
-#${UI.panel} .btn.ghost{ background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08); }
-#${UI.panel} .btn.small{ padding:6px 8px; border-radius:10px; font-weight:900; }
-#${UI.panel} .slider{ width:100%; margin:10px 0 6px; }
-#${UI.panel} .fine{ font-size:12px; opacity:.75; }
-#${UI.panel} .sep{ height:1px; background:rgba(0,0,0,.08); margin:10px 0; }
+#${UI.modal} .btn.ghost{
+  background:#fff;
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+}
+#${UI.modal} .slider{ width:100%; margin:10px 0 6px; }
+#${UI.modal} .fine{ font-size:12px; opacity:.75; font-weight:900; }
+#${UI.modal} .sep{ height:1px; background:rgba(0,0,0,.08); margin:10px 0; }
 
-#bgmShopV3 .item{
+#bgmShopModal .item{
   display:flex; align-items:center; justify-content:space-between;
   gap:10px; padding:8px 8px;
   border-radius:14px;
   background:rgba(0,0,0,.03);
   margin:8px 0;
 }
-#bgmShopV3 .name{ font-weight:900; }
-#bgmShopV3 .meta{ font-size:12px; opacity:.75; margin-top:2px; }
-#bgmShopV3 .right{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-#bgmShopV3 .tag{
+#bgmShopModal .name{ font-weight:900; }
+#bgmShopModal .meta{ font-size:12px; opacity:.75; margin-top:2px; }
+#bgmShopModal .right{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+#bgmShopModal .tag{
   font-size:12px; font-weight:900;
   padding:4px 8px; border-radius:999px;
   background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08);
 }
-#bgmShopV3 .buy{
+#bgmShopModal .buy{
   border:none; border-radius:12px;
   padding:8px 10px; font-weight:900;
   cursor:pointer; background:#ffd6e7;
 }
-#bgmShopV3 .buy[disabled]{ opacity:.55; cursor:not-allowed; }
-#bgmShopV3 .select{
+#bgmShopModal .buy[disabled]{ opacity:.55; cursor:not-allowed; }
+#bgmShopModal .select{
   border:none; border-radius:12px;
   padding:8px 10px; font-weight:900;
   cursor:pointer; background:#fff;
   box-shadow:0 10px 24px rgba(0,0,0,.08);
 }
-#bgmShopV3 .select[disabled]{ opacity:.55; cursor:not-allowed; }
-#bgmShopV3 .select.active{ background:#333; color:#fff; box-shadow:none; }
-
-#bgmShopV3 .sectionTitle{
+#bgmShopModal .select[disabled]{ opacity:.55; cursor:not-allowed; }
+#bgmShopModal .select.active{ background:#333; color:#fff; box-shadow:none; }
+#bgmShopModal .sectionTitle{
   margin-top:10px;
   font-size:12px;
   font-weight:900;
@@ -535,129 +476,104 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   letter-spacing:.03em;
 }
 `;
-      document.head.appendChild(style);
+    document.head.appendChild(style);
+  }
+
+  let backdropEl = null;
+  let modalEl = null;
+
+  function ensureModal() {
+    ensureStyle();
+
+    backdropEl = document.getElementById(UI.backdrop);
+    if (!backdropEl) {
+      backdropEl = document.createElement("div");
+      backdropEl.id = UI.backdrop;
+      document.body.appendChild(backdropEl);
     }
 
-    const btn = document.createElement("button");
-    btn.id = UI.hamburger;
-    btn.type = "button";
-    btn.innerHTML = `<span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>`;
-    btn.title = "BGM設定";
-
-    const panel = document.createElement("div");
-    panel.id = UI.panel;
-
-    panel.innerHTML = `
-<div class="row">
-  <div>
-    <div class="ttl">${title}</div>
-    <div class="sub" id="bgmStateTextV3">未再生（画面をクリックで開始）</div>
-  </div>
-  <button class="btn ghost" id="bgmCloseV3" type="button">×</button>
-</div>
-
-<div class="sep"></div>
-
-<div class="row">
-  <button class="btn" id="bgmToggleV3" type="button">ON</button>
-  <button class="btn ghost" id="bgmMuteV3" type="button">ミュート</button>
-</div>
-
-<input class="slider" id="bgmVolV3" type="range" min="0" max="100" step="1" />
-<div class="fine" id="bgmInfoV3"></div>
-
-<div class="sep"></div>
-
-<div class="row">
-  <div class="ttl">BGMショップ（購入＆選択）</div>
-  <div class="tag" id="bgmCoinTagV3">🪙 0</div>
-</div>
-
-<div class="row" style="margin-top:6px;">
-  <button class="btn ghost small" id="bgmAutoV3" type="button">🔁 自動に戻す</button>
-  <div class="fine" id="bgmSelTextV3"></div>
-</div>
-
-<div id="bgmShopV3">
-  <div class="sectionTitle">▼ 通常BGM（朝昼夜：自動）</div>
-  ${renderItem("morning", LABELS.morning, "朝の時間帯（5-10時）")}
-  ${renderItem("day",     LABELS.day,     "昼の時間帯（10-17時）")}
-  ${renderItem("night",   LABELS.night,   "夜の時間帯（それ以外）")}
-
-  <div class="sectionTitle">▼ いつでもBGM（購入して好きな時に流す）</div>
-  ${renderItem("stream",   LABELS.stream,   "購入するといつでも選択して再生できる")}
-  ${renderItem("dokkan",   LABELS.dokkan,   "購入するといつでも選択して再生できる")}
-  ${renderItem("cocktail", LABELS.cocktail, "購入するといつでも選択して再生できる")}
-
-  <div class="sectionTitle">▼ 特別BGM（演出用）</div>
-  ${renderItem("depart", LABELS.depart, "旅立ち演出などで使う（手動でも可）")}
-</div>
-`;
-
-    document.body.appendChild(btn);
-    document.body.appendChild(panel);
-
-    const stateText = $("#bgmStateTextV3", panel);
-    const info = $("#bgmInfoV3", panel);
-    const selText = $("#bgmSelTextV3", panel);
-    const toggle = $("#bgmToggleV3", panel);
-    const mute = $("#bgmMuteV3", panel);
-    const vol = $("#bgmVolV3", panel);
-    const close = $("#bgmCloseV3", panel);
-    const coinTag = $("#bgmCoinTagV3", panel);
-    const autoBtn = $("#bgmAutoV3", panel);
-
-    const buyBtns = {};
-    const selectBtns = {};
-    const priceTags = {};
-    for (const k of Object.keys(PRICES)) {
-      buyBtns[k] = $(`#bgmBuy_${k}`, panel);
-      selectBtns[k] = $(`#bgmSelect_${k}`, panel);
-      priceTags[k] = $(`#bgmPrice_${k}`, panel);
+    modalEl = document.getElementById(UI.modal);
+    if (!modalEl) {
+      modalEl = document.createElement("div");
+      modalEl.id = UI.modal;
+      backdropEl.appendChild(modalEl);
     }
 
-    function refresh() {
-      vol.value = String(Math.round(settings.volume * 100));
-      toggle.textContent = settings.enabled ? "ON" : "OFF";
-      toggle.style.opacity = settings.enabled ? "1" : "0.6";
-      mute.textContent = settings.muted ? "ミュート中" : "ミュート";
-      mute.style.opacity = settings.muted ? "0.75" : "1";
+    backdropEl.onclick = (e) => {
+      if (e.target === backdropEl) close();
+    };
 
-      const c = getCoinsWB();
-      coinTag.textContent = `🪙 ${c}`;
+    render();
+  }
 
-      const sel = selected?.selectedKey ?? null;
-      selText.textContent = sel ? `選択中：${LABELS[sel]}` : "選択中：自動";
+  function open() {
+    ensureModal();
+    backdropEl.style.display = "block";
+    refresh();
+  }
 
-      const nowKey = decideKeyToPlay() || pickByTime();
-      info.textContent =
-        (specialKey && TRACKS[specialKey]) ? `特別：${LABELS[specialKey] || specialKey}` :
-        sel ? `選択：${LABELS[sel]}` :
-        `自動：${LABELS[nowKey] || nowKey}`;
+  function close() {
+    if (!backdropEl) return;
+    backdropEl.style.display = "none";
+  }
 
-      const playing = audio && !audio.paused && unlocked && settings.enabled && !settings.muted && audio.volume > 0;
-      stateText.textContent = playing ? "再生中" : "停止中（クリックで開始）";
+  function render() {
+    if (!modalEl) return;
 
-      for (const k of Object.keys(PRICES)) {
-        const own = isOwned(k);
-        const price = PRICES[k];
-        priceTags[k].textContent = own ? "購入済み" : `${price}🪙`;
-        buyBtns[k].disabled = own || (c < price);
-        buyBtns[k].textContent = own ? "OK" : "購入";
+    modalEl.innerHTML = `
+      <div class="head">
+        <div class="ttl">🎵 BGM</div>
+        <button class="close" type="button" id="bgmCloseModalBtn">×</button>
+      </div>
 
-        selectBtns[k].disabled = !own;
-        selectBtns[k].classList.toggle("active", sel === k);
-        selectBtns[k].textContent = (sel === k) ? "選択中" : "流す";
-      }
-    }
+      <div class="body">
+        <div class="row">
+          <div class="fine" id="bgmStateTextModal">未再生（画面をクリックで開始）</div>
+          <div class="tag" id="bgmCoinTagModal">🪙 0</div>
+        </div>
 
-    btn.addEventListener("click", () => {
-      panel.style.display = (panel.style.display === "block") ? "none" : "block";
-      refresh();
-    });
-    close.addEventListener("click", () => { panel.style.display = "none"; });
+        <div class="sep"></div>
 
-    toggle.addEventListener("click", async () => {
+        <div class="row">
+          <button class="btn" id="bgmToggleModal" type="button">ON</button>
+          <button class="btn ghost" id="bgmMuteModal" type="button">ミュート</button>
+        </div>
+
+        <input class="slider" id="bgmVolModal" type="range" min="0" max="100" step="1" />
+        <div class="fine" id="bgmInfoModal"></div>
+
+        <div class="sep"></div>
+
+        <div class="row">
+          <button class="btn ghost" id="bgmAutoModal" type="button">🔁 自動に戻す</button>
+          <div class="fine" id="bgmSelTextModal"></div>
+        </div>
+
+        <div id="bgmShopModal">
+          <div class="sectionTitle">▼ 通常BGM（朝昼夜：自動）</div>
+          ${renderItem("morning", LABELS.morning, "朝の時間帯（5-10時）")}
+          ${renderItem("day",     LABELS.day,     "昼の時間帯（10-17時）")}
+          ${renderItem("night",   LABELS.night,   "夜の時間帯（それ以外）")}
+
+          <div class="sectionTitle">▼ いつでもBGM（購入して好きな時に流す）</div>
+          ${renderItem("stream",   LABELS.stream,   "購入するといつでも選択して再生できる")}
+          ${renderItem("dokkan",   LABELS.dokkan,   "購入するといつでも選択して再生できる")}
+          ${renderItem("cocktail", LABELS.cocktail, "購入するといつでも選択して再生できる")}
+
+          <div class="sectionTitle">▼ 特別BGM（演出用）</div>
+          ${renderItem("depart", LABELS.depart, "旅立ち演出などで使う（手動でも可）")}
+        </div>
+      </div>
+    `;
+
+    $("#bgmCloseModalBtn", modalEl)?.addEventListener("click", close);
+
+    const toggle = $("#bgmToggleModal", modalEl);
+    const mute = $("#bgmMuteModal", modalEl);
+    const vol = $("#bgmVolModal", modalEl);
+    const autoBtn = $("#bgmAutoModal", modalEl);
+
+    toggle?.addEventListener("click", async () => {
       settings.enabled = !settings.enabled;
       saveSettings(settings);
       if (!settings.enabled) stop();
@@ -669,14 +585,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       refresh();
     });
 
-    mute.addEventListener("click", () => {
+    mute?.addEventListener("click", () => {
       settings.muted = !settings.muted;
       saveSettings(settings);
       applyVolume();
       refresh();
     });
 
-    vol.addEventListener("input", async () => {
+    vol?.addEventListener("input", async () => {
       settings.volume = clamp(Number(vol.value) / 100, 0, 1);
       saveSettings(settings);
       applyVolume();
@@ -688,7 +604,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       refresh();
     });
 
-    autoBtn.addEventListener("click", async () => {
+    autoBtn?.addEventListener("click", async () => {
       patchWB(window.WB);
       try { await window.WB?.unlockAudioOnce?.(); } catch {}
       selectBgm(null);
@@ -696,7 +612,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     });
 
     for (const k of Object.keys(PRICES)) {
-      buyBtns[k]?.addEventListener("click", async () => {
+      $(`#bgmBuy_${k}`, modalEl)?.addEventListener("click", async () => {
         patchWB(window.WB);
         try { await window.WB?.unlockAudioOnce?.(); } catch {}
 
@@ -710,7 +626,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
         refresh();
       });
 
-      selectBtns[k]?.addEventListener("click", async () => {
+      $(`#bgmSelect_${k}`, modalEl)?.addEventListener("click", async () => {
         patchWB(window.WB);
         try { await window.WB?.unlockAudioOnce?.(); } catch {}
         const r = selectBgm(k);
@@ -718,15 +634,59 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
         refresh();
       });
     }
+  }
 
-    document.addEventListener("pointerdown", (e) => {
-      if (panel.style.display !== "block") return;
-      if (panel.contains(e.target) || btn.contains(e.target)) return;
-      panel.style.display = "none";
-    });
+  function refresh() {
+    if (!modalEl) return;
 
-    setInterval(refresh, 500);
-    refresh();
+    const stateText = $("#bgmStateTextModal", modalEl);
+    const info = $("#bgmInfoModal", modalEl);
+    const selText = $("#bgmSelTextModal", modalEl);
+    const toggle = $("#bgmToggleModal", modalEl);
+    const mute = $("#bgmMuteModal", modalEl);
+    const vol = $("#bgmVolModal", modalEl);
+    const coinTag = $("#bgmCoinTagModal", modalEl);
+
+    vol.value = String(Math.round(settings.volume * 100));
+    toggle.textContent = settings.enabled ? "ON" : "OFF";
+    toggle.style.opacity = settings.enabled ? "1" : "0.6";
+    mute.textContent = settings.muted ? "ミュート中" : "ミュート";
+    mute.style.opacity = settings.muted ? "0.75" : "1";
+
+    const c = getCoinsWB();
+    coinTag.textContent = `🪙 ${c}`;
+
+    const sel = selected?.selectedKey ?? null;
+    selText.textContent = sel ? `選択中：${LABELS[sel]}` : "選択中：自動";
+
+    const nowKey = decideKeyToPlay() || pickByTime();
+    info.textContent =
+      (specialKey && TRACKS[specialKey]) ? `特別：${LABELS[specialKey] || specialKey}` :
+      sel ? `選択：${LABELS[sel]}` :
+      `自動：${LABELS[nowKey] || nowKey}`;
+
+    const playing = audio && !audio.paused && unlocked && settings.enabled && !settings.muted && audio.volume > 0;
+    stateText.textContent = playing ? "再生中" : "停止中（クリックで開始）";
+
+    for (const k of Object.keys(PRICES)) {
+      const own = isOwned(k);
+      const price = PRICES[k];
+
+      const priceTag = $(`#bgmPrice_${k}`, modalEl);
+      const buyBtn = $(`#bgmBuy_${k}`, modalEl);
+      const selBtn = $(`#bgmSelect_${k}`, modalEl);
+
+      if (priceTag) priceTag.textContent = own ? "購入済み" : `${price}🪙`;
+      if (buyBtn) {
+        buyBtn.disabled = own || (c < price);
+        buyBtn.textContent = own ? "OK" : "購入";
+      }
+      if (selBtn) {
+        selBtn.disabled = !own;
+        selBtn.classList.toggle("active", sel === k);
+        selBtn.textContent = (sel === k) ? "選択中" : "流す";
+      }
+    }
   }
 
   function startWBWatcher() {
@@ -760,6 +720,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     startTimeWatcher();
 
     try { await waitForBody(); } catch {}
-    mountUI({ position: "top-right", title: "BGM" });
+    // モーダルは「開くまで生成しない」でもOKだが、スタイルだけは先にOK
+    ensureStyle();
+
+    // 外部公開
+    window.BGM = window.BGM || {};
+    window.BGM.open = open;
+    window.BGM.close = close;
+    window.BGM.refresh = refresh;
   })();
 })();
