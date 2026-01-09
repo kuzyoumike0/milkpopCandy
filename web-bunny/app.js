@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.1 (per-bunny charge + more coins)", Date.now());
+  console.log("[app.js] LOADED v16.2 (ougon 0.5% + baby coin1 only + unchi SE/click only)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -13,6 +13,9 @@
     poyoSE: "./assets/poyo.mp3",
     babySE: "./assets/babybunny.mp3",
     tabidatiSE: "./assets/tabidati.mp3",
+
+    // ✅ 黄金うんち専用SE
+    unchiSE: "./assets/unchi.mp3",
 
     ougonUnchi: "./assets/ougonunchi.png",
     coins: [
@@ -42,9 +45,6 @@
 
   /* =========================
    * Charge（個体ごと / UIなし）
-   * - 時間経過で貯まる（少し早く）
-   * - クリック：その個体のチャージ量で「枚数/ティア」を決めてドロップ→その個体のチャージを消費
-   * - チャージMAX中は、その個体の頭上に hart.png（小さめ＆ゆらゆら）
    * ========================= */
   const CHARGE_MAX = 100;
 
@@ -54,8 +54,14 @@
   // クリック後の最低保証（次が0枚感を避ける）
   const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
 
-  // ★コイン獲得量ブースト（ここを変えるだけで稼ぎが増える）
-  const COIN_VALUE_MULTIPLIER = 2; // ← 2倍（3にすると3倍）
+  // ★コイン獲得量ブースト
+  const COIN_VALUE_MULTIPLIER = 2;
+
+  // ✅ 黄金うんち：0.5%（成体のみ・babyは抽選しない）
+  const OUGON_RATE = 0.005;
+
+  // ✅ 黄金うんちの価値（好みで調整OK）
+  const OUGON_VALUE = 120 * COIN_VALUE_MULTIPLIER;
 
   /* =========================
    * Storage
@@ -125,6 +131,9 @@
   const seCoin     = new Audio(ASSETS.coinSE);
   const seTabidati = new Audio(ASSETS.tabidatiSE);
 
+  // ✅ 黄金うんち専用SE
+  const seUnchi    = new Audio(ASSETS.unchiSE);
+
   let audioUnlocked = false;
   function unlockAudioOnce() {
     if (audioUnlocked) return;
@@ -155,7 +164,12 @@
         width:22px !important;
         height:22px !important;
       }
-           .wbChargeHart {
+      .ougonunchi{
+        width:26px !important;
+        height:26px !important;
+        position:absolute;
+      }
+      .wbChargeHart {
         position:absolute;
         z-index:9999;
         pointer-events:none;
@@ -164,8 +178,8 @@
         transform: translate(-50%, -50%);
         animation: wbHartBob 1.05s ease-in-out infinite;
         filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
-        width:26px;   /* ← 小さく */
-        height:26px;  /* ← 小さく */
+        width:26px;
+        height:26px;
       }
 
       @keyframes wbHartBob {
@@ -213,7 +227,7 @@
   }
 
   /* =========================
-   * Drops（ティア対応）
+   * Drops（ティア対応 + 黄金うんち）
    * ========================= */
   const dropsOnField = [];
   const dropByEl = new WeakMap();
@@ -236,6 +250,8 @@
       this.el = el;
 
       dropByEl.set(el, this);
+
+      // ✅ コインはホバー回収OKのまま
       el.addEventListener("pointerenter", () => this.collect());
       el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
       el.addEventListener("click", () => this.collect());
@@ -268,7 +284,6 @@
     collect() {
       if (!this.el || !this.el.isConnected) return;
 
-      // ★獲得量アップ：tier0..3 → (tier+1) を倍率
       coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
       saveCoins();
       updateHud();
@@ -280,7 +295,77 @@
     }
   }
 
-  function spawnClickCoins(bunny, count = 1, tierPicker = () => 0) {
+  // ✅ 黄金うんち：クリックでしか回収できない + 専用SE
+  class OugonUnchiDrop {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() * 2 - 1) * 120;
+      this.vy = -(480 + Math.random() * 260);
+      this.gravity = 2200;
+      this.bounce  = 0.18 + Math.random() * 0.10;
+      this.floor   = groundY();
+
+      const el = document.createElement("img");
+      el.className = "ougonunchi";
+      el.src = ASSETS.ougonUnchi;
+      el.draggable = false;
+      this.el = el;
+
+      dropByEl.set(el, this);
+
+      // ✅ うんちはホバー回収しない（クリック/タップのみ）
+      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
+      el.addEventListener("click", () => this.collect());
+
+      coinLayer.appendChild(el);
+      this.render();
+    }
+
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+
+    update(dt) {
+      this.floor = groundY();
+      this.vy += this.gravity * dt;
+      this.x  += this.vx * dt;
+      this.y  += this.vy * dt;
+
+      if (this.y >= this.floor) {
+        this.y = this.floor;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+          this.vx *= 0.70;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
+      }
+      this.render();
+    }
+
+    collect() {
+      if (!this.el || !this.el.isConnected) return;
+
+      coins += OUGON_VALUE;
+      saveCoins();
+      updateHud();
+
+      // ✅ 黄金うんち専用SE
+      playSE(seUnchi);
+
+      try { this.el.remove(); } catch {}
+      const idx = dropsOnField.indexOf(this);
+      if (idx >= 0) dropsOnField.splice(idx, 1);
+    }
+  }
+
+  // ✅ クリックドロップ（黄金うんち抽選対応）
+  function spawnClickCoins(bunny, count = 1, tierPicker = () => 0, opt = {}) {
+    const allowOugon = opt.allowOugon !== false; // default true
+
     const r  = bunny.wrap.getBoundingClientRect();
     const fr = field.getBoundingClientRect();
     const baseX  = (r.left - fr.left) + r.width  * 0.55;
@@ -289,6 +374,14 @@
     for (let i = 0; i < count; i++) {
       const x = baseX + rand(-14, 14);
       const y = baseY + rand(-6, 6);
+
+      // ✅ 黄金うんち：0.5%（allowOugon=true のときだけ）
+      if (allowOugon && Math.random() < OUGON_RATE) {
+        const u = new OugonUnchiDrop(x, y);
+        dropsOnField.push(u);
+        continue;
+      }
+
       const tier = tierPicker();
       const c = new CoinDrop(x, y, tier);
       dropsOnField.push(c);
@@ -343,9 +436,15 @@
         unlockAudioOnce();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        // ✅ その個体のチャージ量でドロップ決定
-        const plan = this.getDropPlanFromOwnCharge();
-        spawnClickCoins(this, plan.count, plan.pickTier);
+        // ✅ babybunny：coin1(tier0)しか出ない + 黄金うんち抽選なし
+        if (this.isBaby) {
+          const plan = this.getDropPlanFromOwnCharge();
+          spawnClickCoins(this, plan.count, () => 0, { allowOugon: false });
+        } else {
+          // ✅ 成体：チャージに応じて高ティア + 黄金うんち0.5%
+          const plan = this.getDropPlanFromOwnCharge();
+          spawnClickCoins(this, plan.count, plan.pickTier, { allowOugon: true });
+        }
 
         // ✅ クリックでその個体のチャージ消費（ハートも消える）
         this.consumeOwnCharge();
@@ -435,7 +534,7 @@
     getDropPlanFromOwnCharge() {
       const r = this.getChargeRatio(); // 0..1
 
-      // ★枚数アップ：3〜18（前：1〜10）
+      // ★枚数：3〜18
       const count = 3 + Math.floor(r * 15);
 
       // 最大ティア：0〜3
@@ -548,6 +647,7 @@
 
   /* =========================
    * Touch: スライド回収（コインだけ）
+   * - ✅ うんちはスライド回収しない（クリック/タップのみ）
    * ========================= */
   let touchCollectActive = false;
   let touchPointerId = null;
@@ -555,9 +655,12 @@
   function collectAtClientPoint(clientX, clientY) {
     const el = document.elementFromPoint(clientX, clientY);
     if (!el) return;
-    const target = (el.classList?.contains("coin") || el.classList?.contains("ougonunchi"))
+
+    // ✅ coin だけ対象（ougonunchiは対象外）
+    const target = (el.classList?.contains("coin"))
       ? el
-      : el.closest?.(".coin, .ougonunchi");
+      : el.closest?.(".coin");
+
     if (!target) return;
     const drop = dropByEl.get(target);
     if (drop && typeof drop.collect === "function") drop.collect();
@@ -651,6 +754,9 @@
     unlockAudioOnce,
     playSE,
     seTabidati,
+
+    // ✅ うんちSEを外部でも使えるように公開（必要なら）
+    seUnchi,
 
     updateHud,
 
