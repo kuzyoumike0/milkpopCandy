@@ -43,7 +43,7 @@
 
   <!-- ===== メインフィールド ===== -->
   <main id="field">
-    <!-- ✅ bgLayer は「背景専用」：ここにミラーボール/ディスコFXが乗る -->
+    <!-- ✅ bgLayer は「背景専用」：ここにミラーボール/スポット/背景系が乗る -->
     <div id="bgLayer"></div>
 
     <div id="tenkiLayer"></div>
@@ -54,7 +54,10 @@
   <!-- ✅ WBを先に用意（WB not found を根絶） -->
   <script src="./wb_boot.js?v=20260109_2"></script>
 
-  <!-- ✅ 背景（朝昼夜 + ミラーボール/ディスコ） -->
+  <!-- ===== コア（WBを作る） ===== -->
+  <script src="./app.js?v=20260109_2"></script>
+
+  <!-- ✅ 背景（朝昼夜 + ミラーボール/スポット）※WBが出来た後の方が安定 -->
   <script src="./bgcolor.js?v=20260109_2"></script>
 
   <!-- 天気 -->
@@ -63,22 +66,19 @@
   <!-- 花火 -->
   <script src="./hanabi.js?v=20260109_2"></script>
 
-  <!-- ===== コア（WBを作る） ===== -->
-  <script src="./app.js?v=20260109_2"></script>
-
   <!-- ✅ BGM：必ず app.js の後 -->
   <script src="./BGM.js?v=20260109_2"></script>
 
-  <!-- ✅ ショップ（ミラーボール購入＋設置ON/OFF） -->
-  <script src="./shop.js?v=20260109_1"></script>
-
+  <!-- ✅ 背景ショップ（ミラーボール/ベッド購入＋設置ON/OFF） -->
+  <!-- ★重要：v を最新に揃える（古いままだと「直ってない」現象になる） -->
+  <script src="./shop.js?v=20260109_2"></script>
 
   <!-- ===== 拡張（WB依存） ===== -->
   <script src="./isyou.js?v=20260109_2"></script>
   <script src="./zisseki.js?v=20260109_2"></script>
   <script src="./syougou.js?v=20260109_2"></script>
 
-  <!-- ✅ omukae は別ボタンで開く実装にしてね（omukae.js側対応） -->
+  <!-- ✅ お迎え（omukaeBtnで開く） -->
   <script src="./omukae.js?v=20260109_2"></script>
 
   <script src="./zukan.js?v=20260109_2"></script>
