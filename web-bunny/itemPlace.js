@@ -1,38 +1,41 @@
-// itemPlace.js（V3）
+// itemPlace.js（V4）
 // ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う
 // ✅ ミラーボール(mirrorball)は配置しない（候補にも出さない）
 // ✅ 設置ON/OFFは itemPlace.js が管理（LS: milkpop_itemplace_enabled_v1）
 // ✅ 実寸サイズ：画像の naturalWidth/Height を読んでゴースト枠も実寸
-// ✅ 配置できない問題を根絶：座標基準を #field に固定（bgLayerが0サイズでもOK）
+// ✅ クリック座標の基準は #field に固定（bgLayerが0サイズでもOK）
 // ✅ 配置モード：赤枠（透明）→ クリックで設置 → ドラッグ移動 → 完了
 // ✅ OFFにした瞬間に撤去（残骸ゼロ）
+// ✅ アイテム選択は itemPlace 内で完結（セレクト＋「配置物クリックで選択」）
+// ✅ 拡大縮小は不要：常に実寸（scale機能削除）
+// ✅ うさぎの“裏”に行く：wrap を bunnyLayer より手前に置かない＆z-index低め固定
 
 (() => {
   "use strict";
-  console.log("[itemPlace] LOADED V3", Date.now());
+  console.log("[itemPlace] LOADED V4", Date.now());
 
   const SHOP_OWNED_KEY = "milkpop_shop_owned_v1";
-  const LS_STATE_KEY   = "milkpop_itemplace_v3";          // 位置/回転/拡縮/placed
-  const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // ✅ ON/OFF はここ
+  const LS_STATE_KEY   = "milkpop_itemplace_v4";          // 位置/回転/placed（scale廃止）
+  const LS_ENABLED_KEY = "milkpop_itemplace_enabled_v1";  // ON/OFF はここ
 
-  // ✅ クリック座標の基準は field（ここが重要）
+  // ✅ クリック座標の基準は field
   const HOST_ID = "field";
 
-  const WRAP_ID  = "itemPlaceWrapV3";
-  const STYLE_ID = "itemPlaceStyleV3";
-  const PANEL_ID = "itemPlacePanelV3";
-  const GHOST_ID = "itemPlaceGhostV3";
+  const WRAP_ID  = "itemPlaceWrapV4";
+  const STYLE_ID = "itemPlaceStyleV4";
+  const PANEL_ID = "itemPlacePanelV4";
+  const GHOST_ID = "itemPlaceGhostV4";
   const TOAST_ID = "itemPlaceToastV1";
 
   // ✅ 配置できる実体アイテムだけ（mirrorballは絶対入れない）
-  // 追加したい場合はここに増やす（keyは shop.js の owned と一致させる）
+  // 追加したい場合はここに増やす（keyは shop.js の owned と一致）
   const PLACE_ITEMS = {
     bed: {
       key: "bed",
       label: "ベッド",
       src: "./assets/bg/bed.png",
-      z: 6, // うさぎより後ろ想定（必要なら調整）
-      default: { x: 180, y: 280, scale: 1.0, rot: 0, placed: false },
+      z: 1, // “裏”想定：wrap自体のz-indexを低く固定するので、ここは微調整用
+      default: { x: 180, y: 280, rot: 0, placed: false },
     },
   };
 
@@ -86,22 +89,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (key in en) return !!en[key];
     return true;
   }
-  function setEnabled(key, v) {
-    const en = loadEnabled();
-    en[key] = !!v;
-    saveEnabled(en);
-    // OFFにしたら即撤去（placedも落とす）
-    if (!en[key]) {
-      st[key] = st[key] || { ...PLACE_ITEMS[key].default };
-      st[key].placed = false;
-      saveState(st);
-      removeObj(key);
-    }
-    // 通知（他モジュールが聞きたいなら）
-    try { window.WB?.emit?.("itemplace:enabled_changed", { key, enabled: !!en[key] }); } catch {}
-  }
 
-  // ===== 位置などの保存 =====
+  // ===== 状態（位置/回転/placed） =====
+  // ※旧V3のscaleが残ってても無視する（読み込みだけして捨てる）
   function loadState() {
     const j = safeParse(localStorage.getItem(LS_STATE_KEY)) || {};
     const out = {};
@@ -111,7 +101,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       out[k] = {
         x: Number(cur.x ?? def.x),
         y: Number(cur.y ?? def.y),
-        scale: Number(cur.scale ?? def.scale),
         rot: Number(cur.rot ?? def.rot),
         placed: (typeof cur.placed === "boolean") ? cur.placed : !!def.placed,
       };
@@ -120,7 +109,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
   function saveState(st0) { try { localStorage.setItem(LS_STATE_KEY, JSON.stringify(st0)); } catch {} }
 
-  // ===== 画像実寸管理（naturalWidth/Height）=====
+  // ===== 画像実寸（naturalWidth/Height） =====
   const imgSize = {}; // { key: { w, h } }
 
   function preloadSize(key) {
@@ -159,6 +148,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   inset:0;
   pointer-events:none;
   overflow:visible;
+
+  /* ✅ “裏”に回す：z-indexを低め固定 */
+  z-index:2;
 }
 
 .itemPlaceObj{
@@ -178,6 +170,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   cursor: grab;
 }
 .itemPlaceObj.editing:active{ cursor: grabbing; }
+
+.itemPlaceObj.selected{
+  outline: 3px solid rgba(255,0,0,.95);
+  outline-offset: 2px;
+}
 
 #${GHOST_ID}{
   position:fixed;
@@ -203,7 +200,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 13px;
   display:none;
-  min-width: 280px;
+  min-width: 300px;
+  max-width: min(360px, 92vw);
 }
 #${PANEL_ID} .ttl{ font-weight:1000; margin-bottom:6px; }
 #${PANEL_ID} .row{ display:flex; gap:6px; margin: 6px 0; flex-wrap:wrap; align-items:center; }
@@ -234,6 +232,15 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 }
 #${PANEL_ID} .chip.on{ border-color: rgba(0,160,60,.35); }
 #${PANEL_ID} .chip.off{ border-color: rgba(220,0,0,.35); opacity:.8; }
+#${PANEL_ID} .mini{
+  width:40px; height:40px;
+  border-radius:10px;
+  border:1px solid rgba(0,0,0,.12);
+  background:#fff;
+  overflow:hidden;
+  display:flex; align-items:center; justify-content:center;
+}
+#${PANEL_ID} .mini img{ width:100%; height:100%; object-fit:contain; }
 `;
     document.head.appendChild(stEl);
   }
@@ -257,10 +264,28 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!wrap) {
       wrap = document.createElement("div");
       wrap.id = WRAP_ID;
-      host.appendChild(wrap);
-    } else {
+    }
+
+    // ✅ “裏”に入れる：bunnyLayer より前（下）に差し込む
+    //  - field内に #bunnyLayer がある想定
+    //  - 無ければ先頭に近い位置へ
+    try {
+      const bunnyLayer = host.querySelector("#bunnyLayer");
+      if (bunnyLayer && bunnyLayer.parentElement === host) {
+        // bunnyLayerの直前に配置（=DOM的に下に行く）
+        if (wrap.parentElement !== host || wrap.nextSibling !== bunnyLayer) {
+          host.insertBefore(wrap, bunnyLayer);
+        }
+      } else {
+        // hostの先頭へ（できるだけ裏）
+        if (wrap.parentElement !== host || host.firstChild !== wrap) {
+          host.insertBefore(wrap, host.firstChild);
+        }
+      }
+    } catch {
       try { host.appendChild(wrap); } catch {}
     }
+
     return wrap;
   }
 
@@ -275,16 +300,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     return g;
   }
 
-  function setGhostSizeFor(key, scale = 1) {
+  function setGhostSizeFor(key) {
     const g = ensureGhost();
     const s = imgSize[key] || { w: 120, h: 90 };
-    g.style.width  = `${Math.max(8, s.w * scale)}px`;
-    g.style.height = `${Math.max(8, s.h * scale)}px`;
+    g.style.width  = `${Math.max(8, s.w)}px`;
+    g.style.height = `${Math.max(8, s.h)}px`;
   }
 
-  function showGhostAt(clientX, clientY, key, scale) {
+  function showGhostAt(clientX, clientY, key) {
     const g = ensureGhost();
-    setGhostSizeFor(key, scale);
+    setGhostSizeFor(key);
     const w = parseFloat(g.style.width) || 120;
     const h = parseFloat(g.style.height) || 90;
     g.style.transform = `translate3d(${clientX - w / 2}px,${clientY - h / 2}px,0)`;
@@ -311,7 +336,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       img.alt = key;
       img.src = it.src;
       img.draggable = false;
-      img.style.zIndex = String(it.z ?? 6);
+      img.style.zIndex = String(it.z ?? 1);
       img.addEventListener("error", () => console.warn("[itemPlace] load failed:", it.src));
       wrap.appendChild(img);
     } else if (img.getAttribute("src") !== it.src) {
@@ -327,7 +352,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   function applyTransform(img, s) {
     img.style.left = `${Math.round(s.x)}px`;
     img.style.top  = `${Math.round(s.y)}px`;
-    img.style.transform = `scale(${s.scale}) rotate(${s.rot}deg)`;
+    // ✅ 実寸固定（scaleなし）＋回転のみ
+    img.style.transform = `rotate(${s.rot}deg)`;
   }
 
   // ===== 編集モード =====
@@ -336,14 +362,31 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   let st = loadState();
   let drag = null;
 
-  function placeableKeys() {
-    // ✅ 所持してて、enabledがONの物だけ
+  function ownedKeys() {
+    // ✅ 所持してる物（enabledは問わない：選択はできる）
+    return Object.keys(PLACE_ITEMS).filter(k => isOwned(k));
+  }
+
+  function selectableKeys() {
+    // ✅ 所持してて、enabledがON（“配置/移動”可能）
     return Object.keys(PLACE_ITEMS).filter(k => isOwned(k) && isEnabled(k));
   }
 
-  function ownedKeys() {
-    // ✅ 所持してる物（enabledは問わない）
-    return Object.keys(PLACE_ITEMS).filter(k => isOwned(k));
+  function setEnabled(key, v) {
+    const en = loadEnabled();
+    en[key] = !!v;
+    saveEnabled(en);
+
+    // OFFにしたら即撤去（placedも落とす）
+    if (!en[key]) {
+      st[key] = st[key] || { ...PLACE_ITEMS[key].default };
+      st[key].placed = false;
+      saveState(st);
+      removeObj(key);
+    }
+
+    // 通知（他モジュールが聞きたいなら）
+    try { window.WB?.emit?.("itemplace:enabled_changed", { key, enabled: !!en[key] }); } catch {}
   }
 
   function ensurePanel() {
@@ -356,45 +399,37 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     p.innerHTML = `
   <div class="ttl">🧸 アイテム配置</div>
 
-  <div class="row" style="gap:8px;">
-    <div style="flex:1 1 auto;">
+  <div class="row" style="gap:8px; align-items:flex-start;">
+    <div style="flex:1 1 auto; min-width: 180px;">
       <select id="ipSel"></select>
+      <div class="hint" style="margin-top:6px;">
+        透明赤枠の位置をクリックで設置。<br>
+        設置後はドラッグで移動。<br>
+        <b>配置物をクリック</b>するとそのアイテムを選択できます。
+      </div>
     </div>
-    <button class="chip" id="ipToggle" type="button">設置ON</button>
+
+    <div style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
+      <div class="mini" id="ipMini"><img alt="" /></div>
+      <button class="chip" id="ipToggle" type="button">設置ON</button>
+    </div>
   </div>
 
   <div class="row">
-    <button id="ipScaleDown">− 縮小</button>
-    <button id="ipScaleUp">＋ 拡大</button>
     <button id="ipRotL">⟲ 回転</button>
     <button id="ipRotR">⟳ 回転</button>
+    <button id="ipReset">リセット</button>
   </div>
 
   <div class="row">
-    <button id="ipReset">リセット</button>
     <button id="ipRemove">撤去</button>
     <button id="ipDone">完了</button>
-  </div>
-
-  <div class="hint">
-    設置ONのアイテムのみ配置できます。<br>
-    透明赤枠の位置をクリックで設置。設置後はドラッグで移動。
   </div>
 `;
     document.body.appendChild(p);
 
     const byId = (id) => document.getElementById(id);
 
-    byId("ipScaleDown").addEventListener("click", () => {
-      const s = st[selectedKey]; if (!s) return;
-      s.scale = Math.max(0.2, +(s.scale - 0.05).toFixed(3));
-      saveState(st); syncOne(selectedKey);
-    });
-    byId("ipScaleUp").addEventListener("click", () => {
-      const s = st[selectedKey]; if (!s) return;
-      s.scale = Math.min(4.0, +(s.scale + 0.05).toFixed(3));
-      saveState(st); syncOne(selectedKey);
-    });
     byId("ipRotL").addEventListener("click", () => {
       const s = st[selectedKey]; if (!s) return;
       s.rot -= 5;
@@ -407,7 +442,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     });
     byId("ipReset").addEventListener("click", () => {
       const def = PLACE_ITEMS[selectedKey]?.default; if (!def) return;
-      st[selectedKey] = { ...st[selectedKey], ...def, placed: st[selectedKey]?.placed ?? false };
+      const keepPlaced = st[selectedKey]?.placed ?? false;
+      st[selectedKey] = { ...def, placed: keepPlaced };
       saveState(st); syncOne(selectedKey);
     });
     byId("ipRemove").addEventListener("click", () => {
@@ -425,11 +461,28 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       refreshToggle();
       syncAll();
       toast(!now ? "✅ 設置ON" : "⛔ 設置OFF（撤去）");
-      // OFFにしたら選べるキーが変わるのでセレクト更新
       refreshSelect();
     });
 
     return p;
+  }
+
+  function refreshMini() {
+    const p = ensurePanel();
+    const box = $("#ipMini", p);
+    const img = $("#ipMini img", p);
+    if (!box || !img) return;
+
+    const it = PLACE_ITEMS[selectedKey];
+    if (!selectedKey || !it) {
+      img.src = "";
+      img.alt = "";
+      box.style.opacity = "0.4";
+      return;
+    }
+    img.src = it.src;
+    img.alt = selectedKey;
+    box.style.opacity = "1";
   }
 
   function refreshToggle() {
@@ -462,6 +515,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       sel.value = "";
       selectedKey = "";
       refreshToggle();
+      refreshMini();
       return;
     }
 
@@ -479,22 +533,46 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       if (!sel.value) return;
       selectedKey = sel.value;
       refreshToggle();
+      refreshMini();
       syncAll();
     };
 
     refreshToggle();
+    refreshMini();
   }
 
-  function attachDrag(img, key) {
-    if (img.__ipDrag) return;
-    img.__ipDrag = true;
+  function selectKey(key) {
+    if (!key || !PLACE_ITEMS[key]) return;
+    if (!isOwned(key)) return;
 
+    selectedKey = key;
+    refreshSelect();
+    syncAll();
+  }
+
+  function attachDragAndSelect(img, key) {
+    if (img.__ipBound) return;
+    img.__ipBound = true;
+
+    // ✅ クリックで選択（編集モード中のみ）
     img.addEventListener("pointerdown", (e) => {
       if (!editing) return;
+
+      // 編集対象は “enabled ON” のみ（OFFは触れない＝撤去済みのはず）
+      if (!isEnabled(key)) return;
+
+      // クリック＝選択
+      if (key !== selectedKey) {
+        selectKey(key);
+      }
+
+      // そのままドラッグ開始
       if (key !== selectedKey) return;
+
       e.preventDefault();
       e.stopPropagation();
       img.setPointerCapture?.(e.pointerId);
+
       drag = {
         key,
         startX: e.clientX,
@@ -536,8 +614,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!img) return;
 
     applyTransform(img, s);
-    img.classList.toggle("editing", editing && key === selectedKey);
-    attachDrag(img, key);
+
+    const isSel = editing && key === selectedKey;
+    img.classList.toggle("editing", isSel);
+    img.classList.toggle("selected", isSel);
+
+    attachDragAndSelect(img, key);
   }
 
   function syncAll() {
@@ -547,7 +629,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   function isOverUI(target) {
     return !!(
       target?.closest?.(
-        `#${PANEL_ID}, #gameMenuPanelV1, #gameHamburgerV1, #isyouModal, #isyouConfirmBar, #bgShopModalV1, #bgShopBackdropV1`
+        `#${PANEL_ID}, #gameMenuPanelV1, #gameHamburgerV1, #isyouModal, #isyouConfirmBar, #bgShopModalV1, #bgShopBackdropV1, #bgShopModalV2, #bgShopBackdropV2`
       )
     );
   }
@@ -556,14 +638,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!editing) return;
     if (!selectedKey) { hideGhost(); return; }
 
-    // enabled OFF の時はゴーストも出さない（混乱防止）
+    // enabled OFF の時はゴーストも出さない
     if (!isEnabled(selectedKey)) { hideGhost(); return; }
 
     if (isOverUI(e.target)) { hideGhost(); return; }
 
-    const s = st[selectedKey] || PLACE_ITEMS[selectedKey]?.default;
-    const sc = Number(s?.scale ?? 1);
-    showGhostAt(e.clientX, e.clientY, selectedKey, sc);
+    showGhostAt(e.clientX, e.clientY, selectedKey);
   }
 
   function onPlaceDown(e) {
@@ -577,7 +657,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const host = getHost();
     const r = host.getBoundingClientRect();
 
-    // hostが0サイズの時は置けないのでガード
+    // hostが0サイズの時は置けない
     if (r.width <= 2 || r.height <= 2) {
       console.warn("[itemPlace] host rect is too small:", r);
       return;
@@ -590,10 +670,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const s = st[selectedKey] || (st[selectedKey] = { ...PLACE_ITEMS[selectedKey].default });
     s.placed = true;
 
-    // ✅ 実寸で “中心に置く”（自然サイズ × scale）
+    // ✅ 実寸で “中心に置く”
     const size = imgSize[selectedKey] || { w: 120, h: 90 };
-    const w = size.w * (Number(s.scale) || 1);
-    const h = size.h * (Number(s.scale) || 1);
+    const w = size.w;
+    const h = size.h;
 
     s.x = localX - w / 2;
     s.y = localY - h / 2;
@@ -660,13 +740,19 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     ensureStyle();
     await preloadAll();
     st = loadState();
+
+    // 初期反映（enabled OFF や 未購入 は撤去される）
     syncAll();
 
     // shop変更で即反映（購入されたら候補に出る）
     const hookWB = () => {
       if (!window.WB?.on) return false;
       try {
+        // shop.js 側が "shop:changed" しか投げない運用でも拾える
         window.WB.on("shop:changed", () => { st = loadState(); syncAll(); });
+        // もし統一イベントを足してたらこれも拾う
+        window.WB.on("shop:owned_changed", () => { st = loadState(); syncAll(); });
+
         window.WB.on("core:ready", () => { st = loadState(); syncAll(); });
       } catch {}
       return true;
@@ -688,16 +774,19 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       openModal,
       open: openModal, // 互換
       close,
+      select: (key) => selectKey(key),
       _items: PLACE_ITEMS,
       _enabledKey: LS_ENABLED_KEY,
+      _stateKey: LS_STATE_KEY,
     };
 
-    // WB側にも生やしたいなら（互換）
+    // WB側にも（互換）
     try {
       window.WB = window.WB || {};
       window.WB.itemplace = window.WB.itemplace || {};
       window.WB.itemplace.openModal = openModal;
       window.WB.itemplace.close = close;
+      window.WB.itemplace.select = (key) => selectKey(key);
     } catch {}
   })();
 })();
