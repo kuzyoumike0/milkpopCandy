@@ -1,9 +1,11 @@
 // bgcolor.js
 // 朝・昼・夜を「日本時間(JST)」で判定して #bgLayer に直接適用（確実）
 // reset後に背景が黒くなる対策：イベントでも再適用
-// ✅ mirrorball（購入済み）なら「上中央に設置」＋「ディスコ背景」ON（回転ライト＋走るビーム＋キラ粒）
+// ✅ mirrorball（購入済み＆設置ON）なら「上中央に設置」＋「ディスコ背景」ON（回転ライト＋走るビーム＋キラ粒）
 
 (() => {
+  "use strict";
+
   const bgLayer = document.getElementById("bgLayer");
   const field = document.getElementById("field");
   if (!bgLayer) return;
@@ -11,8 +13,8 @@
   /* =========================
    * Time themes (JST)
    * ========================= */
-  const MORNING = { start: 5,  end: 10 };
-  const DAY     = { start: 10, end: 17 };
+  const MORNING = { start: 5, end: 10 };
+  const DAY = { start: 10, end: 17 };
 
   const THEMES = {
     morning: "linear-gradient(180deg, #ffe7b8 0%, #ffd6e7 55%, #ffffff 100%)",
@@ -36,7 +38,7 @@
   }
 
   /* =========================
-   * Mirrorball owned?
+   * Mirrorball owned + enabled?
    * ========================= */
   function hasMirrorballOwned() {
     try {
@@ -49,6 +51,25 @@
       return !!j?.mirrorball;
     } catch {
       return false;
+    }
+  }
+
+  function isMirrorballEnabled() {
+    // shop.js がWBへ出してるならそれ優先
+    try {
+      const fn = window.WB?.shop?.isMirrorballEnabled;
+      if (typeof fn === "function") return !!fn();
+    } catch {}
+
+    // localStorage fallback
+    try {
+      const raw = localStorage.getItem("milkpop_shop_state_v1");
+      const j = raw ? JSON.parse(raw) : null;
+      // 未設定なら「ON扱い」（購入直後の自然な挙動）
+      if (!j || typeof j !== "object") return true;
+      return !!j.mirrorballEnabled;
+    } catch {
+      return true;
     }
   }
 
@@ -86,13 +107,13 @@
     document.head.appendChild(st);
   }
 
-  function ensureMirrorball(enabled) {
+  function ensureMirrorball(on) {
     const cs = getComputedStyle(bgLayer);
     if (cs.position === "static") bgLayer.style.position = "relative";
     ensureMirrorballStyle();
 
     const old = document.getElementById(MIRROR.id);
-    if (!enabled) {
+    if (!on) {
       try { old?.remove(); } catch {}
       return;
     }
@@ -118,10 +139,10 @@
   const DISCO = {
     styleId: "mirrorballDiscoStyleV1",
     wrapId:  "mirrorballDiscoWrapV1",
-    spinId:  "mirrorballDiscoSpinV1",   // 回転する色光
-    beamsId: "mirrorballDiscoBeamsV1",  // 走るビーム
-    dustId:  "mirrorballDiscoDustV1",   // キラ粒
-    z: 6, // 背景の上（bunnyLayerより下：bgLayer内なので影響なし）
+    spinId:  "mirrorballDiscoSpinV1",
+    beamsId: "mirrorballDiscoBeamsV1",
+    dustId:  "mirrorballDiscoDustV1",
+    z: 6, // MIRROR.z(8)より下
   };
 
   function ensureDiscoStyle() {
@@ -157,7 +178,7 @@
   transition: opacity .25s ease;
 }
 
-/* 回転するディスコライト（中心がミラーボールっぽい） */
+/* 回転ライト */
 #${DISCO.spinId}{
   position:absolute;
   left:50%;
@@ -184,7 +205,7 @@
   will-change: transform, filter;
 }
 
-/* 走るビーム（斜めスポット） */
+/* 走るビーム */
 #${DISCO.beamsId}{
   position:absolute;
   inset:-30%;
@@ -203,7 +224,7 @@
   will-change: transform, opacity;
 }
 
-/* キラ粒（細かい反射） */
+/* キラ粒 */
 #${DISCO.dustId}{
   position:absolute;
   inset:-12%;
@@ -245,27 +266,27 @@
       wrap.appendChild(beams);
       wrap.appendChild(dust);
 
-      // bgLayerの一番後ろに入れたいので先頭に
+      // bgLayerの先頭（背景側）に入れる
       bgLayer.insertBefore(wrap, bgLayer.firstChild);
     }
     return wrap;
   }
 
-  function setDiscoEnabled(enabled) {
+  function setDiscoEnabled(on) {
     const wrap = ensureDiscoLayers();
-    wrap.style.opacity = enabled ? "1" : "0";
+    wrap.style.opacity = on ? "1" : "0";
   }
 
   /* =========================
    * apply
    * ========================= */
-  let last = "";
+  let lastPhase = "";
   function apply(force = false) {
     const h = getJSTHour();
     const phase = getPhaseByHour(h);
 
-    if (force || phase !== last) {
-      last = phase;
+    if (force || phase !== lastPhase) {
+      lastPhase = phase;
 
       bgLayer.style.background = THEMES[phase];
       if (field) field.style.background = THEMES[phase];
@@ -273,26 +294,19 @@
       window.WB?.emit?.("bg:changed", { phase, hour: h });
     }
 
-    // ✅ mirrorballの設置/解除 ＋ ディスコ背景
+    // ✅ mirrorball: purchased && enabled
     const owned = hasMirrorballOwned();
-const enabled = (() => {
-  try { return window.WB?.shop?.isMirrorballEnabled?.(); } catch {}
-  try {
-    const raw = localStorage.getItem("milkpop_shop_state_v1");
-    const j = raw ? JSON.parse(raw) : null;
-    return !!j?.mirrorballEnabled;
-  } catch { return true; }
-})();
-const on = owned && enabled;
+    const enabled = isMirrorballEnabled();
+    const on = owned && enabled;
 
-ensureMirrorball(on);
-setDiscoEnabled(on);
-
+    ensureMirrorball(on);
+    setDiscoEnabled(on);
+  }
 
   // 初回
   apply(true);
 
-  // 1分ごと
+  // 1分ごと（時間帯追従）
   setInterval(() => apply(false), 60 * 1000);
 
   /* =========================
@@ -302,9 +316,10 @@ setDiscoEnabled(on);
     if (!window.WB?.on) return false;
     window.WB.on("core:reset_partial", () => apply(true));
     window.WB.on("core:ready", () => apply(true));
-    window.WB.on("bg:mirrorball_changed", () => apply(true));
+    window.WB.on("bg:mirrorball_changed", () => apply(true)); // 購入/設置切替直後
     return true;
   };
+
   hookWB();
   setTimeout(hookWB, 300);
 })();
