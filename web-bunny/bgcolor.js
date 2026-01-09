@@ -1,25 +1,60 @@
-// bgcolor.js（修正版：ミラーボールOFFできる／SPOTはONと完全同期／軽量化）
-// ✅ ミラーボールを設置ONにしたらスポットライトもつく（= on の時だけ）
-// ✅ ただし OFF を強制でONに戻さない（OFFできないバグ根絶）
-// ✅ localStorageフック / requestAnimationFrame / リセット耐性 / 軽量化 / 残骸掃除つき
+// bgcolor.js（V11：itemPlaceのmirrorball設置ON/OFF & placed に完全同期して虹スポットを出す）
+// ✅ 朝昼夜 背景をJSTで自動
+// ✅ ミラーボール：購入済み + itemPlaceで enabled=true + placed=true のときだけ表示
+// ✅ スポットライト：幅広い虹2本 / 左右ゆらゆら / hue回転
+// ✅ OFF時は残骸ゼロ（ライトも画像も消す）
+// ✅ 軽量（rAF 1本 + 30秒ごとに再同期）
+// ※ shop_state_v1 は見ない（=OFFできないバグ根絶）
 
 (() => {
   "use strict";
 
-  const LS_OWNED = "milkpop_shop_owned_v1";
-  const LS_STATE = "milkpop_shop_state_v1";
+  const LS_OWNED   = "milkpop_shop_owned_v1";
+  const LS_IP_EN   = "milkpop_itemplace_enabled_v1";
+  const LS_IP_ST   = "milkpop_itemplace_v10"; // itemPlace.js側のstateKeyに合わせる（違うならここだけ直す）
 
-  const GARBAGE_ID_PREFIXES = [
-    "mirrorballDisco",
-    "mirrorballSparkle",
-    "mirrorballSpotWrapV",
-    "mirrorballSpotLeftV",
-    "mirrorballSpotRightV",
-    "mirrorballImgV",
-  ];
+  const BG_ID    = "bgLayer";
+  const FIELD_ID = "field";
 
+  // ===== Mirrorball (optional image in bgLayer) =====
+  const MIRROR = {
+    id: "bgMirrorballImgV11",
+    src: "./assets/bg/mirrorball.png",
+    top: 8,
+    size: 140,
+    z: 40,
+  };
+
+  // ===== Spotlights =====
+  const FX = {
+    wrapId: "bgMirrorFXWrapV11",
+    leftId: "bgMirrorFXLeftV11",
+    rightId:"bgMirrorFXRightV11",
+    styleId:"bgMirrorFXStyleV11",
+    z: 25,
+
+    // 見た目調整
+    width: 420,     // px（幅広）
+    height: 760,    // px（長め）
+    blur: 4.0,
+    opacityDay: 0.52,
+    opacityNight: 0.72,
+
+    baseAngleL: -18,
+    baseAngleR:  18,
+    swayDeg: 12,
+    swaySpeed: 0.0016,
+
+    hueSpeed: 0.035,
+
+    // ミラーボール画像内の「光源」位置（だいたい球の下）
+    anchorX: 0.50,
+    anchorY: 0.62,
+  };
+
+  // ===== Time themes (JST) =====
   const MORNING = { start: 5, end: 10 };
-  const DAY = { start: 10, end: 17 };
+  const DAY     = { start: 10, end: 17 };
 
   const THEMES = {
     morning: "linear-gradient(180deg, #ffe7b8 0%, #ffd6e7 55%, #ffffff 100%)",
@@ -27,13 +62,21 @@
     night:   "linear-gradient(180deg, #0b1026 0%, #141b3a 55%, #2b1b44 100%)",
   };
 
+  const $ = (q, p = document) => p.querySelector(q);
+
+  function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
+
   function getJSTHour() {
-    const parts = new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      hour: "2-digit",
-      hour12: false,
-    }).formatToParts(new Date());
-    return Number(parts.find(p => p.type === "hour")?.value ?? 0);
+    try {
+      const parts = new Intl.DateTimeFormat("ja-JP", {
+        timeZone: "Asia/Tokyo",
+        hour: "2-digit",
+        hour12: false,
+      }).formatToParts(new Date());
+      return Number(parts.find(p => p.type === "hour")?.value ?? 0);
+    } catch {
+      return new Date().getHours();
+    }
   }
 
   function getPhaseByHour(h) {
@@ -42,85 +85,59 @@
     return "night";
   }
 
-  const getBgLayer = () => document.getElementById("bgLayer");
-  const getField   = () => document.getElementById("field");
-
-  function ensureBgLayerReady(bgLayer) {
-    if (!bgLayer) return;
-    const cs = getComputedStyle(bgLayer);
-    if (cs.position === "static") bgLayer.style.position = "relative";
-    bgLayer.style.overflow = "hidden";
-  }
-
-  function safeParseLS(key) {
+  function ensureLayerReady(el) {
+    if (!el) return;
     try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
+      const cs = getComputedStyle(el);
+      if (cs.position === "static") el.style.position = "relative";
+    } catch {}
+    el.style.overflow = "hidden";
   }
 
-  function hasMirrorballOwned() {
+  // ===== Truth source =====
+  function isOwnedMirrorball() {
     try { if (window.WB?.shop?.isOwned?.("mirrorball")) return true; } catch {}
-    const j = safeParseLS(LS_OWNED);
+    const j = safeParse(localStorage.getItem(LS_OWNED));
     return !!j?.mirrorball;
   }
 
-  function isMirrorballEnabled() {
-    // WB.shop優先
-    try {
-      if (typeof window.WB?.shop?.isMirrorballEnabled === "function") {
-        const v = window.WB.shop.isMirrorballEnabled();
-        return (typeof v === "boolean") ? v : !!v;
-      }
-      const wbState = window.WB?.shop?.state;
-      if (wbState && typeof wbState.mirrorballEnabled === "boolean") return wbState.mirrorballEnabled;
-    } catch {}
+  function itemPlaceEnabledMirrorball() {
+    const en = safeParse(localStorage.getItem(LS_IP_EN)) || {};
+    // 未設定ならtrue扱い（itemPlace仕様に合わせる）
+    if (typeof en.mirrorball !== "boolean") return true;
+    return !!en.mirrorball;
+  }
 
-    // LS fallback
-    const j = safeParseLS(LS_STATE);
-    if (j && typeof j === "object" && "mirrorballEnabled" in j) return !!j.mirrorballEnabled;
+  function itemPlacePlacedMirrorball() {
+    const st = safeParse(localStorage.getItem(LS_IP_ST)) || {};
+    const s = st?.mirrorball;
+    return !!(s && typeof s === "object" && s.placed === true);
+  }
 
-    // 古い環境はON扱い
+  function shouldShowMirrorballAndSpot() {
+    if (!isOwnedMirrorball()) return false;
+    if (!itemPlaceEnabledMirrorball()) return false;
+    if (!itemPlacePlacedMirrorball()) return false;
     return true;
   }
 
-  function cleanupAllMirrorballStuff(root = document) {
-    // 過去版id残骸を削除
-    try {
-      const all = root.querySelectorAll("[id]");
-      all.forEach(el => {
-        const id = String(el.id || "");
-        for (const p of GARBAGE_ID_PREFIXES) {
-          if (id.startsWith(p)) { try { el.remove(); } catch {} break; }
-        }
-      });
-    } catch {}
-
-    // src一致（id違い残骸）
-    try {
-      root.querySelectorAll('img[src*="mirrorball.png"], img[src*="/mirrorball.png"]').forEach(el => {
-        if (el.id === MIRROR.id) return;
-        try { el.remove(); } catch {}
-      });
-    } catch {}
+  // ===== Cleanup =====
+  function cleanupFX(root = document) {
+    try { root.getElementById?.(FX.wrapId)?.remove(); } catch {}
+    try { document.getElementById(FX.wrapId)?.remove(); } catch {}
   }
 
-  /* =========================
-   * Mirrorball image
-   * ========================= */
-  const MIRROR = {
-    id: "mirrorballImgFINAL",
-    styleId: "mirrorballImgStyleFINAL",
-    src: "./assets/bg/mirrorball.png",
-    top: 8,
-    size: 140,
-    z: 30,
-  };
+  function cleanupMirrorImg(root = document) {
+    try { root.getElementById?.(MIRROR.id)?.remove(); } catch {}
+    try { document.getElementById(MIRROR.id)?.remove(); } catch {}
+  }
 
-  function ensureMirrorballStyle() {
-    if (document.getElementById(MIRROR.styleId)) return;
+  // ===== Mirrorball image =====
+  function ensureMirrorStyle() {
+    const id = "bgMirrorballStyleV11";
+    if (document.getElementById(id)) return;
     const st = document.createElement("style");
-    st.id = MIRROR.styleId;
+    st.id = id;
     st.textContent = `
 #${MIRROR.id}{
   position:absolute;
@@ -139,19 +156,15 @@
     document.head.appendChild(st);
   }
 
-  function ensureMirrorball(bgLayer, on) {
+  function ensureMirrorImg(bgLayer, on) {
     if (!bgLayer) return;
-
-    ensureBgLayerReady(bgLayer);
-    ensureMirrorballStyle();
+    ensureLayerReady(bgLayer);
+    ensureMirrorStyle();
 
     if (!on) {
-      try { document.getElementById(MIRROR.id)?.remove(); } catch {}
+      cleanupMirrorImg(document);
       return;
     }
-
-    // ON時：残骸を消してから1個だけ
-    cleanupAllMirrorballStuff(bgLayer);
 
     let img = document.getElementById(MIRROR.id);
     if (!img) {
@@ -166,229 +179,138 @@
     }
   }
 
-  /* =========================
-   * Spotlight
-   * ========================= */
-  const SPOT = {
-    styleId: "mirrorballSpotStyleFINAL",
-    wrapId:  "mirrorballSpotWrapFINAL",
-    leftId:  "mirrorballSpotLeftFINAL",
-    rightId: "mirrorballSpotRightFINAL",
-    z: 18,
-    widthVmax: 210,
-    coreOpacity: 0.52,
-    nightAdd: 0.22,
-    swayDegA: 18,
-    swayDegB: 28,
-  };
-
-  function spotOriginTopPx() {
-    return Math.round(MIRROR.top + MIRROR.size * 0.62);
-  }
-
-  function ensureSpotStyle() {
-    if (document.getElementById(SPOT.styleId)) return;
-
+  // ===== FX (2 beams) =====
+  function ensureFXStyle() {
+    if (document.getElementById(FX.styleId)) return;
     const st = document.createElement("style");
-    st.id = SPOT.styleId;
+    st.id = FX.styleId;
     st.textContent = `
-@keyframes mbHueFINAL {
-  0%   { filter: hue-rotate(0deg)    saturate(1.7) brightness(1.10); }
-  100% { filter: hue-rotate(360deg)  saturate(1.7) brightness(1.10); }
-}
-@keyframes mbSwayL_FINAL {
-  0%   { transform: translateX(-50%) rotate(-${SPOT.swayDegA}deg); }
-  50%  { transform: translateX(-50%) rotate(-${SPOT.swayDegB}deg); }
-  100% { transform: translateX(-50%) rotate(-${SPOT.swayDegA}deg); }
-}
-@keyframes mbSwayR_FINAL {
-  0%   { transform: translateX(-50%) rotate(${SPOT.swayDegA}deg); }
-  50%  { transform: translateX(-50%) rotate(${SPOT.swayDegB}deg); }
-  100% { transform: translateX(-50%) rotate(${SPOT.swayDegA}deg); }
-}
-
-#${SPOT.wrapId}{
+#${FX.wrapId}{
   position:absolute;
   inset:0;
-  z-index:${SPOT.z};
   pointer-events:none;
   overflow:hidden;
-  opacity:0;
-  transition: opacity .20s ease;
+  z-index:${FX.z};
+  display:none;
 }
-
-#${SPOT.wrapId} .beam{
+#${FX.wrapId} .beam{
   position:absolute;
-  left:50%;
-  top:${spotOriginTopPx()}px;
-
-  width:${SPOT.widthVmax}vmax;
-  height:${SPOT.widthVmax}vmax;
-
+  left:0; top:0;
   transform-origin: 50% 0%;
+  pointer-events:none;
   mix-blend-mode: screen;
-  opacity:${SPOT.coreOpacity};
-
-  background:
-    conic-gradient(from 0deg,
-      rgba(255,255,255,0)   0deg,
-      rgba(255,255,255,0)  118deg,
-      rgba(255,255,255,.00) 150deg,
-      rgba(255,255,255,.40) 180deg,
-      rgba(255,255,255,.00) 210deg,
-      rgba(255,255,255,0)  242deg,
-      rgba(255,255,255,0)  360deg
-    );
-
-  mask-image: radial-gradient(circle at 50% 0%, rgba(0,0,0,1) 0 34%, rgba(0,0,0,0) 74%);
-  -webkit-mask-image: radial-gradient(circle at 50% 0%, rgba(0,0,0,1) 0 34%, rgba(0,0,0,0) 74%);
-
-  animation: mbHueFINAL 6.6s linear infinite;
-  will-change: transform, filter, opacity;
-}
-
-#${SPOT.leftId}{
-  animation: mbHueFINAL 6.6s linear infinite, mbSwayL_FINAL 2.9s ease-in-out infinite;
-}
-#${SPOT.rightId}{
-  animation: mbHueFINAL 6.6s linear infinite, mbSwayR_FINAL 3.1s ease-in-out infinite;
+  border-radius: 18px;
+  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+  background: linear-gradient(90deg,
+    rgba(255,0,80,.92) 0%,
+    rgba(255,140,0,.92) 14%,
+    rgba(255,230,0,.92) 28%,
+    rgba(0,255,120,.92) 42%,
+    rgba(0,210,255,.92) 56%,
+    rgba(0,120,255,.92) 70%,
+    rgba(170,70,255,.92) 84%,
+    rgba(255,0,180,.92) 100%
+  );
+  box-shadow: 0 0 40px rgba(255,255,255,.15) inset;
 }
 `;
     document.head.appendChild(st);
   }
 
-  function ensureSpotWrap(bgLayer) {
+  function ensureFX(bgLayer) {
     if (!bgLayer) return null;
-    ensureBgLayerReady(bgLayer);
-    ensureSpotStyle();
+    ensureLayerReady(bgLayer);
+    ensureFXStyle();
 
-    let wrap = document.getElementById(SPOT.wrapId);
+    let wrap = document.getElementById(FX.wrapId);
     if (!wrap) {
       wrap = document.createElement("div");
-      wrap.id = SPOT.wrapId;
-
-      const left = document.createElement("div");
-      left.id = SPOT.leftId;
-      left.className = "beam";
-
-      const right = document.createElement("div");
-      right.id = SPOT.rightId;
-      right.className = "beam";
-
-      wrap.appendChild(left);
-      wrap.appendChild(right);
-
+      wrap.id = FX.wrapId;
+      wrap.innerHTML = `<div class="beam" id="${FX.leftId}"></div><div class="beam" id="${FX.rightId}"></div>`;
+      // 背景の先頭に
       bgLayer.insertBefore(wrap, bgLayer.firstChild);
+    } else {
+      if (wrap.parentElement !== bgLayer) bgLayer.insertBefore(wrap, bgLayer.firstChild);
+      else if (bgLayer.firstChild !== wrap) bgLayer.insertBefore(wrap, bgLayer.firstChild);
     }
     return wrap;
   }
 
-  function removeSpot() {
-    try { document.getElementById(SPOT.wrapId)?.remove(); } catch {}
+  // itemPlaceのmirrorball座標を背景座標へ変換（host=#field基準）
+  function getMirrorAnchorInBg(bgLayer, field) {
+    const st = safeParse(localStorage.getItem(LS_IP_ST)) || {};
+    const s = st?.mirrorball;
+    if (!s || !s.placed) return null;
+
+    // itemPlaceは#fieldローカル座標（px）
+    const fr = field.getBoundingClientRect();
+    const br = bgLayer.getBoundingClientRect();
+
+    const xInViewport = fr.left + Number(s.x || 0) + (MIRROR.size * FX.anchorX);
+    const yInViewport = fr.top  + Number(s.y || 0) + (MIRROR.size * FX.anchorY);
+
+    const x = xInViewport - br.left;
+    const y = yInViewport - br.top;
+
+    return { x, y };
   }
 
-  function setSpotEnabled(bgLayer, on, phase) {
-    if (!bgLayer) return;
+  function syncFXLayout(phase) {
+    const bgLayer = document.getElementById(BG_ID);
+    const field   = document.getElementById(FIELD_ID);
+    if (!bgLayer || !field) return;
+
+    const on = shouldShowMirrorballAndSpot();
+    ensureMirrorImg(bgLayer, on);
+
+    const fxWrap = ensureFX(bgLayer);
+    if (!fxWrap) return;
 
     if (!on) {
-      removeSpot();
+      fxWrap.style.display = "none";
+      cleanupFX(document);
       return;
     }
 
-    const wrap = ensureSpotWrap(bgLayer);
-    if (!wrap) return;
-
-    wrap.style.opacity = "1";
-
-    const add = (phase === "night") ? SPOT.nightAdd : 0;
-    const left = document.getElementById(SPOT.leftId);
-    const right = document.getElementById(SPOT.rightId);
-    if (left && right) {
-      const op = String(SPOT.coreOpacity + add);
-      if (left.style.opacity !== op) left.style.opacity = op;
-      if (right.style.opacity !== op) right.style.opacity = op;
+    const a = getMirrorAnchorInBg(bgLayer, field);
+    if (!a) {
+      fxWrap.style.display = "none";
+      return;
     }
+
+    fxWrap.style.display = "block";
+
+    const L = document.getElementById(FX.leftId);
+    const R = document.getElementById(FX.rightId);
+    if (!L || !R) return;
+
+    const op = (phase === "night") ? FX.opacityNight : FX.opacityDay;
+    const common = (el) => {
+      el.style.left = `${Math.round(a.x)}px`;
+      el.style.top  = `${Math.round(a.y)}px`;
+      el.style.width  = `${FX.width}px`;
+      el.style.height = `${FX.height}px`;
+      el.style.opacity = String(op);
+      el.style.filter = `blur(${FX.blur}px) saturate(1.35)`;
+    };
+
+    common(L);
+    common(R);
+
+    // 初期角度
+    L.style.transform = `translateX(-50%) rotate(${FX.baseAngleL}deg)`;
+    R.style.transform = `translateX(-50%) rotate(${FX.baseAngleR}deg)`;
   }
 
-  /* =========================
-   * Bunny brighten (light)
-   * ========================= */
-  let bunnyBrightTimer = null;
-  let cachedFieldRect = null;
-  let cachedFieldRectAt = 0;
-  const FIELD_RECT_TTL = 800;
-
-  function stopBunnyGlow() {
-    if (bunnyBrightTimer) { clearInterval(bunnyBrightTimer); bunnyBrightTimer = null; }
-    document.querySelectorAll(".bunnyWrap").forEach(w => { w.style.filter = ""; });
-  }
-
-  function getFieldRect(field) {
-    const now = Date.now();
-    if (cachedFieldRect && (now - cachedFieldRectAt) < FIELD_RECT_TTL) return cachedFieldRect;
-    cachedFieldRect = field.getBoundingClientRect();
-    cachedFieldRectAt = now;
-    return cachedFieldRect;
-  }
-
-  function startBunnyGlow(on, phase) {
-    if (!on) { stopBunnyGlow(); return; }
-
-    const field = getField();
-    if (!field) { stopBunnyGlow(); return; }
-
-    const boost = (phase === "night") ? 1.20 : 1.10;
-    const tick = 350;
-
-    if (bunnyBrightTimer) clearInterval(bunnyBrightTimer);
-    bunnyBrightTimer = setInterval(() => {
-      const fieldEl = getField();
-      if (!fieldEl) { stopBunnyGlow(); return; }
-
-      const fr = getFieldRect(fieldEl);
-      const centerX = fr.left + fr.width * 0.5;
-      const originY = fr.top + spotOriginTopPx();
-
-      const wraps = document.querySelectorAll(".bunnyWrap");
-      if (!wraps.length) return;
-
-      wraps.forEach(w => {
-        const r = w.getBoundingClientRect();
-        const x = r.left + r.width * 0.5;
-        const y = r.top  + r.height * 0.8;
-
-        const dy = Math.max(0, y - originY);
-        const allowed = 130 + dy * 0.90;
-        const inside = Math.abs(x - centerX) < allowed;
-
-        const want = inside ? `brightness(${boost})` : "";
-        if (w.style.filter !== want) w.style.filter = want;
-      });
-    }, tick);
-  }
-
-  /* =========================
-   * Apply
-   * ========================= */
+  // ===== Background apply =====
   let lastPhase = "";
-  let lastOn = null;
-
-  let applyQueued = false;
-  function requestApply(force = false) {
-    if (applyQueued) return;
-    applyQueued = true;
-    requestAnimationFrame(() => {
-      applyQueued = false;
-      apply(force);
-    });
-  }
-
-  function apply(force = false) {
-    const bgLayer = getBgLayer();
-    const field = getField();
+  function applyBg(force = false) {
+    const bgLayer = document.getElementById(BG_ID);
+    const field   = document.getElementById(FIELD_ID);
     if (!bgLayer) return;
 
-    ensureBgLayerReady(bgLayer);
+    ensureLayerReady(bgLayer);
+    if (field) ensureLayerReady(field);
 
     const h = getJSTHour();
     const phase = getPhaseByHour(h);
@@ -398,84 +320,84 @@
       const bg = THEMES[phase] || THEMES.day;
       bgLayer.style.background = bg;
       if (field) field.style.background = bg;
-      try { window.WB?.emit?.("bg:changed", { phase, hour: h }); } catch {}
     }
 
-    const owned = hasMirrorballOwned();
-    const enabled = isMirrorballEnabled();
-
-    // ★唯一の真実：OFFを勝手にONに戻さない
-    const on = owned && enabled;
-
-    // onが変わってない & forceでないなら最小更新
-    if (!force && lastOn === on) {
-      setSpotEnabled(bgLayer, on, phase);
-      startBunnyGlow(on, phase);
-      return;
-    }
-    lastOn = on;
-
-    if (!on) {
-      // OFFに切り替わった瞬間だけ重め掃除
-      ensureMirrorball(bgLayer, false);
-      removeSpot();
-      stopBunnyGlow();
-      cleanupAllMirrorballStuff(document);
-      return;
-    }
-
-    // ON
-    ensureMirrorball(bgLayer, true);
-    setSpotEnabled(bgLayer, true, phase);
-    startBunnyGlow(true, phase);
+    syncFXLayout(phase);
   }
 
-  /* =========================
-   * Boot / Watch
-   * ========================= */
-  let tries = 0;
-  const bootTimer = setInterval(() => {
-    tries++;
-    requestApply(true);
-    if (getBgLayer() || tries >= 80) clearInterval(bootTimer);
-  }, 50);
+  // ===== Animation loop =====
+  let __raf = 0;
+  function startLoop() {
+    cancelAnimationFrame(__raf);
+    const tick = (t) => {
+      __raf = requestAnimationFrame(tick);
 
-  setInterval(() => requestApply(false), 60 * 1000);
+      // 条件外なら軽く終了
+      if (!shouldShowMirrorballAndSpot()) return;
 
-  const invalidateRect = () => { cachedFieldRect = null; cachedFieldRectAt = 0; };
-  window.addEventListener("resize", invalidateRect, { passive: true });
-  window.addEventListener("scroll", invalidateRect, { passive: true });
+      const L = document.getElementById(FX.leftId);
+      const R = document.getElementById(FX.rightId);
+      if (!L || !R) return;
 
-  const hookWB = () => {
-    if (!window.WB?.on) return false;
-    [
-      "core:reset_partial",
-      "core:ready",
-      "bg:mirrorball_changed",
-      "bg:mirrorball_toggle",
-      "shop:changed",
-      "shop:state_changed",
-      "shop:toggled",
-    ].forEach(ev => {
-      try { window.WB.on(ev, () => requestApply(true)); } catch {}
-    });
-    return true;
-  };
-  hookWB();
-  setTimeout(hookWB, 300);
+      // 揺れ
+      const s1 = Math.sin(t * FX.swaySpeed);
+      const s2 = Math.sin(t * (FX.swaySpeed * 1.07) + 1.4);
+      const angL = FX.baseAngleL + s1 * FX.swayDeg;
+      const angR = FX.baseAngleR - s2 * FX.swayDeg;
 
-  // localStorage更新を同タブで拾う
-  (function hookLocalStorage() {
+      L.style.transform = `translateX(-50%) rotate(${angL.toFixed(2)}deg)`;
+      R.style.transform = `translateX(-50%) rotate(${angR.toFixed(2)}deg)`;
+
+      // 虹
+      const hue = (t * FX.hueSpeed) % 360;
+      const f = `blur(${FX.blur}px) saturate(1.35) hue-rotate(${hue.toFixed(1)}deg)`;
+      L.style.filter = f;
+      R.style.filter = f;
+    };
+    __raf = requestAnimationFrame(tick);
+  }
+
+  // ===== Watchers =====
+  function hookStorageChange() {
+    // 同タブでsetItemしても反映させる
     try {
       const _setItem = localStorage.setItem.bind(localStorage);
       localStorage.setItem = (k, v) => {
         _setItem(k, v);
-        if (k === LS_STATE || k === LS_OWNED) requestApply(true);
+        if (k === LS_OWNED || k === LS_IP_EN || k === LS_IP_ST) applyBg(true);
       };
     } catch {}
-  })();
+    window.addEventListener("storage", (e) => {
+      if (!e) return;
+      if (e.key === LS_OWNED || e.key === LS_IP_EN || e.key === LS_IP_ST) applyBg(true);
+    });
+  }
 
-  window.addEventListener("storage", (e) => {
-    if (e && (e.key === LS_STATE || e.key === LS_OWNED)) requestApply(true);
-  });
+  function hookWB() {
+    if (!window.WB?.on) return;
+    const evs = [
+      "shop:changed",
+      "itemplace:enabled_changed",
+      "itemplace:owned_changed",
+      "core:ready",
+      "core:reset_partial",
+    ];
+    evs.forEach(ev => {
+      try { window.WB.on(ev, () => applyBg(true)); } catch {}
+    });
+  }
+
+  // ===== Boot =====
+  (function boot() {
+    applyBg(true);
+    startLoop();
+    hookStorageChange();
+    hookWB();
+
+    // 30秒ごとに時刻/状態再同期
+    setInterval(() => applyBg(false), 30_000);
+
+    window.addEventListener("resize", () => applyBg(true), { passive: true });
+    window.addEventListener("scroll",  () => applyBg(true), { passive: true });
+  })();
 })();
