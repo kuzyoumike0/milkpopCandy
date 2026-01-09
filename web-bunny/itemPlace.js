@@ -1,4 +1,4 @@
-// itemPlace.js（V8：bed/oak は “うさぎと同じくらい” スケール）
+// itemPlace.js（V8：bed/oak は “うさぎと同じくらい” スケール + 🛏 bed 地面吸着）
 // ✅ アイテム配置は itemPlace のみで行う（shop.js は購入のみ）
 // ✅ shop.js購入済み(owned)の「配置できるアイテム」だけ扱う（mirrorballは除外）
 // ✅ oak.png などアイテムが増えても自動対応：SHOP.items() / WB.shop.items() / fallback の順で吸収
@@ -12,6 +12,7 @@
 // ✅ アイテム選択も itemPlace で完結（セレクト + 配置物クリックで選択）
 // ✅ うさぎの裏：wrap を #bunnyLayer の直前へ（DOM順）＋低z-index
 // ✅ クリックできない問題根絶：編集中だけ pointer-events:auto
+// ✅ 🛏 bed を地面吸着（bottom基準）：置いた/ドラッグした後に “床” に吸着（y固定）
 
 (() => {
   "use strict";
@@ -32,12 +33,14 @@
   // ✅ 基本は少し大きめ（他アイテム用）
   const DISPLAY_SCALE_DEFAULT = 1.18;
 
-  // ✅ bed / oak は “うさぎと同じくらい” に固定（ここだけ調整）
-  // だいたい同じなら 1.00、少しだけ小さめなら 0.95〜0.98
+  // ✅ bed / oak は “うさぎと同じくらい”
   const ITEM_SCALE_OVERRIDE = {
     bed: 1.00,
     oak: 1.00,
   };
+
+  // ✅ 🛏 bed 地面吸着：床からの余白（px）
+  const BED_GROUND_MARGIN_PX = 0;
 
   const $ = (q, p = document) => p.querySelector(q);
   const esc = (s) => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
@@ -69,7 +72,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
    * Items source (増えても追従)
    * ========================= */
 
-  // ✅ SHOP.items が無いときの保険（最低限）
   const FALLBACK_ITEMS = [
     { key: "bed", label: "ベッド", img: "./assets/bg/bed.png", placeable: true },
     { key: "oak", label: "オーク", img: "./assets/bg/oak.png", placeable: true },
@@ -82,18 +84,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const label = String(it?.label ?? key);
     const src = String(it?.img ?? it?.src ?? "");
 
-    // shop.js が displayScale を渡す可能性にも対応（任意）
     const ds = Number(it?.displayScale);
-    const displayScaleFromShop =
-      Number.isFinite(ds) && ds > 0 ? ds : null;
+    const displayScaleFromShop = (Number.isFinite(ds) && ds > 0) ? ds : null;
 
-    return {
-      key,
-      label,
-      src,
-      placeable: !!it?.placeable,
-      displayScaleFromShop,
-    };
+    return { key, label, src, placeable: !!it?.placeable, displayScaleFromShop };
   }
 
   function readShopItemsMap() {
@@ -108,8 +102,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   }
 
   function getDefaultForKey(key) {
-    // itemごとの初期座標（必要ならキーで調整できる）
-    // ここは「増えてもOK」方針なので、基本同じ
     return { x: 180, y: 280, rot: 0, placed: false };
   }
 
@@ -124,12 +116,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       }
     } else {
       for (const x of FALLBACK_ITEMS) {
-        const n = normalizeShopItem({
-          key: x.key,
-          label: x.label,
-          img: x.img,
-          placeable: x.placeable,
-        });
+        const n = normalizeShopItem({ key: x.key, label: x.label, img: x.img, placeable: x.placeable });
         if (n) items.push(n);
       }
     }
@@ -144,12 +131,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         key: it.key,
         label: it.label,
         src: it.src,
-        z: 1, // “うさぎの裏”
+        z: 1,
         default: getDefaultForKey(it.key),
-        // まず shop.js 指定があればそれ、無ければ override、無ければ default
         displayScale:
           it.displayScaleFromShop ??
           (Number.isFinite(+ITEM_SCALE_OVERRIDE[it.key]) ? +ITEM_SCALE_OVERRIDE[it.key] : DISPLAY_SCALE_DEFAULT),
+        // ✅ 地面吸着したいか（今は bed のみ）
+        groundSnap: (it.key === "bed"),
       };
     }
 
@@ -192,7 +180,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const out = { ...j };
 
     for (const k of Object.keys(PLACE_ITEMS)) {
-      if (typeof out[k] !== "boolean") out[k] = true; // default ON
+      if (typeof out[k] !== "boolean") out[k] = true;
     }
     for (const k of Object.keys(out)) {
       if (!(k in PLACE_ITEMS)) delete out[k];
@@ -278,6 +266,37 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     return DISPLAY_SCALE_DEFAULT;
   }
 
+  function getDisplayWH(key) {
+    const base = imgSize[key] || { w: 120, h: 90 };
+    const ds = getDisplayScale(key);
+    return { w: base.w * ds, h: base.h * ds };
+  }
+
+  /* =========================
+   * 🛏 bed 地面吸着
+   * ========================= */
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  function snapGroundIfNeeded(key) {
+    const it = PLACE_ITEMS[key];
+    if (!it?.groundSnap) return;
+
+    const host = getHost();
+    const r = host.getBoundingClientRect();
+    if (r.width <= 2 || r.height <= 2) return;
+
+    const s = st[key];
+    if (!s || !s.placed) return;
+
+    const wh = getDisplayWH(key);
+    // ✅ bottom 基準：y を “床（hostの高さ - 物体高さ - margin）” に固定
+    s.y = (r.height - wh.h - BED_GROUND_MARGIN_PX);
+
+    // ついでに左右のはみ出しを少しガード（任意）
+    s.x = clamp(s.x, -wh.w * 0.2, r.width - wh.w * 0.8);
+  }
+
   /* =========================
    * DOM / Layer
    * ========================= */
@@ -292,7 +311,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
   inset:0;
   overflow:visible;
   pointer-events:none;
-  z-index:1; /* うさぎの裏 */
+  z-index:1;
 }
 #${WRAP_ID}.ipEditing{ pointer-events:auto; }
 #${WRAP_ID}.ipEditing .itemPlaceObj{ pointer-events:auto; }
@@ -436,10 +455,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
   function setGhostSizeFor(key) {
     const g = ensureGhost();
-    const base = imgSize[key] || { w: 120, h: 90 };
-    const ds = getDisplayScale(key);
-    g.style.width  = `${Math.max(8, base.w * ds)}px`;
-    g.style.height = `${Math.max(8, base.h * ds)}px`;
+    const wh = getDisplayWH(key);
+    g.style.width  = `${Math.max(8, wh.w)}px`;
+    g.style.height = `${Math.max(8, wh.h)}px`;
   }
 
   function showGhostAt(clientX, clientY, key) {
@@ -508,10 +526,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
 
   function ownedKeys() {
     const o = [];
-    for (const k of PLACE_ORDER) {
-      if (!isOwned(k)) continue;
-      o.push(k);
-    }
+    for (const k of PLACE_ORDER) if (isOwned(k)) o.push(k);
     return o;
   }
 
@@ -532,7 +547,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
         透明赤枠の位置をクリックで設置。<br>
         設置後はドラッグで移動。<br>
         <b>配置物をクリック</b>で選択できます。<br>
-        （bed / oak は <b>うさぎと同じくらい</b>）
+        （bed / oak は <b>うさぎと同じくらい</b>）<br>
+        🛏 bed は <b>床に吸着</b>します。
       </div>
     </div>
 
@@ -561,6 +577,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       if (!selectedKey) return;
       const s = st[selectedKey]; if (!s) return;
       s.rot -= 5;
+      // bedは回転しても床吸着は維持（yだけ固定）
+      snapGroundIfNeeded(selectedKey);
       saveState(st); syncOne(selectedKey);
     });
 
@@ -568,6 +586,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       if (!selectedKey) return;
       const s = st[selectedKey]; if (!s) return;
       s.rot += 5;
+      snapGroundIfNeeded(selectedKey);
       saveState(st); syncOne(selectedKey);
     });
 
@@ -576,6 +595,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       const def = PLACE_ITEMS[selectedKey]?.default; if (!def) return;
       const keepPlaced = st[selectedKey]?.placed ?? false;
       st[selectedKey] = { ...def, placed: keepPlaced };
+      snapGroundIfNeeded(selectedKey);
       saveState(st); syncOne(selectedKey);
     });
 
@@ -694,6 +714,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       return;
     }
 
+    // ✅ bed は常に床吸着（描画前に確定）
+    snapGroundIfNeeded(key);
+
     const img = ensureObj(key);
     if (!img) return;
 
@@ -707,7 +730,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const wrap = ensureWrap();
     if (wrap) wrap.classList.toggle("ipEditing", !!editing);
 
-    // もう存在しないキーの残骸を掃除
     document.querySelectorAll(`[id^="itemPlace_"]`).forEach(el => {
       const key = el.id.replace(/^itemPlace_/, "");
       if (!(key in PLACE_ITEMS)) {
@@ -758,13 +780,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     const s = st[selectedKey] || (st[selectedKey] = { ...PLACE_ITEMS[selectedKey].default });
     s.placed = true;
 
-    const base = imgSize[selectedKey] || { w: 120, h: 90 };
-    const ds = getDisplayScale(selectedKey);
-    const w = base.w * ds;
-    const h = base.h * ds;
+    const wh = getDisplayWH(selectedKey);
+    s.x = localX - wh.w / 2;
+    s.y = localY - wh.h / 2;
 
-    s.x = localX - w / 2;
-    s.y = localY - h / 2;
+    // ✅ bed は “置いた瞬間” に床へ吸着
+    snapGroundIfNeeded(selectedKey);
 
     saveState(st);
     syncOne(selectedKey);
@@ -817,12 +838,19 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     s.x = drag.baseX + dx;
     s.y = drag.baseY + dy;
 
+    // ✅ bed はドラッグしても床に吸着し続ける（y固定、xだけ動く感じ）
+    snapGroundIfNeeded(drag.key);
+
     syncOne(drag.key);
   }
 
   function onObjUp() {
     if (!drag.active) return;
     drag.active = false;
+
+    // ✅ bed は離した瞬間も床へ確定
+    snapGroundIfNeeded(drag.key);
+
     saveState(st);
   }
 
@@ -863,6 +891,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       document.removeEventListener("pointerup", onObjUp);
 
       window.removeEventListener("keydown", onKey);
+
+      // ✅ 閉じる時に bed を床へ確定
+      try { snapGroundIfNeeded("bed"); } catch {}
+
       saveState(st);
     }
 
@@ -887,6 +919,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     if (!owned.includes(selectedKey)) selectedKey = owned[0];
 
     st = loadState();
+
+    // ✅ 開いた瞬間も bed は床へ
+    try { snapGroundIfNeeded("bed"); } catch {}
+
     setEditing(true);
   }
 
@@ -906,12 +942,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
     saveState(st);
     saveEnabled(loadEnabled());
 
+    // ✅ 初期も床吸着
+    try { snapGroundIfNeeded("bed"); } catch {}
+
     syncAll();
 
     const reSync = async () => {
       refreshItems();
       await preloadAll();
       st = loadState();
+      try { snapGroundIfNeeded("bed"); } catch {}
       syncAll();
       if (editing) refreshSelect();
     };
@@ -932,6 +972,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       if (!e) return;
       if (e.key === SHOP_OWNED_KEY || e.key === LS_STATE_KEY || e.key === LS_ENABLED_KEY) {
         st = loadState();
+        try { snapGroundIfNeeded("bed"); } catch {}
         syncAll();
         if (editing) refreshSelect();
       }
@@ -949,6 +990,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;`;
       _stateKey: LS_STATE_KEY,
       _scaleDefault: DISPLAY_SCALE_DEFAULT,
       _scaleOverride: { ...ITEM_SCALE_OVERRIDE },
+      _bedGroundMargin: BED_GROUND_MARGIN_PX,
     };
 
     try {
