@@ -1,15 +1,16 @@
 // shop.js（非module）
 // ✅ HUDの「ショップ」(#shopBtn) で開く（omukaeとは別）
-// ✅ ミラーボール：購入（所持）＋設置ON/OFF（外せる）
-// ✅ 購入/設置変更時に WB.emit("bg:mirrorball_changed") で bgcolor.js に即反映
+// ✅ ミラーボール：購入（所持）＋ 設置ON/OFF（外せる）
+// ✅ 購入/設置変更時に WB.emit("bg:mirrorball_changed") で bgcolor.js 即反映
+// ✅ FIX: 状態JSONが壊れても復旧（必ず保存し直す）
 // ✅ FIX: captureで伝播停止（omukae側の委譲クリック根絶）
 // ✅ WB coin API 互換 + #coinValue fallback
 
 (() => {
   "use strict";
 
-  const LS_OWNED = "milkpop_shop_owned_v1";   // { mirrorball:true }
-  const LS_STATE = "milkpop_shop_state_v1";   // { mirrorballEnabled:true }
+  const LS_OWNED = "milkpop_shop_owned_v1"; // { mirrorball:true }
+  const LS_STATE = "milkpop_shop_state_v1"; // { mirrorballEnabled:true/false }
 
   const ITEM = {
     key: "mirrorball",
@@ -20,16 +21,16 @@
   };
 
   const UI = {
-    style: "milkpopShopStyleV2",
-    backdrop: "milkpopShopBackdropV2",
-    modal: "milkpopShopModalV2",
-    toast: "milkpopShopToastV2",
+    style: "milkpopShopStyleV3",
+    backdrop: "milkpopShopBackdropV3",
+    modal: "milkpopShopModalV3",
+    toast: "milkpopShopToastV3",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
 
   /* =========================
-   * storage
+   * storage (safe)
    * ========================= */
   function loadJson(key, fallback) {
     try {
@@ -41,17 +42,39 @@
       return fallback;
     }
   }
-  function saveJson(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
+  function saveJson(key, v) {
+    try { localStorage.setItem(key, JSON.stringify(v)); } catch {}
+  }
 
   let owned = loadJson(LS_OWNED, {});
-  let state = loadJson(LS_STATE, { mirrorballEnabled: true });
+  let state = loadJson(LS_STATE, { mirrorballEnabled: false }); // ★読めない時はOFFで安全
 
-  function isOwned(k) { return !!owned?.[k]; }
+  // ★JSONが壊れててもここで必ず復旧して保存し直す
+  function normalizeAndPersist() {
+    if (!owned || typeof owned !== "object") owned = {};
+    if (!state || typeof state !== "object") state = { mirrorballEnabled: false };
+    if (typeof state.mirrorballEnabled !== "boolean") state.mirrorballEnabled = false;
+    saveJson(LS_OWNED, owned);
+    saveJson(LS_STATE, state);
+  }
+  normalizeAndPersist();
+
+  function isOwned(key) { return !!owned?.[key]; }
   function isEnabled() { return !!state?.mirrorballEnabled; }
+
+  function notify() {
+    try {
+      window.WB?.emit?.("bg:mirrorball_changed", {
+        owned: isOwned(ITEM.key),
+        enabled: isEnabled(),
+      });
+    } catch {}
+  }
+
   function setEnabled(v) {
     state.mirrorballEnabled = !!v;
     saveJson(LS_STATE, state);
-    try { window.WB?.emit?.("bg:mirrorball_changed", { owned: isOwned(ITEM.key), enabled: isEnabled() }); } catch {}
+    notify();
   }
 
   /* =========================
@@ -78,17 +101,11 @@
       if (WB && typeof WB.spendCoins === "function") return !!WB.spendCoins(a);
       if (WB && typeof WB.spendCoin === "function") return !!WB.spendCoin(a);
 
-      if (WB && typeof WB.addCoin === "function") {
-        const cur = getCoinsWB();
-        if (cur < a) return false;
-        WB.addCoin(-a);
-        // 念のためHUD直も更新されない環境向けは bgcolor/shop側では不要
-        return true;
-      }
-
       const cur = getCoinsWB();
       if (cur < a) return false;
-      // 直書きfallback（WBにsetがない場合）
+
+      if (WB && typeof WB.addCoin === "function") { WB.addCoin(-a); return true; }
+
       if (WB && typeof WB.coins === "number") WB.coins = cur - a;
       const el = document.getElementById("coinValue");
       if (el) el.textContent = String(cur - a);
@@ -126,7 +143,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   /* =========================
-   * UI style
+   * UI
    * ========================= */
   function ensureStyle() {
     if (document.getElementById(UI.style)) return;
@@ -226,14 +243,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     <div class="ttl">ショップ</div>
     <div class="sub">アイテムを購入・設置できます</div>
   </div>
-  <button class="btn ghost" id="shopCloseModalV2" type="button">×</button>
+  <button class="btn ghost" id="shopCloseModalV3" type="button">×</button>
 </div>
 
 <div class="sep"></div>
 
 <div class="row">
-  <div class="tag" id="shopCoinTagV2">🪙 0</div>
-  <div class="tag" id="shopStateTagV2">ミラーボール：OFF</div>
+  <div class="tag" id="shopCoinTagV3">🪙 0</div>
+  <div class="tag" id="shopStateTagV3">ミラーボール：OFF</div>
 </div>
 
 <div class="sep"></div>
@@ -247,9 +264,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       <div class="meta">価格：<b>${ITEM.price}🪙</b></div>
     </div>
     <div class="right">
-      <div class="tag" id="shopOwnedTagV2">未購入</div>
-      <button class="btn" id="shopBuyBtnV2" type="button">購入</button>
-      <button class="toggle" id="shopToggleBtnV2" type="button">設置</button>
+      <div class="tag" id="shopOwnedTagV3">未購入</div>
+      <button class="btn" id="shopBuyBtnV3" type="button">購入</button>
+      <button class="toggle" id="shopToggleBtnV3" type="button">設置</button>
     </div>
   </div>
 </div>
@@ -286,10 +303,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     owned[ITEM.key] = true;
     saveJson(LS_OWNED, owned);
 
-    // 購入直後はONにしておく
-    if (!isEnabled()) setEnabled(true);
+    // ★購入直後はONにする（でも外せる）
+    setEnabled(true);
 
-    try { window.WB?.emit?.("bg:mirrorball_changed", { owned: true, enabled: isEnabled() }); } catch {}
     return { ok: true, reason: "bought" };
   }
 
@@ -297,17 +313,18 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const modal = document.getElementById(UI.modal);
     if (!modal) return;
 
-    const coinTag = $("#shopCoinTagV2", modal);
-    const ownedTag = $("#shopOwnedTagV2", modal);
-    const buyBtn = $("#shopBuyBtnV2", modal);
-    const toggleBtn = $("#shopToggleBtnV2", modal);
-    const stateTag = $("#shopStateTagV2", modal);
+    const coinTag = $("#shopCoinTagV3", modal);
+    const ownedTag = $("#shopOwnedTagV3", modal);
+    const buyBtn = $("#shopBuyBtnV3", modal);
+    const toggleBtn = $("#shopToggleBtnV3", modal);
+    const stateTag = $("#shopStateTagV3", modal);
 
     const c = getCoinsWB();
     if (coinTag) coinTag.textContent = `🪙 ${c}`;
 
     const own = isOwned(ITEM.key);
     if (ownedTag) ownedTag.textContent = own ? "購入済み" : "未購入";
+
     if (buyBtn) {
       buyBtn.disabled = own || (c < ITEM.price);
       buyBtn.textContent = own ? "OK" : "購入";
@@ -325,9 +342,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   function bindModalEvents() {
     const { modal, backdrop } = ensureUI();
 
-    const closeBtn = $("#shopCloseModalV2", modal);
-    const buyBtn = $("#shopBuyBtnV2", modal);
-    const toggleBtn = $("#shopToggleBtnV2", modal);
+    const closeBtn = $("#shopCloseModalV3", modal);
+    const buyBtn = $("#shopBuyBtnV3", modal);
+    const toggleBtn = $("#shopToggleBtnV3", modal);
 
     const stop = (e) => {
       e.preventDefault();
@@ -417,9 +434,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       openModal();
     }, true);
 
-    // 初期反映
-    try {
-      window.WB?.emit?.("bg:mirrorball_changed", { owned: isOwned(ITEM.key), enabled: isEnabled() });
-    } catch {}
+    // 初期通知
+    notify();
   })();
 })();
