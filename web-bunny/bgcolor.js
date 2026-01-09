@@ -1,13 +1,16 @@
 // bgcolor.js
 // ✅ 朝昼夜(JST)で背景色
-// ✅ mirrorball 購入済み + 設置ON のときだけ：ディスコ背景＋中央上スポットライト（太め）
+// ✅ mirrorball 購入済み + 設置ON のときだけ：
+//    - 上中央に mirrorball.png を表示
+//    - ディスコ背景（回転ライト＋走るビーム＋キラ粒）
+//    - 中央上スポットライト（太め）
 // ✅ 背景黒化を避ける（bgLayer/field 両方に適用）
 
 (() => {
   "use strict";
 
-  const field  = document.getElementById("field");
-  const bgLayer= document.getElementById("bgLayer");
+  const field   = document.getElementById("field");
+  const bgLayer = document.getElementById("bgLayer");
   if (!field || !bgLayer) return;
 
   const MORNING = { start: 5,  end: 10 };
@@ -43,7 +46,7 @@
     } catch { return false; }
   }
 
-  // ★ここが重要：読めない時は OFF（勝手にONへ戻さない）
+  // ★ここ重要：読めない/無い/壊れてる時は OFF（勝手にONへ戻さない）
   function isMirrorballEnabled() {
     try {
       const v = window.WB?.shop?.isMirrorballEnabled?.();
@@ -51,7 +54,7 @@
     } catch {}
     try {
       const raw = localStorage.getItem("milkpop_shop_state_v1");
-      if (!raw) return false;               // ★状態が無い＝OFF
+      if (!raw) return false;
       const j = JSON.parse(raw);
       if (!j || typeof j !== "object") return false;
       return !!j.mirrorballEnabled;
@@ -60,22 +63,72 @@
     }
   }
 
-  function ensureLayerPositions() {
+  function ensureBaseLayout() {
+    // bgLayer は children を載せるので relative 化（style.cssで absolute済みでもOK）
     const bcs = getComputedStyle(bgLayer);
     if (bcs.position === "static") bgLayer.style.position = "absolute";
     bgLayer.style.inset = "0";
-    bgLayer.style.width = "100%";
-    bgLayer.style.height = "100%";
     bgLayer.style.pointerEvents = "none";
-
-    const fcs = getComputedStyle(field);
-    if (fcs.position === "static") field.style.position = "fixed";
-    field.style.inset = "0";
-    field.style.overflow = "hidden";
   }
 
   /* =========================
-   * FX (disco + spotlight)
+   * Mirrorball image
+   * ========================= */
+  const MIRROR = {
+    id: "mirrorballImgV3",
+    styleId: "mirrorballImgStyleV3",
+    src: "./assets/bg/mirrorball.png",
+    top: 8,
+    size: 140,
+    z: 5, // FXより上
+  };
+
+  function ensureMirrorStyle() {
+    if (document.getElementById(MIRROR.styleId)) return;
+    const st = document.createElement("style");
+    st.id = MIRROR.styleId;
+    st.textContent = `
+#${MIRROR.id}{
+  position:absolute;
+  left:50%;
+  top:${MIRROR.top}px;
+  transform:translateX(-50%);
+  width:${MIRROR.size}px;
+  height:auto;
+  z-index:${MIRROR.z};
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+  filter: drop-shadow(0 16px 30px rgba(0,0,0,.28));
+}
+`;
+    document.head.appendChild(st);
+  }
+
+  function setMirrorVisible(on) {
+    ensureBaseLayout();
+    ensureMirrorStyle();
+
+    const old = document.getElementById(MIRROR.id);
+    if (!on) { try { old?.remove(); } catch {} return; }
+
+    let img = old;
+    if (!img) {
+      img = document.createElement("img");
+      img.id = MIRROR.id;
+      img.alt = "mirrorball";
+      img.src = MIRROR.src;
+      img.addEventListener("error", () => {
+        console.warn("[bgcolor] mirrorball load failed:", MIRROR.src);
+      });
+      bgLayer.appendChild(img);
+    } else if (img.getAttribute("src") !== MIRROR.src) {
+      img.src = MIRROR.src;
+    }
+  }
+
+  /* =========================
+   * Disco FX + Spotlight
    * ========================= */
   const FX = {
     styleId: "mirrorballFxStyleV3",
@@ -84,7 +137,7 @@
     beamsId: "mirrorballFxBeamsV3",
     dustId:  "mirrorballFxDustV3",
     spotId:  "mirrorballFxSpotV3",
-    z: 1,
+    z: 4, // ミラーボール画像より下
   };
 
   function ensureFxStyle() {
@@ -122,6 +175,7 @@
   opacity:0;
   transition: opacity .25s ease;
 }
+
 #${FX.spinId}{
   position:absolute;
   left:50%;
@@ -146,6 +200,7 @@
   animation: mbSpinHueV3 5.2s linear infinite;
   will-change: transform, filter;
 }
+
 #${FX.beamsId}{
   position:absolute;
   inset:-35%;
@@ -163,6 +218,7 @@
   animation: mbBeamSweepV3 2.8s ease-in-out infinite;
   will-change: transform, opacity;
 }
+
 #${FX.dustId}{
   position:absolute;
   inset:-12%;
@@ -176,13 +232,13 @@
   will-change: transform, opacity;
 }
 
-/* ★中央上スポットライト：幅を大きく */
+/* ★中央上スポットライト（太め） */
 #${FX.spotId}{
   position:absolute;
   left:50%;
   top:-10px;
 
-  width:min(980px, 98vw);   /* ★太くした */
+  width:min(980px, 98vw);
   height:92vh;
 
   transform: translateX(-50%);
@@ -207,9 +263,7 @@
       rgba(255,  0,160,.18)
     );
 
-  /* ★扇を太く（下端を広げる） */
-  clip-path: polygon(50% 0%, 84% 100%, 16% 100%);
-
+  clip-path: polygon(50% 0%, 86% 100%, 14% 100%);
   filter: blur(1px);
   animation: mbSpotPulseV3 2.4s ease-in-out infinite;
   will-change: opacity, filter;
@@ -219,27 +273,26 @@
   }
 
   function ensureFxWrap() {
+    ensureBaseLayout();
     ensureFxStyle();
-    const cs = getComputedStyle(bgLayer);
-    if (cs.position === "static") bgLayer.style.position = "absolute";
-    bgLayer.style.inset = "0";
 
     let wrap = document.getElementById(FX.wrapId);
     if (!wrap) {
       wrap = document.createElement("div");
       wrap.id = FX.wrapId;
 
-      const spin = document.createElement("div"); spin.id = FX.spinId;
+      const spin  = document.createElement("div"); spin.id  = FX.spinId;
       const beams = document.createElement("div"); beams.id = FX.beamsId;
-      const dust = document.createElement("div"); dust.id = FX.dustId;
-      const spot = document.createElement("div"); spot.id = FX.spotId;
+      const dust  = document.createElement("div"); dust.id  = FX.dustId;
+      const spot  = document.createElement("div"); spot.id  = FX.spotId;
 
       wrap.appendChild(spin);
       wrap.appendChild(beams);
       wrap.appendChild(dust);
       wrap.appendChild(spot);
 
-      bgLayer.appendChild(wrap);
+      // 背景の中で後ろ側に入れたい：先頭に
+      bgLayer.insertBefore(wrap, bgLayer.firstChild);
     }
     return wrap;
   }
@@ -256,25 +309,34 @@
    * ========================= */
   let lastPhase = "";
   function apply(force = false) {
-    ensureLayerPositions();
+    ensureBaseLayout();
 
     const h = getJSTHour();
     const phase = getPhaseByHour(h);
 
     if (force || phase !== lastPhase) {
       lastPhase = phase;
+
+      // ★bgLayer/field 両方へ（黒化根絶）
       bgLayer.style.background = THEMES[phase];
-      field.style.background = THEMES[phase];
+      field.style.background   = THEMES[phase];
+
       try { window.WB?.emit?.("bg:changed", { phase, hour: h }); } catch {}
     }
 
     const on = hasMirrorballOwned() && isMirrorballEnabled();
+
+    setMirrorVisible(on);
     setFxEnabled(on);
   }
 
+  // 初回
   apply(true);
+
+  // 1分ごと
   setInterval(() => apply(false), 60 * 1000);
 
+  // WB hook
   const hookWB = () => {
     if (!window.WB?.on) return false;
     window.WB.on("core:reset_partial", () => apply(true));
