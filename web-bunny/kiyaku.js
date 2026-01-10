@@ -1,12 +1,13 @@
 // kiyaku.js（非module）— 利用規約モーダル（予約キュー対応で必ず開く）
 // ✅ window.KIYAKU.open()/close()/setText()
 // ✅ gameMenu.js が先に呼んでも「予約」→ kiyaku.js 読込後に自動で開く
+// ✅ さらに保険：window.dispatchEvent(new Event("milkpop:openKiyaku")) でも開く
 // ✅ 背景クリック / × / Esc で閉じる
 // ✅ スクロールOK・超前面
 
 (() => {
   "use strict";
-  console.log("[kiyaku.js] LOADED v1.1.0 (queue+guaranteed)", Date.now());
+  console.log("[kiyaku.js] LOADED v1.2.1 (queue+event+guaranteed)", Date.now());
 
   const UI = {
     modal: "milkpopKiyakuModalV1",
@@ -14,7 +15,12 @@
     text:  "milkpopKiyakuTextV1",
   };
 
+  const X_HANDLE = "Soni_complaint";
+  const X_URL = `https://x.com/${encodeURIComponent(X_HANDLE)}`;
+
   // ====== 利用規約本文（ここを編集） ======
+  // ※ 本文内に https://... を直書きすると環境によっては自動リンク化等で崩れることがあるため
+  //    URLは「文字」として書く（下の SOURCES_TEXT にまとめる）
   const KIYAKU_TEXT = `
 ■ 利用規約（Milkpop）
 
@@ -48,13 +54,15 @@
 ・本サービスの内容は予告なく変更、停止、中断されることがあります。
 ・本サービス利用により利用者に生じたいかなる損害についても、
   運営は責任を負いません（ただし法令で認められる範囲）。
+
 ────────────────────────
 4. 使用素材
 ────────────────────────
-効果音ラボ様　https://soundeffect-lab.info/
-DOVA-SYNDROME様　https://dova-s.jp/
-サクソラ様　https://39sora.com/
-32°様
+効果音ラボ様
+DOVA-SYNDROME様
+サクソラ様
+
+（URLは下の「素材リンク」に記載）
 ────────────────────────
 5. お問い合わせ
 ────────────────────────
@@ -62,10 +70,15 @@ X（旧Twitter） @Soni_complaint
 
 ※DMやリプライの返信は保証できません。
 `.trim();
-  // ======================================
 
-  const X_HANDLE = "Soni_complaint";
-  const X_URL = `https://x.com/${encodeURIComponent(X_HANDLE)}`;
+  // ✅ URLは本文から分離（表示崩れ・自動リンク化事故を避ける）
+  const SOURCES_TEXT = `
+■ 素材リンク
+効果音ラボ：https://soundeffect-lab.info/
+DOVA-SYNDROME：https://dova-s.jp/
+サクソラ：https://39sora.com/
+`.trim();
+  // ======================================
 
   const $ = (q, p = document) => p.querySelector(q);
 
@@ -87,8 +100,8 @@ X（旧Twitter） @Soni_complaint
   position:absolute;
   left:50%; top:50%;
   transform:translate(-50%,-50%);
-  width:min(620px, 92vw);
-  max-height:min(74vh, 620px);
+  width:min(680px, 92vw);
+  max-height:min(78vh, 680px);
   overflow:auto;
   background:rgba(255,255,255,.98);
   border-radius:18px;
@@ -125,6 +138,10 @@ X（旧Twitter） @Soni_complaint
   margin-top:10px;
   font-size:12px;
   opacity:.78;
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  align-items:center;
 }
 #${UI.modal} .link{
   font-weight:1000;
@@ -132,6 +149,10 @@ X（旧Twitter） @Soni_complaint
   text-decoration:none;
 }
 #${UI.modal} .link:hover{ text-decoration:underline; }
+#${UI.modal} .mini{
+  font-size:12px;
+  opacity:.78;
+}
 `;
     document.head.appendChild(s);
   }
@@ -154,14 +175,15 @@ X（旧Twitter） @Soni_complaint
         <pre id="${UI.text}"></pre>
 
         <div class="hint">
-          お問い合わせ：<a class="link" href="${X_URL}" target="_blank" rel="noopener noreferrer">@${X_HANDLE}</a>
+          <span class="mini">お問い合わせ：</span>
+          <a class="link" href="${X_URL}" target="_blank" rel="noopener noreferrer">@${X_HANDLE}</a>
         </div>
       </div>
     `;
     document.body.appendChild(m);
 
     const pre = $(`#${UI.text}`, m);
-    if (pre) pre.textContent = KIYAKU_TEXT;
+    if (pre) pre.textContent = `${KIYAKU_TEXT}\n\n${SOURCES_TEXT}`;
 
     // 背景/× で閉じる
     m.addEventListener("click", (e) => {
@@ -197,10 +219,7 @@ X（旧Twitter） @Soni_complaint
     if (pre) pre.textContent = String(text ?? "");
   };
 
-  // ✅ 予約キュー（gameMenuが先に呼んでも後から開く）
-  // ルール：
-  // - gameMenu.js が window.__milkpopOpenModalQueue に {type:"kiyaku"} を積む
-  // - kiyaku.js 起動時に吸収して open
+  // ✅ 予約キュー（gameMenuが先でも後でもOK）
   window.__milkpopOpenModalQueue = window.__milkpopOpenModalQueue || [];
   function drainQueue() {
     try {
@@ -219,6 +238,11 @@ X（旧Twitter） @Soni_complaint
       if (needOpen) open();
     } catch {}
   }
+
+  // ✅ 追加保険：イベントでも開く（gameMenu側がこれを叩けば確実）
+  window.addEventListener("milkpop:openKiyaku", () => {
+    try { open(); } catch {}
+  });
 
   // 初期化（初回遅延防止）
   try { ensureModal(); close(); } catch {}
