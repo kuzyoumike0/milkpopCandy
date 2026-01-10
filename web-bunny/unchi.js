@@ -1,7 +1,7 @@
 // unchi.js（非module）— 個体別ゲージ / 同時排出防止 / 分散排出
 (() => {
   "use strict";
-  console.log("[unchi.js] LOADED v1.4 (per-bunny async spawn)", Date.now());
+  console.log("[unchi.js] LOADED v1.4.1 (ougon=10000)", Date.now());
 
   /* =========================
    * Config
@@ -22,7 +22,7 @@
 
   // 💰 価値
   const UNCHI_VALUE = 10;
-  const OUGON_VALUE = 120;
+  const OUGON_VALUE = 10000; // ✅ ここを10000に
 
   // 🧱 上限
   const MAX_UNCHI_ON_FIELD = 20;
@@ -182,7 +182,7 @@
   class OugonUnchiDrop extends BaseDrop{
     constructor(o){super({...o,cls:"ougonunchiDrop",src:ASSETS.ougonUnchi});}
     collect(){
-      window.WB.coins+=OUGON_VALUE;
+      window.WB.coins+=OUGON_VALUE; // ✅ 10000入る
       window.WB.updateHud?.();
       playSE();
       this.destroy();
@@ -232,7 +232,8 @@
       }
 
       gauge.set(id,v);
-  }}
+    }
+  }
 
   /* =========================
    * Boot
@@ -255,6 +256,6 @@
     }
     requestAnimationFrame(loop);
 
-    console.log("[unchi.js] ready (per-bunny async)");
+    console.log("[unchi.js] ready (ougon=10000)");
   });
 })();
