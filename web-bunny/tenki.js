@@ -1,9 +1,11 @@
-// tenki.js（UFO強化：✅UFO.mp3 を SEスライダーに紐づけ（WB.se.loop） + ITEMより上）
+// tenki.js（UFO強化 + 特殊演出PNGランダム表示）
+// ✅ UFO.mp3 を SEスライダーに紐づけ（WB.se.loop） + ITEMより上
 // ✅ UFOは ITEM（ベッド/ミラーボール/oak）より上に表示：超高z-index
 // ✅ UFO出現中は UFO.mp3 をずっと鳴らし続ける（ループ）
 // ✅ BGM.js の SE API（WB.se.loop / WB.getSEVolume / milkpop_se_settings_v1 muted）に完全追従
 // ✅ BGM.js が無い場合はフォールバックで鳴る
-// ✅ 修正：UFO出現を “もう少しレア” に（確率を下げる）
+// ✅ 修正：UFO出現を “もう少しレア” に
+// ✅ 追加：assets/tenki の PNG（大雨/大雪/雷/オーロラ/桜/紅葉）をランダムで表示（UFOより下）
 
 (() => {
   "use strict";
@@ -17,13 +19,10 @@
   // 🛸 UFO
   const UFO_IMG_SRC = "./assets/tenki/UFO.png";
   const UFO_SE_SRC  = "./assets/UFO.mp3";
-
-  // ✅ SEスライダー通り（小さくしない）
   const UFO_SE_BASE = 1.0;
 
-  // 出現率（1秒あたり）
-  // 🔻 ここを下げてレア化（例：0.010 → 0.0035）
-  const UFO_CHANCE_PER_SEC = 0.0035; // 0.35%/sec（だいたい3倍弱レア）
+  // 出現率（1秒あたり）— レア化
+  const UFO_CHANCE_PER_SEC = 0.0035; // 0.35%/sec
   const UFO_SPEED_PX_PER_SEC = 95;
   const UFO_SIZE_PX = 150;
 
@@ -44,6 +43,25 @@
   const SUN_BASE_OPACITY = 1.0;
   const SUN_HIDE_OPACITY = 0.25;
   const SUN_FADE_SPEED = 0.06;
+
+  /* =========================
+     ✅ 特殊演出PNG（assets/tenki に置く）
+     - “たまに” ランダムで1枚だけ表示
+     - UFOより下 / アイテムより上
+  ========================= */
+  const SPECIAL_Z_INDEX = 340000; // UFO(350000)より下 / アイテムより上想定
+  const SPECIAL_CHANCE_PER_SEC = 0.0016; // 0.16%/sec（だいたい10分に1回くらい目安）
+  const SPECIAL_MIN_DURATION_SEC = 5.5;
+  const SPECIAL_MAX_DURATION_SEC = 10.0;
+
+  const SPECIALS = [
+    { key: "rain",   src: "./assets/tenki/w02_大雨.png",   opacity: 0.55, blend: "screen" },
+    { key: "snow",   src: "./assets/tenki/w05_大雪.png",   opacity: 0.55, blend: "screen" },
+    { key: "thun",   src: "./assets/tenki/w09_雷.png",     opacity: 0.60, blend: "screen" },
+    { key: "aurora", src: "./assets/tenki/w33_オーロラ.png", opacity: 0.55, blend: "screen" },
+    { key: "sakura", src: "./assets/tenki/w34_桜.png",     opacity: 0.55, blend: "screen" },
+    { key: "momiji", src: "./assets/tenki/w35_紅葉.png",   opacity: 0.55, blend: "screen" },
+  ];
 
   const field = document.getElementById(FIELD_ID);
   if (!field) return;
@@ -183,7 +201,6 @@
     return Math.floor(y);
   }
 
-  // ✅ ここが本命：UFO.mp3 を SEに紐づけ（WB.se.loop）
   function startUFOSound() {
     try {
       const WB = window.WB;
@@ -207,7 +224,6 @@
 
   function stopUFOSound() {
     try { window.WB?.se?.stop?.("ufo"); } catch {}
-
     try {
       if (window.__ufoFallbackAudio) {
         window.__ufoFallbackAudio.pause();
@@ -245,6 +261,81 @@
     }
     stopUFOSound();
   }
+
+  /* =========================
+     ✅ 特殊演出PNG（ランダム表示）
+  ========================= */
+  let specialEl = null;
+  let specialActive = false;
+  let specialTLeft = 0;
+  let specialTargetOpacity = 0.55;
+  let specialNowOpacity = 0.0;
+
+  function ensureSpecialEl() {
+    if (specialEl && specialEl.isConnected) return specialEl;
+
+    const img = document.createElement("img");
+    img.draggable = false;
+
+    Object.assign(img.style, {
+      position: "absolute",
+      left: "0px",
+      top: "0px",
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+      pointerEvents: "none",
+      zIndex: String(SPECIAL_Z_INDEX),
+      opacity: "0",
+      transform: "translate3d(0,0,0)",
+      // ちょい雰囲気
+      filter: "drop-shadow(0 10px 30px rgba(0,0,0,.18))",
+    });
+
+    field.appendChild(img);
+    specialEl = img;
+    return specialEl;
+  }
+
+  function pickSpecial() {
+    const i = Math.floor(Math.random() * SPECIALS.length);
+    return SPECIALS[i];
+  }
+
+  function startSpecial(which = null) {
+    if (specialActive) return;
+
+    const s = which || pickSpecial();
+    const el = ensureSpecialEl();
+
+    el.src = s.src;
+    el.style.mixBlendMode = s.blend || "normal";
+
+    specialTargetOpacity = Math.max(0, Math.min(1, Number(s.opacity ?? 0.55)));
+    specialNowOpacity = 0.0;
+    el.style.opacity = "0";
+
+    specialActive = true;
+    specialTLeft = (SPECIAL_MIN_DURATION_SEC + Math.random() * (SPECIAL_MAX_DURATION_SEC - SPECIAL_MIN_DURATION_SEC));
+
+    // ほんの少し動き（固定画像でも“生きてる”感）
+    el._shakeSeed = Math.random() * 1000;
+  }
+
+  function stopSpecial() {
+    specialActive = false;
+    // すぐ消さず、フェードアウトは animate 側で
+  }
+
+  // デバッグ用：コンソールから強制表示
+  window.TENKI = window.TENKI || {};
+  window.TENKI.forceSpecial = (keyOrIndex) => {
+    let s = null;
+    if (typeof keyOrIndex === "number") s = SPECIALS[keyOrIndex];
+    else if (typeof keyOrIndex === "string") s = SPECIALS.find(x => x.key === keyOrIndex) || null;
+    startSpecial(s);
+  };
+  window.TENKI.stopSpecial = () => stopSpecial();
 
   /* =========================
      アニメーション
@@ -298,6 +389,35 @@
     const sunTarget = sunCovered ? SUN_HIDE_OPACITY : SUN_BASE_OPACITY;
     sunny._opacity = approach(sunny._opacity, sunTarget, SUN_FADE_SPEED);
     sunny.style.opacity = String(sunny._opacity);
+
+    // ✅ 特殊演出抽選（非アクティブ時のみ）
+    if (!specialActive) {
+      const pSp = 1 - Math.pow(1 - SPECIAL_CHANCE_PER_SEC, dt);
+      if (Math.random() < pSp) startSpecial();
+    } else {
+      specialTLeft -= dt;
+      if (specialTLeft <= 0) stopSpecial();
+    }
+
+    // ✅ 特殊演出フェード＆微小ゆらぎ
+    if (specialEl) {
+      const target = specialActive ? specialTargetOpacity : 0;
+      // 早すぎないフェード
+      specialNowOpacity = approach(specialNowOpacity, target, 0.08);
+      specialEl.style.opacity = String(specialNowOpacity);
+
+      // うっすら漂う（見えない程度に）
+      const seed = specialEl._shakeSeed || 0;
+      const sx = Math.sin((t / 1400) + seed) * 0.8;
+      const sy = Math.cos((t / 1600) + seed) * 0.6;
+      specialEl.style.transform = `translate3d(${sx}px, ${sy}px, 0)`;
+
+      // 完全に消えたらDOM掃除（残骸ゼロ）
+      if (!specialActive && specialNowOpacity < 0.01) {
+        try { specialEl.remove(); } catch {}
+        specialEl = null;
+      }
+    }
 
     // UFO抽選（非アクティブ時のみ）
     if (!ufoActive) {
