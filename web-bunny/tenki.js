@@ -3,6 +3,7 @@
 // ✅ UFO出現中は UFO.mp3 をずっと鳴らし続ける（ループ）
 // ✅ BGM.js の SE API（WB.se.loop / WB.getSEVolume / milkpop_se_settings_v1 muted）に完全追従
 // ✅ BGM.js が無い場合はフォールバックで鳴る
+// ✅ 修正：UFO出現を “もう少しレア” に（確率を下げる）
 
 (() => {
   "use strict";
@@ -21,7 +22,8 @@
   const UFO_SE_BASE = 1.0;
 
   // 出現率（1秒あたり）
-  const UFO_CHANCE_PER_SEC = 0.010; // 1.0%/sec
+  // 🔻 ここを下げてレア化（例：0.010 → 0.0035）
+  const UFO_CHANCE_PER_SEC = 0.0035; // 0.35%/sec（だいたい3倍弱レア）
   const UFO_SPEED_PX_PER_SEC = 95;
   const UFO_SIZE_PX = 150;
 
