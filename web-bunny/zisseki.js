@@ -1,15 +1,16 @@
-// zisseki.js（実績システム：図鑑と完全分離版 / ✅WB待機 + ✅実績UI + ✅フレーバーテキスト）
+// zisseki.js（✅実績：zisseki.js単体でカウント完結 + ✅図鑑タブ互換(ach提供) + ✅WB待機 + ✅トースト）
 // - localStorage 永続化（実績専用LSのみ）
-// - 図鑑(zukan)には一切入れない（LS.dex等に触れない）
-// - WB events が無くても定期チェックで解除（コイン/同時うさぎ等）
-// - sy:add が来たら即チェック（hanabi/slot/旅立ち/お迎え/うんち等）
+// - 回数系（うんち/お迎え/旅立ち/花火/スロット当たり）も zisseki.js 自前statsで保持
+// - WB events が無くても、WB.emit を安全にフックして拾う（最終保険）
+// - sy:add が来たら payload を解析して自動で stats に加算
+// - 図鑑(zukan.js)の renderAchievements が参照するために WB.zisseki.ach を提供（互換）
 //
-// ✅ 追加: 実績ごとにフレーバーテキスト
-//   - 解除時トーストに表示
-//   - UIでも解除済みは表示 / 未解除は伏せる
+// 使い方（他モジュールから加算したい場合）
+//   WB.emit("sy:add", { key:"unchi", delta:1 })
+//   WB.emit("sy:add", { type:"tabidachi" })
+//   WB.zisseki.addCount("omukae", 1)
 //
-// ✅ 注意: 旅立ち/花火/スロット等の回数は “称号(SYOUGOU)” から読む仕様のまま。
-//   - SYOUGOU が無い環境だと、その系統の進捗は 0 になる（コイン・同時うさぎなどは解除可能）
+// ✅ zukan.js 側はタブ切り替えで実績を表示するだけ（カウントは zisseki.js が担当）
 
 (() => {
   "use strict";
@@ -37,36 +38,103 @@
     });
   }
 
-  /* =========================
-   * Main
-   * ========================= */
   waitForWB().then((WB) => {
-    // ✅ 実績専用LS（図鑑には触れない）
-    const LS_ACH = "wb_ach_v5"; // ← v5: flavor 対応版
+    /* =========================
+     * Storage（unlocked + stats）
+     * ========================= */
+    const LS_ZISSEKI = "wb_zisseki_v6"; // { ver:6, unlocked:{}, stats:{} }
 
-    // 同時うさぎ数でショップ解放（実績としても扱う）
     const UNLOCK_BUNNY4_NEED = 10;
 
-    /* =========================
-     * Storage
-     * ========================= */
-    function loadAch() {
+    function loadState() {
+      // 新形式
       try {
-        const a = JSON.parse(localStorage.getItem(LS_ACH) || "{}");
-        return a && typeof a === "object" ? a : {};
-      } catch {
-        return {};
-      }
-    }
-    function saveAch() {
-      localStorage.setItem(LS_ACH, JSON.stringify(ach));
+        const raw = JSON.parse(localStorage.getItem(LS_ZISSEKI) || "null");
+        if (raw && typeof raw === "object") {
+          if (raw.unlocked && typeof raw.unlocked === "object") {
+            return {
+              ver: Number(raw.ver || 6) || 6,
+              unlocked: raw.unlocked && typeof raw.unlocked === "object" ? raw.unlocked : {},
+              stats: raw.stats && typeof raw.stats === "object" ? raw.stats : {},
+            };
+          }
+          // 旧形式（平坦object：{achId:true,...}）
+          return { ver: 6, unlocked: raw, stats: {} };
+        }
+      } catch {}
+
+      // さらに古いキー救済（あなたが以前使ってた）
+      try {
+        const legacy = JSON.parse(localStorage.getItem("wb_ach_v5") || "null");
+        if (legacy && typeof legacy === "object") {
+          return { ver: 6, unlocked: legacy, stats: {} };
+        }
+      } catch {}
+
+      return { ver: 6, unlocked: {}, stats: {} };
     }
 
-    const ach = loadAch();
+    const state = loadState();
+    const unlocked = state.unlocked || {};
+    const stats = state.stats || {};
+
+    function saveState() {
+      localStorage.setItem(LS_ZISSEKI, JSON.stringify({ ver: 6, unlocked, stats }));
+    }
 
     function isUnlocked(id) {
-      return !!ach[id];
+      return !!unlocked[id];
     }
+
+    /* =========================
+     * Stats（zisseki.js完結カウンタ）
+     * ========================= */
+    const STAT_KEYS = ["unchi", "omukae", "tabidachi", "hanabi", "slot_win"];
+
+    function normKey(k) {
+      const s = String(k ?? "").trim().toLowerCase();
+      if (!s) return "";
+      if (s === "tabidati") return "tabidachi";
+      if (s === "slotwin") return "slot_win";
+      if (s === "slot") return "slot_win";
+      if (s === "fireworks") return "hanabi";
+      return s;
+    }
+
+    function getCount(key) {
+      const k = normKey(key);
+      const v = Number(stats[k] ?? 0);
+      return Number.isFinite(v) ? v : 0;
+    }
+
+    function setCount(key, value) {
+      const k = normKey(key);
+      if (!k) return;
+      const v = Number(value);
+      stats[k] = Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+      saveState();
+    }
+
+    function addCount(key, delta = 1) {
+      const k = normKey(key);
+      if (!k) return 0;
+
+      const d = Number(delta);
+      const inc = Number.isFinite(d) ? d : 1;
+
+      const next = Math.max(0, Math.floor(getCount(k) + inc));
+      stats[k] = next;
+      saveState();
+
+      onSyAddLight();
+      return next;
+    }
+
+    // 初期化：キーが無ければ0
+    for (const k of STAT_KEYS) {
+      if (!(k in stats)) stats[k] = 0;
+    }
+    saveState();
 
     /* =========================
      * Toast
@@ -114,6 +182,15 @@
       document.head.appendChild(s);
     }
 
+    function escapeHtml(s) {
+      return String(s ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
     function toast(title, flavor = "") {
       ensureToastStyle();
       const t1 = String(title ?? "").trim();
@@ -130,25 +207,12 @@
       setTimeout(() => { try { el.remove(); } catch {} }, 3800);
     }
 
-    function escapeHtml(s) {
-      return String(s ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
     /* =========================
      * Helpers (WB互換)
      * ========================= */
     function getCoins() {
-      try {
-        if (typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0;
-      } catch {}
-      try {
-        if (typeof WB.coins === "number") return WB.coins;
-      } catch {}
+      try { if (typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
+      try { if (typeof WB.coins === "number") return WB.coins; } catch {}
       const el = document.getElementById("coinValue");
       return el ? (Number(el.textContent) || 0) : 0;
     }
@@ -160,19 +224,8 @@
           return Array.isArray(arr) ? arr.length : 0;
         }
       } catch {}
-      try {
-        if (Array.isArray(WB.bunnies)) return WB.bunnies.length;
-      } catch {}
+      try { if (Array.isArray(WB.bunnies)) return WB.bunnies.length; } catch {}
       return 0;
-    }
-
-    // ✅ “称号カウント”は SYOUGOU から読む（図鑑ではなく称号）
-    function getSyougouCount(key) {
-      try {
-        return Number(window.SYOUGOU?.getCount?.(key) ?? 0) || 0;
-      } catch {
-        return 0;
-      }
     }
 
     function getStatMaybe(keys) {
@@ -190,20 +243,123 @@
     }
 
     /* =========================
-     * ✅ sy:add を受けたら即チェック（花火等がWBに直接出ない環境向け）
+     * sy:add / event 解析 → stats加算
      * ========================= */
+    function parseSyPayload(payload) {
+      if (payload == null) return { key: "", delta: 0 };
+
+      if (typeof payload === "string") {
+        const k = normKey(payload);
+        return { key: k, delta: k ? 1 : 0 };
+      }
+
+      if (typeof payload === "object") {
+        const k =
+          normKey(payload.key) ||
+          normKey(payload.type) ||
+          normKey(payload.id) ||
+          normKey(payload.name) ||
+          normKey(payload.event);
+
+        if (k === "slot_win") {
+          if (payload.win === false) return { key: "slot_win", delta: 0 };
+        }
+
+        let d = 1;
+        if ("delta" in payload) {
+          const dd = Number(payload.delta);
+          d = Number.isFinite(dd) ? dd : 1;
+        } else if ("count" in payload) {
+          const cc = Number(payload.count);
+          d = Number.isFinite(cc) ? cc : 1;
+        }
+        d = Math.max(0, Math.floor(d));
+        return { key: k, delta: k ? d : 0 };
+      }
+
+      return { key: "", delta: 0 };
+    }
+
     let __lastSyPing = 0;
-    function onSyAdd() {
+    function onSyAddLight() {
       const now = Date.now();
-      if (now - __lastSyPing < 120) return; // 連打で重いのを避ける
+      if (now - __lastSyPing < 120) return;
       __lastSyPing = now;
       checkUnlocks();
-      refreshUI();
+      try { WB.emit?.("achievementDirty", { t: now }); } catch {}
     }
+
+    function onSyAdd(payload) {
+      const p = parseSyPayload(payload);
+      if (p.key && p.delta > 0) {
+        addCount(p.key, p.delta);
+        return;
+      }
+      onSyAddLight();
+    }
+
+    // WB.on("sy:add") が来たら解析
     try { WB.on?.("sy:add", onSyAdd); } catch {}
 
+    // よくあるイベント名を直接拾う（payload無でもOK）
+    function bindCountEvent(evtName, key) {
+      try {
+        WB.on?.(evtName, (payload) => {
+          const p = parseSyPayload(payload);
+          if (p.key) {
+            if (p.delta > 0) addCount(p.key, p.delta);
+            else onSyAddLight();
+          } else {
+            addCount(key, 1);
+          }
+        });
+      } catch {}
+    }
+
+    bindCountEvent("unchi", "unchi");
+    bindCountEvent("omukae", "omukae");
+    bindCountEvent("tabidachi", "tabidachi");
+    bindCountEvent("tabidati", "tabidachi");
+    bindCountEvent("hanabiFired", "hanabi");
+    bindCountEvent("hanabi", "hanabi");
+    bindCountEvent("fireworks", "hanabi");
+    bindCountEvent("slotWin", "slot_win");
+    bindCountEvent("slotwin", "slot_win");
+
     /* =========================
-     * Achievements Master（✅flavor を追加）
+     * 最終保険：WB.emit フック
+     * ========================= */
+    function hookEmitOnce() {
+      try {
+        if (WB.__zissekiEmitHooked) return;
+        if (typeof WB.emit !== "function") return;
+
+        const orig = WB.emit.bind(WB);
+        WB.emit = function (name, payload) {
+          try {
+            const ev = String(name ?? "");
+            if (ev === "sy:add") onSyAdd(payload);
+
+            if (ev === "unchi") addCount("unchi", 1);
+            if (ev === "omukae") addCount("omukae", 1);
+            if (ev === "tabidachi" || ev === "tabidati") addCount("tabidachi", 1);
+            if (ev === "hanabiFired" || ev === "hanabi" || ev === "fireworks") addCount("hanabi", 1);
+
+            if (ev === "slotWin" || ev === "slotwin") {
+              if (!(payload && typeof payload === "object" && payload.win === false)) addCount("slot_win", 1);
+            }
+          } catch {}
+          return orig(name, payload);
+        };
+
+        WB.__zissekiEmitHooked = true;
+      } catch {}
+    }
+    hookEmitOnce();
+    setTimeout(hookEmitOnce, 500);
+
+    /* =========================
+     * Achievements Master（flavor）
      * ========================= */
     const ACH_MASTER = [
       {
@@ -237,82 +393,82 @@
 
       { id: "unchi_10",  name: "ウンチ道・初段", desc: "ウンチ回数 10",
         flavor: "誇り高く、堂々と、今日も置いていく。",
-        check: () => getSyougouCount("unchi") >= 10,
-        progress: () => ({ now: getSyougouCount("unchi"), target: 10, unit: "回" })
+        check: () => getCount("unchi") >= 10,
+        progress: () => ({ now: getCount("unchi"), target: 10, unit: "回" })
       },
       { id: "unchi_50",  name: "ウンチ道・五段", desc: "ウンチ回数 50",
         flavor: "積み重ねは、時に香りも積み重なる。",
-        check: () => getSyougouCount("unchi") >= 50,
-        progress: () => ({ now: getSyougouCount("unchi"), target: 50, unit: "回" })
+        check: () => getCount("unchi") >= 50,
+        progress: () => ({ now: getCount("unchi"), target: 50, unit: "回" })
       },
       { id: "unchi_100", name: "ウンチ道・皆伝", desc: "ウンチ回数 100",
         flavor: "もはや芸術。もはや様式美。",
-        check: () => getSyougouCount("unchi") >= 100,
-        progress: () => ({ now: getSyougouCount("unchi"), target: 100, unit: "回" })
+        check: () => getCount("unchi") >= 100,
+        progress: () => ({ now: getCount("unchi"), target: 100, unit: "回" })
       },
 
       { id: "tabidachi_10",  name: "見送り見習い", desc: "旅立ち回数 10",
         flavor: "手を振る回数だけ、優しくなれる気がした。",
-        check: () => getSyougouCount("tabidachi") >= 10,
-        progress: () => ({ now: getSyougouCount("tabidachi"), target: 10, unit: "回" })
+        check: () => getCount("tabidachi") >= 10,
+        progress: () => ({ now: getCount("tabidachi"), target: 10, unit: "回" })
       },
       { id: "tabidachi_50",  name: "見送り職人",   desc: "旅立ち回数 50",
         flavor: "別れに慣れるんじゃない。上手に抱えるだけ。",
-        check: () => getSyougouCount("tabidachi") >= 50,
-        progress: () => ({ now: getSyougouCount("tabidachi"), target: 50, unit: "回" })
+        check: () => getCount("tabidachi") >= 50,
+        progress: () => ({ now: getCount("tabidachi"), target: 50, unit: "回" })
       },
       { id: "tabidachi_100", name: "見送り神",     desc: "旅立ち回数 100",
         flavor: "行ってらっしゃい、の言葉に“祈り”が混ざる。",
-        check: () => getSyougouCount("tabidachi") >= 100,
-        progress: () => ({ now: getSyougouCount("tabidachi"), target: 100, unit: "回" })
+        check: () => getCount("tabidachi") >= 100,
+        progress: () => ({ now: getCount("tabidachi"), target: 100, unit: "回" })
       },
 
       { id: "hanabi_10",  name: "一発屋",       desc: "花火回数 10",
         flavor: "夜空に、理由のない拍手が起こった。",
-        check: () => getSyougouCount("hanabi") >= 10,
-        progress: () => ({ now: getSyougouCount("hanabi"), target: 10, unit: "回" })
+        check: () => getCount("hanabi") >= 10,
+        progress: () => ({ now: getCount("hanabi"), target: 10, unit: "回" })
       },
       { id: "hanabi_50",  name: "夜空の演出家", desc: "花火回数 50",
         flavor: "静けさの上に、光を置く仕事。",
-        check: () => getSyougouCount("hanabi") >= 50,
-        progress: () => ({ now: getSyougouCount("hanabi"), target: 50, unit: "回" })
+        check: () => getCount("hanabi") >= 50,
+        progress: () => ({ now: getCount("hanabi"), target: 50, unit: "回" })
       },
       { id: "hanabi_100", name: "天上の花火師", desc: "花火回数 100",
         flavor: "星が嫉妬するほど、上手に鳴らせるようになった。",
-        check: () => getSyougouCount("hanabi") >= 100,
-        progress: () => ({ now: getSyougouCount("hanabi"), target: 100, unit: "回" })
+        check: () => getCount("hanabi") >= 100,
+        progress: () => ({ now: getCount("hanabi"), target: 100, unit: "回" })
       },
 
       { id: "slotwin_10",  name: "当たり癖",         desc: "スロット当たり回数 10",
         flavor: "たまたま、が続くと運命に見える。",
-        check: () => getSyougouCount("slot_win") >= 10,
-        progress: () => ({ now: getSyougouCount("slot_win"), target: 10, unit: "回" })
+        check: () => getCount("slot_win") >= 10,
+        progress: () => ({ now: getCount("slot_win"), target: 10, unit: "回" })
       },
       { id: "slotwin_50",  name: "勝ち筋が見える",   desc: "スロット当たり回数 50",
         flavor: "当たる瞬間の気配が、指先で分かる。",
-        check: () => getSyougouCount("slot_win") >= 50,
-        progress: () => ({ now: getSyougouCount("slot_win"), target: 50, unit: "回" })
+        check: () => getCount("slot_win") >= 50,
+        progress: () => ({ now: getCount("slot_win"), target: 50, unit: "回" })
       },
       { id: "slotwin_100", name: "スロットの申し子", desc: "スロット当たり回数 100",
         flavor: "確率が、あなたの味方をしている。",
-        check: () => getSyougouCount("slot_win") >= 100,
-        progress: () => ({ now: getSyougouCount("slot_win"), target: 100, unit: "回" })
+        check: () => getCount("slot_win") >= 100,
+        progress: () => ({ now: getCount("slot_win"), target: 100, unit: "回" })
       },
 
       { id: "omukae_10",  name: "お迎え係",   desc: "お迎え回数 10",
         flavor: "扉の向こうは、いつだって新しい物語。",
-        check: () => getSyougouCount("omukae") >= 10,
-        progress: () => ({ now: getSyougouCount("omukae"), target: 10, unit: "回" })
+        check: () => getCount("omukae") >= 10,
+        progress: () => ({ now: getCount("omukae"), target: 10, unit: "回" })
       },
       { id: "omukae_50",  name: "案内人",     desc: "お迎え回数 50",
         flavor: "迷子にならないように、灯りを持って待っていた。",
-        check: () => getSyougouCount("omukae") >= 50,
-        progress: () => ({ now: getSyougouCount("omukae"), target: 50, unit: "回" })
+        check: () => getCount("omukae") >= 50,
+        progress: () => ({ now: getCount("omukae"), target: 50, unit: "回" })
       },
       { id: "omukae_100", name: "冥府の執事", desc: "お迎え回数 100",
         flavor: "“ようこそ”は、何度言っても温かい。",
-        check: () => getSyougouCount("omukae") >= 100,
-        progress: () => ({ now: getSyougouCount("omukae"), target: 100, unit: "回" })
+        check: () => getCount("omukae") >= 100,
+        progress: () => ({ now: getCount("omukae"), target: 100, unit: "回" })
       },
 
       { id: "buy_10",  name: "多頭飼いデビュー", desc: "累計うさぎ購入 10",
@@ -337,9 +493,9 @@
     }
 
     function unlock(id, meta = {}) {
-      if (ach[id]) return false;
-      ach[id] = true;
-      saveAch();
+      if (unlocked[id]) return false;
+      unlocked[id] = true;
+      saveState();
 
       const a = getAchById(id);
       const title = `🏆 実績解除：${a?.name || meta?.name || id}`;
@@ -347,13 +503,9 @@
       toast(title, flavor);
 
       try { WB.emit?.("achievementUnlocked", { id, ...meta, flavor }); } catch {}
-      refreshUI();
       return true;
     }
 
-    /* =========================
-     * Unlock check
-     * ========================= */
     function checkUnlocks() {
       for (const a of ACH_MASTER) {
         if (isUnlocked(a.id)) continue;
@@ -369,279 +521,61 @@
     }
 
     /* =========================
-     * Ach UI（HUDボタンのみ）
+     * zukan.js 互換：zisseki.ach を提供
+     * - zukan.js は z?.ach を見に行くのでここで返す
      * ========================= */
-    const PANEL_ID = "wbAchPanelV2";
-    const BTN_ID   = "wbAchBtnV2";
-    let uiEl = null;
-
-    function ensureUiStyle() {
-      if (document.getElementById("wbAchUiStyleV2")) return;
-      const s = document.createElement("style");
-      s.id = "wbAchUiStyleV2";
-      s.textContent = `
-#${PANEL_ID}{position:fixed;inset:0;z-index:2147483647;display:none;user-select:none;}
-#${PANEL_ID} .bg{position:absolute;inset:0;background:rgba(0,0,0,.38);}
-#${PANEL_ID} .card{
-  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:min(760px,94vw);max-height:min(82vh,820px);overflow:hidden;
-  background:rgba(255,255,255,.97);border-radius:18px;
-  box-shadow:0 20px 60px rgba(0,0,0,.24);display:flex;flex-direction:column;
-}
-#${PANEL_ID} .head{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 10px;border-bottom:1px solid rgba(0,0,0,.08);}
-#${PANEL_ID} .title{font-weight:1000;letter-spacing:.02em;}
-#${PANEL_ID} .close{border:none;background:rgba(0,0,0,.06);border-radius:12px;padding:8px 12px;font-weight:900;cursor:pointer;}
-#${PANEL_ID} .body{padding:12px 14px;overflow:auto;}
-#${PANEL_ID} .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin-bottom:10px;}
-#${PANEL_ID} .pill{display:inline-flex;align-items:center;gap:8px;background:rgba(0,0,0,.04);border-radius:999px;padding:8px 10px;font-weight:900;}
-#${PANEL_ID} .btn{border:none;border-radius:12px;padding:10px 12px;font-weight:900;cursor:pointer;background:#fff;box-shadow:0 10px 22px rgba(0,0,0,.10);}
-#${PANEL_ID} .btn.primary{background:#ffd6e7;}
-#${PANEL_ID} .btn.ghost{background:rgba(0,0,0,.04);box-shadow:none;}
-#${PANEL_ID} .grid{display:grid;grid-template-columns:1fr;gap:10px;}
-#${PANEL_ID} .item{
-  background:rgba(255,255,255,.92);border-radius:14px;padding:12px;
-  box-shadow:0 10px 22px rgba(0,0,0,.08);display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
-}
-#${PANEL_ID} .item.locked{opacity:.72;}
-#${PANEL_ID} .name{font-weight:1000;}
-#${PANEL_ID} .desc{font-size:12px;opacity:.78;font-weight:800;margin-top:4px;line-height:1.35;}
-#${PANEL_ID} .flavor{
-  margin-top:8px;
-  background:rgba(0,0,0,.04);
-  border-radius:12px;
-  padding:10px 10px;
-  font-weight:950;
-  font-size:12px;
-  line-height:1.4;
-  opacity:.92;
-}
-#${PANEL_ID} .flavor.locked{
-  opacity:.55;
-  filter: blur(1.4px);
-}
-#${PANEL_ID} .meta{font-size:12px;opacity:.75;font-weight:900;margin-top:6px;}
-#${PANEL_ID} .badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 10px;font-weight:900;font-size:12px;background:rgba(255,120,120,.18);}
-#${PANEL_ID} .badge.on{background:rgba(120,210,255,.22);}
-#${PANEL_ID} .bar{height:10px;border-radius:999px;background:rgba(0,0,0,.08);overflow:hidden;margin-top:8px;}
-#${PANEL_ID} .bar > i{display:block;height:100%;width:0%;background:rgba(120,210,255,.55);}
-#${PANEL_ID} .small{font-size:12px;opacity:.8;font-weight:900;}
-#${BTN_ID}{margin-left:8px;}
-`;
-      document.head.appendChild(s);
-    }
-
-    function buildUI() {
-      ensureUiStyle();
-      if (uiEl && document.body.contains(uiEl)) return uiEl;
-
-      uiEl = document.createElement("div");
-      uiEl.id = PANEL_ID;
-      uiEl.innerHTML = `
-        <div class="bg"></div>
-        <div class="card" role="dialog" aria-modal="true">
-          <div class="head">
-            <div class="title">🏆 実績</div>
-            <button class="close" type="button">閉じる</button>
-          </div>
-          <div class="body"></div>
-        </div>
-      `;
-      document.body.appendChild(uiEl);
-
-      uiEl.querySelector(".bg")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closePanel(); });
-      uiEl.querySelector(".close")?.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closePanel(); });
-      uiEl.querySelector(".card")?.addEventListener("click", (e) => e.stopPropagation());
-      return uiEl;
-    }
-
-    let uiFilter = "all"; // all | unlocked | locked
-
-    function renderUI() {
-      const p = buildUI();
-      const body = p.querySelector(".body");
-      if (!body) return;
-
-      const total = ACH_MASTER.length;
-      const unlockedCount = ACH_MASTER.filter(a => isUnlocked(a.id)).length;
-
-      const pills = `
-        <div class="pill">解除：<b>${unlockedCount}</b> / ${total}</div>
-        <div class="pill">🪙 <b>${getCoins().toLocaleString()}</b></div>
-        <div class="pill">🐰 <b>${getBunnyCount()}</b></div>
-        <div class="pill">💩 <b>${getSyougouCount("unchi")}</b></div>
-        <div class="pill">🕊️ <b>${getSyougouCount("tabidachi")}</b></div>
-        <div class="pill">🎆 <b>${getSyougouCount("hanabi")}</b></div>
-        <div class="pill">🎰 <b>${getSyougouCount("slot_win")}</b></div>
-        <div class="pill">🚪 <b>${getSyougouCount("omukae")}</b></div>
-      `;
-
-      const buttons = `
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="btn ghost" type="button" data-filter="all">全部</button>
-          <button class="btn ghost" type="button" data-filter="unlocked">解除済み</button>
-          <button class="btn ghost" type="button" data-filter="locked">未解除</button>
-          <button class="btn primary" type="button" data-refresh="1">更新</button>
-        </div>
-      `;
-
-      const list = ACH_MASTER
-        .filter(a => {
-          if (uiFilter === "unlocked") return isUnlocked(a.id);
-          if (uiFilter === "locked") return !isUnlocked(a.id);
-          return true;
-        })
-        .map(a => {
-          const on = isUnlocked(a.id);
-          let prog = null;
-          try { prog = a.progress?.(); } catch { prog = null; }
-
-          let now = 0, target = 0, unit = "";
-          if (prog && Number.isFinite(Number(prog.now)) && Number.isFinite(Number(prog.target)) && Number(prog.target) > 0) {
-            now = Number(prog.now);
-            target = Number(prog.target);
-            unit = String(prog.unit || "");
-          }
-          const pct = (target > 0) ? Math.max(0, Math.min(100, (now / target) * 100)) : (on ? 100 : 0);
-
-          const right = on
-            ? `<span class="badge on">解除済</span>`
-            : `<span class="badge">未解除</span>`;
-
-          const barHtml = (target > 0)
-            ? `
-              <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
-              <div class="meta">${escapeHtml(now.toLocaleString())}${escapeHtml(unit)} / ${escapeHtml(target.toLocaleString())}${escapeHtml(unit)}（${pct.toFixed(1)}%）</div>
-            `
-            : `<div class="meta">進捗：—</div>`;
-
-          const flavorText = (a.flavor || "").trim();
-          const flavorHtml = flavorText
-            ? `
-              <div class="flavor ${on ? "" : "locked"}">
-                ${on ? escapeHtml(flavorText) : "？？？（解除すると読める）"}
-              </div>
-            `
-            : "";
-
-          return `
-            <div class="item ${on ? "" : "locked"}">
-              <div style="flex:1; min-width: 0;">
-                <div class="name">${on ? "✅" : "⬜"} ${escapeHtml(a.name)} <span class="small">(${escapeHtml(a.id)})</span></div>
-                <div class="desc">${escapeHtml(a.desc || "")}</div>
-                ${barHtml}
-                ${flavorHtml}
-              </div>
-              <div>${right}</div>
-            </div>
-          `;
-        })
-        .join("");
-
-      body.innerHTML = `
-        <div class="toolbar">
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">${pills}</div>
-          ${buttons}
-        </div>
-        <div class="grid">${list || "<div class='pill'>表示する実績がありません</div>"}</div>
-      `;
-
-      body.querySelectorAll("[data-filter]").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-          e.preventDefault(); e.stopPropagation();
-          uiFilter = btn.getAttribute("data-filter") || "all";
-          renderUI();
-        });
-      });
-      body.querySelectorAll("[data-refresh]").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-          e.preventDefault(); e.stopPropagation();
-          checkUnlocks();
-          renderUI();
-        });
-      });
-    }
-
-    function openPanel() {
-      const p = buildUI();
-      checkUnlocks();
-      renderUI();
-      p.style.display = "block";
-    }
-    function closePanel() {
-      const p = uiEl || document.getElementById(PANEL_ID);
-      if (!p) return;
-      p.style.display = "none";
-    }
-    function refreshUI() {
-      if (uiEl && uiEl.style.display !== "none") renderUI();
-    }
-
-    function injectHudButton() {
-      const hud = document.getElementById("hud");
-      if (!hud) return;
-      if (document.getElementById(BTN_ID)) return;
-
-      const mount = document.getElementById("hudButtons") || hud;
-
-      const btn = document.createElement("button");
-      btn.id = BTN_ID;
-      btn.textContent = "実績";
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        openPanel();
-      });
-
-      mount.appendChild(btn);
+    function buildAchCompatMap() {
+      const o = {};
+      for (const a of ACH_MASTER) {
+        o[a.id] = !!unlocked[a.id];
+      }
+      return o;
     }
 
     /* =========================
-     * Hooks
-     * ========================= */
-    try { WB.on?.("bunnyCountChanged", checkUnlocks); } catch {}
-    try { WB.on?.("hudUpdated", checkUnlocks); } catch {}
-    try { WB.on?.("coinsChanged", checkUnlocks); } catch {}
-    try { WB.on?.("coinChanged", checkUnlocks); } catch {}
-
-    // 保険：hanabi.js等が emit してるイベントも拾う
-    try { WB.on?.("hanabiFired", checkUnlocks); } catch {}
-    try { WB.on?.("slotWin", checkUnlocks); } catch {}
-    try { WB.on?.("tabidachi", checkUnlocks); } catch {}
-    try { WB.on?.("omukae", checkUnlocks); } catch {}
-    try { WB.on?.("sy:add", checkUnlocks); } catch {}
-
-    // eventsが無くても解除できる「定期チェック」
-    const TIMER_MS = 900;
-    const timer = setInterval(() => {
-      checkUnlocks();
-      refreshUI();
-    }, TIMER_MS);
-
-    window.addEventListener("load", () => {
-      injectHudButton();
-      setTimeout(injectHudButton, 400);
-    });
-
-    /* =========================
-     * External
+     * Public API
      * ========================= */
     WB.zisseki = {
-      ach,
+      // storage
+      LS_ZISSEKI,
+      unlocked,
+      stats,
+
+      // zukan互換（ここが重要）
+      // zukan.js: const ach = z?.ach ... を満たす
+      get ach() { return buildAchCompatMap(); },
+
+      // core
+      ACH_MASTER,
+      UNLOCK_BUNNY4_NEED,
       isUnlocked,
       unlock,
       checkUnlocks,
-      LS_ACH,
-      UNLOCK_BUNNY4_NEED,
-      ACH_MASTER,
-      openPanel,
-      closePanel,
-      stop: () => { try { clearInterval(timer); } catch {} },
+
+      // counts
+      getCount,
+      setCount,
+      addCount,
+
+      // internal
+      _parseSyPayload: parseSyPayload,
     };
 
-    // 初回
+    // 初回判定
     checkUnlocks();
-    injectHudButton();
 
-    console.log("[zisseki] ready (flavor in zisseki.js)", { unlocked: Object.keys(ach).length });
+    // 定期判定（コイン/同時うさぎ数など）
+    const TIMER_MS = 900;
+    const timer = setInterval(() => {
+      checkUnlocks();
+    }, TIMER_MS);
+
+    WB.zisseki.stop = () => { try { clearInterval(timer); } catch {} };
+
+    console.log("[zisseki] ready (for zukan tab)", {
+      unlocked: Object.keys(unlocked).length,
+      stats: { ...stats },
+    });
   }).catch((e) => {
     console.warn("[zisseki] WB wait failed:", e?.message || e);
   });
