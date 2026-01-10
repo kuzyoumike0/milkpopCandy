@@ -2,7 +2,7 @@
 // ✅ 「babybunny.png の個体」から unchi / ougonunchi を出さない（画像パス判定で確実）
 (() => {
   "use strict";
-  console.log("[unchi.js] LOADED v1.4.3 (skip babybunny.png)", Date.now());
+  console.log("[unchi.js] LOADED v1.4.4 (ougon click +10000 fixed)", Date.now());
 
   /* =========================
    * Config
@@ -23,7 +23,9 @@
 
   // 💰 価値
   const UNCHI_VALUE = 10;
-  const OUGON_VALUE = 10000;
+
+  // ✅ 黄金うんちクリック時は必ず +10000 に固定
+  const OUGON_CLICK_VALUE = 10000;
 
   // 🧱 上限
   const MAX_UNCHI_ON_FIELD = 20;
@@ -172,7 +174,7 @@
   class UnchiDrop extends BaseDrop{
     constructor(o){ super({...o,cls:"unchiDrop",src:ASSETS.unchiImg}); }
     collect(){
-      window.WB.coins+=UNCHI_VALUE;
+      window.WB.coins += UNCHI_VALUE;
       window.WB.updateHud?.();
       playSE();
       this.destroy();
@@ -183,7 +185,8 @@
   class OugonUnchiDrop extends BaseDrop{
     constructor(o){ super({...o,cls:"ougonunchiDrop",src:ASSETS.ougonUnchi}); }
     collect(){
-      window.WB.coins+=OUGON_VALUE;
+      // ✅ ここを固定で +10000
+      window.WB.coins += OUGON_CLICK_VALUE;
       window.WB.updateHud?.();
       playSE();
       this.destroy();
@@ -205,7 +208,6 @@
    * ✅ babybunny.png 判定（ここが要件）
    * ========================= */
   function isBabyBunnyByPng(b){
-    // うさぎの画像がどこに入ってても拾えるように多方面チェック
     const candidates = [
       b?.img?.src,
       b?.imgSrc,
@@ -220,8 +222,6 @@
     for(const v of candidates){
       const s = String(v ?? "").toLowerCase();
       if(!s) continue;
-
-      // background-image: url("...babybunny.png") 対策
       if (s.includes("babybunny.png")) return true;
       if (s.includes("/babybunny.png")) return true;
       if (s.includes("assets/babybunny.png")) return true;
@@ -250,7 +250,6 @@
       if(!id)continue;
 
       if(!gauge.has(id)){
-        // ⭐ 初期値ランダム → 完全に時間がズレる
         gauge.set(id,Math.random()*UNCHI_CHARGE_MAX);
       }
 
@@ -288,6 +287,6 @@
     }
     requestAnimationFrame(loop);
 
-    console.log("[unchi.js] ready (babybunny.png excluded)");
+    console.log("[unchi.js] ready (ougon click +10000 fixed, babybunny.png excluded)");
   });
 })();
