@@ -1,1024 +1,462 @@
+// BGM.js（非module）— ✅WBマージ対応 / ✅BGMモーダル必ず表示 / ✅SE音量もここで管理
+// v1.1: ✅registerSE() 追加（UFO.mp3など “任意SE” をスライダーで調整） / ✅mute時もSEへ反映
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.9.2 (WB merge + zIndex safe + unchi gauge +10%)", Date.now());
+  console.log("[BGM.js] LOADED v1.1 (WB merge + guaranteed modal + registerSE)", Date.now());
 
   /* =========================
-   * Assets / Defs
+   * Config / Storage
    * ========================= */
-  const ASSETS = {
-    babyBunny: "./assets/babybunny.png",
-    hart: "./assets/hart.png",
+  const LS_KEY_BGM_SETTINGS = "milkpop_bgm_settings_v2"; // { muted: bool, bgmVol:0..1, seVol:0..1 }
+  const LS_KEY_SE_VOL       = "milkpop_se_volume_v1";   // 0..1 (互換)
+  const LS_KEY_BGM_VOL      = "milkpop_bgm_volume_v1";  // 0..1 (互換)
 
-    coinSE: "./assets/coin.mp3",
-    poyoSE: "./assets/poyo.mp3",
-    babySE: "./assets/babybunny.mp3",
-    tabidatiSE: "./assets/tabidati.mp3",
-
-    // ✅ うんちSE
-    unchiSE: "./assets/unchi.mp3",
-
-    // ✅ 通常うんち
-    unchiImg: "./assets/unchi.png",
-
-    // ✅ 黄金うんち
-    ougonUnchi: "./assets/ougonunchi.png",
-
-    coins: [
-      "./assets/coin1.png",
-      "./assets/coin2.png",
-      "./assets/coin3.png",
-      "./assets/coin4.png",
-    ],
+  // BGMの音源（存在しなくてもモーダルは出る）
+  // 1) window.MILKPOP_BGM = { morning:"...", day:"...", night:"..." } があればそれを使う
+  // 2) 無ければデフォルトパス
+  const DEFAULT_BGM = {
+    morning: "./assets/bgm/morning.mp3",
+    day:     "./assets/bgm/day.mp3",
+    night:   "./assets/bgm/night.mp3",
   };
 
-  const BUNNY_DEFS = {
-    bunny1:   { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3:   { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4:   { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5:   { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
-  };
-
-  /* =========================
-   * Balance
-   * ========================= */
-  const BABY_DURATION_MS = 3 * 60 * 1000;
-  const BABY_SPEED_MUL   = 0.65;
-  const REA_EVOLVE_RATE  = 0.01;
-
-  const DEPART_COST = 10;
-
-  /* =========================
-   * Charge（個体ごと）
-   * ========================= */
-  const CHARGE_MAX = 100;
-  const CHARGE_PER_SEC = 3.0;
-  const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
-
-  const COIN_VALUE_MULTIPLIER = 2;
-
-  /* =========================
-   * 黄金うんち
-   * ========================= */
-  const OUGON_RATE  = 0.005;
-  const OUGON_VALUE = 120 * COIN_VALUE_MULTIPLIER;
-
-  /* =========================
-   * ✅ 通常うんち（うんちゲージ満タンで出現）
-   * - うさぎより上のレイヤー
-   * - クリックでSE + 削除
-   * ========================= */
-  const UNCHI_CHARGE_MAX = 100;
-
-  // ✅ +10%：0.18 → 0.198（0.18 × 1.10）
-  // 目安：満タンまで約 505秒（約 8.4分）
-  const UNCHI_CHARGE_PER_SEC = 0.198;
-
-  // クリックでコイン加算するなら（不要なら 0 に）
-  const UNCHI_VALUE = 10 * COIN_VALUE_MULTIPLIER;
-
-  // うさぎが子供の間は出さない（必要なら false）
-  const UNCHI_ADULT_ONLY = true;
-
-  // うんちSEのベース（ここは1.0で、スライダーに追従）
-  const UNCHI_SE_BASE = 1.0;
-
-  /* =========================
-   * Storage
-   * ========================= */
-  const LS = {
-    coins:     "wb_coins_v6",
-    bunnies:   "wb_bunnies_v6",
-    dex:       "wb_dex_v1",
-    unchi:     "wb_unchi_v1",
-    title:     "wb_title_v1",
-    titleList: "wb_title_list_v1",
-  };
-
-  /* =========================
-   * DOM
-   * ========================= */
-  const field       = document.getElementById("field");
-  const bunnyLayer  = document.getElementById("bunnyLayer");
-  const coinLayer   = document.getElementById("coinLayer");
-  const coinValueEl = document.getElementById("coinValue");
-
-  const shopBtn   = document.getElementById("shopBtn");
-  const departBtn = document.getElementById("departBtn");
-  const resetBtn  = document.getElementById("resetBtn");
-  const rankBtn   = document.getElementById("rankBtn");
-  const slotBtn   = document.getElementById("slotBtn");
-
-  if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
-    console.error("[app.js] 必要DOMが見つかりません");
-    return;
-  }
-
-  /* =========================
-   * ✅ 安全なZ-INDEX設計
-   * - モーダル(BGM等)を潰さない
-   * - うんちは「うさぎより上」だが「モーダルより下」
-   * ========================= */
-  const Z = {
-    UNCHI_LAYER: 120,   // うさぎより上にしたいが、モーダルを邪魔しない低め
-    UNCHI_DROP:  121,
-    HART:        130,   // ハートも同様にモーダルを邪魔しない
-  };
-
-  /* =========================
-   * ✅ うんちレイヤー（うさぎより上 / モーダルより下）
-   * ========================= */
-  function ensureUnchiLayer() {
-    let layer = document.getElementById("unchiLayer");
-    if (layer) {
-      layer.style.zIndex = String(Z.UNCHI_LAYER);
-      return layer;
-    }
-
-    layer = document.createElement("div");
-    layer.id = "unchiLayer";
-    layer.style.position = "absolute";
-    layer.style.left = "0";
-    layer.style.top = "0";
-    layer.style.width = "100%";
-    layer.style.height = "100%";
-    layer.style.pointerEvents = "none"; // 子要素でON
-    layer.style.zIndex = String(Z.UNCHI_LAYER);
-    field.appendChild(layer);
-    return layer;
-  }
-  const unchiLayer = ensureUnchiLayer();
-
-  /* =========================
-   * Event bus（WB互換）
-   * ========================= */
-  const __events = new Map();
-  function on(ev, fn) {
-    if (!__events.has(ev)) __events.set(ev, new Set());
-    __events.get(ev).add(fn);
-  }
-  function off(ev, fn) { __events.get(ev)?.delete(fn); }
-  function emit(ev, payload) {
-    __events.get(ev)?.forEach((fn) => { try { fn(payload); } catch {} });
-  }
-
-  /* =========================
-   * Utils / Field size cache
-   * ========================= */
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const rand  = (a, b) => a + Math.random() * (b - a);
-
-  let FIELD_W = 1, FIELD_H = 1;
-  function refreshFieldSize() {
-    FIELD_W = Math.max(1, field.clientWidth  || field.getBoundingClientRect().width  || 1);
-    FIELD_H = Math.max(1, field.clientHeight || field.getBoundingClientRect().height || 1);
-  }
-  refreshFieldSize();
-  window.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
-
-  function groundY() { return FIELD_H - 60; }
+  const $ = (q, p = document) => p.querySelector(q);
 
   /* =========================
-   * Audio (SEはBGM.jsに完全連動)
+   * Load/Save Settings
    * ========================= */
-  const sePoyo     = new Audio(encodeURI(ASSETS.poyoSE));
-  const seBaby     = new Audio(encodeURI(ASSETS.babySE));
-  const seCoin     = new Audio(encodeURI(ASSETS.coinSE));
-  const seTabidati = new Audio(encodeURI(ASSETS.tabidatiSE));
-  const seUnchi    = new Audio(encodeURI(ASSETS.unchiSE));
-
-  [sePoyo, seBaby, seCoin, seTabidati, seUnchi].forEach(a => {
-    try { a.preload = "auto"; a.loop = false; } catch {}
-  });
-
-  const LS_KEY_BGM_SETTINGS = "milkpop_bgm_settings_v2"; // { muted: bool, ... }
-  const LS_KEY_SE_VOL       = "milkpop_se_volume_v1";   // 0..1
-
-  function loadBgmSettingsLike() {
+  function loadSettings() {
+    // 新形式
     try {
       const raw = localStorage.getItem(LS_KEY_BGM_SETTINGS);
-      if (!raw) return { muted: false };
-      const j = JSON.parse(raw);
-      return { muted: !!j.muted };
-    } catch {
-      return { muted: false };
-    }
-  }
-
-  function getSEVolume() {
-    try {
-      if (window.WB && typeof window.WB.getSEVolume === "function") {
-        const v = Number(window.WB.getSEVolume());
-        if (Number.isFinite(v)) return clamp(v, 0, 1);
+      if (raw) {
+        const j = JSON.parse(raw);
+        return {
+          muted: !!j.muted,
+          bgmVol: clamp(Number(j.bgmVol ?? j.bgm ?? localStorage.getItem(LS_KEY_BGM_VOL) ?? 0.35) || 0.35, 0, 1),
+          seVol:  clamp(Number(j.seVol  ?? localStorage.getItem(LS_KEY_SE_VOL)  ?? 0.85) || 0.85, 0, 1),
+        };
       }
     } catch {}
 
-    try {
-      const v = Number(window.__milkpopSeVolume);
-      if (Number.isFinite(v)) return clamp(v, 0, 1);
-    } catch {}
-
-    try {
-      const raw = localStorage.getItem(LS_KEY_SE_VOL);
-      if (raw == null) return 0.85;
-      const v = Number(raw);
-      return clamp(Number.isFinite(v) ? v : 0.85, 0, 1);
-    } catch {
-      return 0.85;
-    }
+    // 旧互換
+    const bgmVol = clamp(Number(localStorage.getItem(LS_KEY_BGM_VOL) ?? 0.35) || 0.35, 0, 1);
+    const seVol  = clamp(Number(localStorage.getItem(LS_KEY_SE_VOL)  ?? 0.85) || 0.85, 0, 1);
+    return { muted: false, bgmVol, seVol };
   }
 
-  function isSEMuted() {
-    const s = loadBgmSettingsLike();
-    return !!s.muted;
+  function saveSettings(s) {
+    const j = { muted: !!s.muted, bgmVol: clamp(s.bgmVol, 0, 1), seVol: clamp(s.seVol, 0, 1) };
+    try { localStorage.setItem(LS_KEY_BGM_SETTINGS, JSON.stringify(j)); } catch {}
+    try { localStorage.setItem(LS_KEY_BGM_VOL, String(j.bgmVol)); } catch {}
+    try { localStorage.setItem(LS_KEY_SE_VOL, String(j.seVol)); } catch {}
   }
+
+  let settings = loadSettings();
+
+  // app.js が参照する “SE音量の共有”
+  window.__milkpopSeVolume = settings.seVol;
+
+  /* =========================
+   * ✅ Registered SE list
+   * - UFO.mp3 等、任意の Audio を登録すればスライダー追従
+   * ========================= */
+  const registeredSE = new Set(); // Set<HTMLAudioElement>
+
+  function isAudioLike(x) {
+    return x && (typeof x === "object") && ("play" in x) && ("pause" in x) && ("volume" in x);
+  }
+
+  function applySeSettingsToRegistered() {
+    const vol = settings.muted ? 0 : clamp(settings.seVol, 0, 1);
+    registeredSE.forEach(a => {
+      try {
+        // muted は「BGM/SEミュート」に追従
+        a.muted = !!settings.muted;
+        // volume は SE音量スライダーに追従
+        a.volume = vol;
+      } catch {}
+    });
+  }
+
+  function registerSE(audioEl) {
+    if (!isAudioLike(audioEl)) return false;
+    registeredSE.add(audioEl);
+    // 登録直後に現在設定を反映（UFOが即追従）
+    try { applySeSettingsToRegistered(); } catch {}
+    return true;
+  }
+
+  function unregisterSE(audioEl) {
+    try { registeredSE.delete(audioEl); } catch {}
+  }
+
+  function setSeVolume(v) {
+    settings.seVol = clamp(Number(v) || 0, 0, 1);
+    window.__milkpopSeVolume = settings.seVol;
+    saveSettings(settings);
+
+    // ✅ 登録SEにも反映（UFOなど）
+    applySeSettingsToRegistered();
+
+    // app.js の playSE がこれを見てる場合がある
+    window.dispatchEvent(new Event("milkpop:seVolume"));
+  }
+
+  function setBgmVolume(v) {
+    settings.bgmVol = clamp(Number(v) || 0, 0, 1);
+    saveSettings(settings);
+    applyBgmVolume();
+  }
+
+  function setMuted(m) {
+    settings.muted = !!m;
+    saveSettings(settings);
+    applyMute();
+    // ✅ 登録SEにも反映（mute/unmute）
+    applySeSettingsToRegistered();
+  }
+
+  /* =========================
+   * BGM Player
+   * ========================= */
+  const bgm = new Audio();
+  bgm.loop = true;
+  bgm.preload = "auto";
 
   let audioUnlocked = false;
-
   function unlockAudioOnce() {
     if (audioUnlocked) return;
     audioUnlocked = true;
 
+    // 先にapp.js側のunlockも呼ぶ（存在するなら）
     try { window.WB?.unlockAudioOnce?.(); } catch {}
 
     try {
-      sePoyo.muted = true;
-      sePoyo.currentTime = 0;
-      sePoyo.play()
-        .then(() => { sePoyo.pause(); sePoyo.currentTime = 0; sePoyo.muted = false; })
-        .catch(() => (sePoyo.muted = false));
+      bgm.muted = true;
+      bgm.currentTime = 0;
+      bgm.play()
+        .then(() => { bgm.pause(); bgm.currentTime = 0; bgm.muted = false; applyMute(); })
+        .catch(() => { bgm.muted = false; applyMute(); });
     } catch {}
   }
   window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
 
-  function playSE(a, base = 1.0) {
-    try {
-      if (!a) return;
-      if (!audioUnlocked) return;
+  function pickBgmSrc() {
+    const map = (window.MILKPOP_BGM && typeof window.MILKPOP_BGM === "object")
+      ? window.MILKPOP_BGM
+      : DEFAULT_BGM;
 
-      const muted = isSEMuted();
-      const vol = muted ? 0 : clamp(base * getSEVolume(), 0, 1);
-
-      a.muted = !!muted;
-      a.volume = vol;
-      a.currentTime = 0;
-      a.play().catch(() => {});
-    } catch {}
+    // JSTで朝昼夜判定（ユーザー環境のローカルに依存）
+    const now = new Date();
+    const h = now.getHours();
+    if (h >= 5 && h < 11) return map.morning || map.day || map.night;
+    if (h >= 11 && h < 18) return map.day || map.morning || map.night;
+    return map.night || map.day || map.morning;
   }
 
-  window.addEventListener("milkpop:seVolume", () => {}, { passive: true });
+  function applyBgmVolume() {
+    try { bgm.volume = settings.muted ? 0 : clamp(settings.bgmVol, 0, 1); } catch {}
+  }
+
+  function applyMute() {
+    try { bgm.muted = !!settings.muted; } catch {}
+    applyBgmVolume();
+  }
+
+  async function play() {
+    unlockAudioOnce();
+    const src = pickBgmSrc();
+    if (!src) return;
+
+    // srcが変わった時だけ差し替え
+    try {
+      if (bgm.src !== new URL(src, location.href).href) {
+        bgm.src = src;
+      }
+    } catch {
+      bgm.src = src;
+    }
+
+    applyMute();
+
+    try {
+      if (audioUnlocked) await bgm.play();
+    } catch (e) {
+      console.warn("[BGM] play blocked:", e?.message || e);
+    }
+  }
+
+  function pause() {
+    try { bgm.pause(); } catch {}
+  }
+
+  // 定期的に時間帯が変わったら曲を切替
+  let lastSlot = null;
+  function slotOfHour(h) {
+    if (h >= 5 && h < 11) return "morning";
+    if (h >= 11 && h < 18) return "day";
+    return "night";
+  }
+  setInterval(() => {
+    try {
+      const h = new Date().getHours();
+      const slot = slotOfHour(h);
+      if (lastSlot == null) lastSlot = slot;
+      if (slot !== lastSlot) {
+        lastSlot = slot;
+        if (!bgm.paused) play();
+      }
+    } catch {}
+  }, 30_000);
 
   /* =========================
-   * CSS injection
+   * Modal UI (guaranteed visible)
    * ========================= */
-  (function injectCssOnce() {
-    if (document.getElementById("wbPerBunnyChargeCss")) return;
+  const UI = {
+    style: "milkpopBgmStyleV1",
+    backdrop: "bgmBackdrop",
+    panel: "bgmPanel",
+    btnInHud: "bgmBtn",
+  };
+
+  function ensureStyle() {
+    if (document.getElementById(UI.style)) return;
     const st = document.createElement("style");
-    st.id = "wbPerBunnyChargeCss";
+    st.id = UI.style;
     st.textContent = `
-      .coin{ width:22px !important; height:22px !important; }
-      .ougonunchi{ width:26px !important; height:26px !important; position:absolute; }
-
-      .unchiDrop{
-        width:24px !important; height:24px !important;
-        position:absolute;
-        user-select:none; -webkit-user-drag:none;
-        pointer-events:auto;
-        cursor:pointer;
-        z-index:${Z.UNCHI_DROP};
+      /* 何があっても見える */
+      #${UI.backdrop}{
+        position: fixed !important;
+        inset: 0 !important;
+        background: rgba(0,0,0,.35) !important;
+        z-index: 200000 !important;
+        display: none;
       }
-
-      .wbChargeHart {
-        position:absolute;
-        z-index:${Z.HART};
-        pointer-events:none;
-        user-select:none;
-        -webkit-user-drag:none;
-        transform: translate(-50%, -50%);
-        animation: wbHartBob 1.05s ease-in-out infinite;
-        filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
-        width:26px; height:26px;
+      #${UI.panel}{
+        position: fixed !important;
+        left: 50% !important;
+        top: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: min(92vw, 420px) !important;
+        background: #fff !important;
+        border-radius: 16px !important;
+        box-shadow: 0 14px 50px rgba(0,0,0,.25) !important;
+        z-index: 200001 !important;
+        display: none;
+        padding: 14px 14px 12px !important;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif !important;
       }
-      @keyframes wbHartBob {
-        0%   { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
-        50%  { transform: translate(-50%, -50%) translateY(-7px) rotate(3deg) scale(1.03); }
-        100% { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
+      #${UI.panel} h3{
+        margin: 0 0 10px 0 !important;
+        font-size: 16px !important;
       }
+      #${UI.panel} .row{
+        display:flex; align-items:center; gap:10px;
+        margin: 10px 0;
+      }
+      #${UI.panel} .row label{
+        width: 92px; font-size: 13px; opacity:.85;
+      }
+      #${UI.panel} input[type="range"]{
+        flex: 1;
+      }
+      #${UI.panel} .actions{
+        display:flex; gap:10px; justify-content:flex-end;
+        margin-top: 12px;
+      }
+      #${UI.panel} button{
+        border: 0; border-radius: 12px;
+        padding: 10px 12px;
+        cursor: pointer;
+      }
+      #${UI.panel} .primary{ background:#ffd6e7; }
+      #${UI.panel} .ghost{ background:#f2f2f2; }
     `;
     document.head.appendChild(st);
-  })();
-
-  /* =========================
-   * State / Storage helpers
-   * ========================= */
-  let coins = (() => {
-    const n = parseInt(localStorage.getItem(LS.coins) || "0", 10);
-    return Number.isFinite(n) ? n : 0;
-  })();
-
-  function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
-
-  function updateHud() {
-    coinValueEl.textContent = String(coins);
-    emit("hudUpdated", { coins });
   }
 
-  function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
+  function ensureModal() {
+    ensureStyle();
 
-  function loadBunnyMeta() {
-    try {
-      const arr = JSON.parse(localStorage.getItem(LS.bunnies) || "null");
-      if (!Array.isArray(arr)) return null;
-      return arr.map(x => ({
-        bornAt: Number(x?.bornAt) || Date.now(),
-        kind: safeKind(x?.kind),
-      }));
-    } catch { return null; }
-  }
+    let backdrop = document.getElementById(UI.backdrop);
+    let panel = document.getElementById(UI.panel);
 
-  function saveBunnyMeta() {
-    localStorage.setItem(
-      LS.bunnies,
-      JSON.stringify(bunnies.map(b => ({ bornAt: b.bornAt, kind: b.kind })))
-    );
-  }
-
-  /* =========================
-   * Drops
-   * ========================= */
-  const dropsOnField = [];
-  const dropByEl = new WeakMap();
-
-  class CoinDrop {
-    constructor(x, y, tierIndex = 0) {
-      this.x = x;
-      this.y = y;
-      this.vx = (Math.random() * 2 - 1) * 110;
-      this.vy = -(420 + Math.random() * 240);
-      this.gravity = 2200;
-      this.bounce  = 0.22 + Math.random() * 0.12;
-      this.floor   = groundY();
-
-      const el = document.createElement("img");
-      el.className = "coin";
-      this.tier = clamp(Math.floor(tierIndex), 0, ASSETS.coins.length - 1);
-      el.src = ASSETS.coins[this.tier];
-      el.draggable = false;
-      this.el = el;
-
-      dropByEl.set(el, this);
-
-      el.addEventListener("pointerenter", () => this.collect());
-      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
-      el.addEventListener("click", () => this.collect());
-
-      coinLayer.appendChild(el);
-      this.render();
+    if (!backdrop) {
+      backdrop = document.createElement("div");
+      backdrop.id = UI.backdrop;
+      document.body.appendChild(backdrop);
     }
-    render() { this.el.style.left = `${this.x}px`; this.el.style.top  = `${this.y}px`; }
-    update(dt) {
-      this.floor = groundY();
-      this.vy += this.gravity * dt;
-      this.x  += this.vx * dt;
-      this.y  += this.vy * dt;
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = UI.panel;
+      panel.innerHTML = `
+        <h3>🎵 BGM / SE 設定</h3>
 
-      if (this.y >= this.floor) {
-        this.y = this.floor;
-        if (Math.abs(this.vy) > 260) {
-          this.vy = -this.vy * this.bounce;
-          this.vx *= 0.72;
-        } else {
-          this.vy = 0; this.vx = 0;
-        }
-      }
-      this.render();
-    }
-    collect() {
-      if (!this.el || !this.el.isConnected) return;
+        <div class="row">
+          <label>ミュート</label>
+          <input id="bgmMuteToggle" type="checkbox" />
+          <span style="font-size:12px;opacity:.75">（BGM/SE）</span>
+        </div>
 
-      coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
-      saveCoins();
-      updateHud();
-      playSE(seCoin);
+        <div class="row">
+          <label>BGM音量</label>
+          <input id="bgmVolRange" type="range" min="0" max="1" step="0.01" />
+          <span id="bgmVolVal" style="width:46px;text-align:right;font-size:12px;opacity:.75"></span>
+        </div>
 
-      try { this.el.remove(); } catch {}
-      const idx = dropsOnField.indexOf(this);
-      if (idx >= 0) dropsOnField.splice(idx, 1);
-    }
-  }
+        <div class="row">
+          <label>SE音量</label>
+          <input id="seVolRange" type="range" min="0" max="1" step="0.01" />
+          <span id="seVolVal" style="width:46px;text-align:right;font-size:12px;opacity:.75"></span>
+        </div>
 
-  class OugonUnchiDrop {
-    constructor(x, y) {
-      this.x = x;
-      this.y = y;
-      this.vx = (Math.random() * 2 - 1) * 120;
-      this.vy = -(480 + Math.random() * 260);
-      this.gravity = 2200;
-      this.bounce  = 0.18 + Math.random() * 0.10;
-      this.floor   = groundY();
+        <div class="row" style="margin-top:6px;">
+          <button id="bgmPlayBtn" class="primary" type="button">▶ 再生</button>
+          <button id="bgmPauseBtn" class="ghost" type="button">⏸ 停止</button>
+          <button id="bgmReloadBtn" class="ghost" type="button">⟳ 曲を更新</button>
+        </div>
 
-      const el = document.createElement("img");
-      el.className = "ougonunchi";
-      el.src = ASSETS.ougonUnchi;
-      el.draggable = false;
-      this.el = el;
-
-      dropByEl.set(el, this);
-
-      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
-      el.addEventListener("click", () => this.collect());
-
-      coinLayer.appendChild(el);
-      this.render();
-    }
-    render() { this.el.style.left = `${this.x}px`; this.el.style.top  = `${this.y}px`; }
-    update(dt) {
-      this.floor = groundY();
-      this.vy += this.gravity * dt;
-      this.x  += this.vx * dt;
-      this.y  += this.vy * dt;
-
-      if (this.y >= this.floor) {
-        this.y = this.floor;
-        if (Math.abs(this.vy) > 260) {
-          this.vy = -this.vy * this.bounce;
-          this.vx *= 0.70;
-        } else {
-          this.vy = 0; this.vx = 0;
-        }
-      }
-      this.render();
-    }
-    collect() {
-      if (!this.el || !this.el.isConnected) return;
-      unlockAudioOnce();
-
-      coins += OUGON_VALUE;
-      saveCoins();
-      updateHud();
-      playSE(seUnchi, 1.0);
-
-      try { this.el.remove(); } catch {}
-      const idx = dropsOnField.indexOf(this);
-      if (idx >= 0) dropsOnField.splice(idx, 1);
-    }
-  }
-
-  class UnchiDrop {
-    constructor(x, y) {
-      this.x = x;
-      this.y = y;
-      this.vx = (Math.random() * 2 - 1) * 120;
-      this.vy = -(480 + Math.random() * 260);
-      this.gravity = 2200;
-      this.bounce  = 0.18 + Math.random() * 0.10;
-      this.floor   = groundY();
-
-      const el = document.createElement("img");
-      el.className = "unchiDrop";
-      el.src = ASSETS.unchiImg;
-      el.draggable = false;
-      el.style.pointerEvents = "auto";
-
-      this.el = el;
-      dropByEl.set(el, this);
-
-      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
-      el.addEventListener("click", () => this.collect());
-
-      unchiLayer.appendChild(el);
-      this.render();
+        <div class="actions">
+          <button id="bgmCloseBtn" class="ghost" type="button">閉じる</button>
+        </div>
+      `;
+      document.body.appendChild(panel);
     }
 
-    render() {
-      this.el.style.left = `${this.x}px`;
-      this.el.style.top  = `${this.y}px`;
-    }
-
-    update(dt) {
-      this.floor = groundY();
-      this.vy += this.gravity * dt;
-      this.x  += this.vx * dt;
-      this.y  += this.vy * dt;
-
-      if (this.y >= this.floor) {
-        this.y = this.floor;
-        if (Math.abs(this.vy) > 260) {
-          this.vy = -this.vy * this.bounce;
-          this.vx *= 0.70;
-        } else {
-          this.vy = 0;
-          this.vx = 0;
-        }
-      }
-      this.render();
-    }
-
-    collect() {
-      if (!this.el || !this.el.isConnected) return;
-
-      unlockAudioOnce();
-
-      coins += UNCHI_VALUE;
-      saveCoins();
-      updateHud();
-
-      playSE(seUnchi, UNCHI_SE_BASE);
-
-      try { this.el.remove(); } catch {}
-      const idx = dropsOnField.indexOf(this);
-      if (idx >= 0) dropsOnField.splice(idx, 1);
-    }
-  }
-
-  function spawnUnchiNearBunny(bunny) {
-    try {
-      const r  = bunny.wrap.getBoundingClientRect();
-      const fr = field.getBoundingClientRect();
-      const x = (r.left - fr.left) + r.width  * 0.40 + rand(-10, 10);
-      const y = (r.top  - fr.top)  + r.height * 0.88 + rand(-6, 6);
-
-      const u = new UnchiDrop(x, y);
-      dropsOnField.push(u);
-    } catch {}
-  }
-
-  function spawnClickCoins(bunny, count = 1, tierPicker = () => 0, opt = {}) {
-    const allowOugon = opt.allowOugon !== false;
-
-    const r  = bunny.wrap.getBoundingClientRect();
-    const fr = field.getBoundingClientRect();
-    const baseX  = (r.left - fr.left) + r.width  * 0.55;
-    const baseY  = (r.top  - fr.top)  + r.height * 0.82;
-
-    for (let i = 0; i < count; i++) {
-      const x = baseX + rand(-14, 14);
-      const y = baseY + rand(-6, 6);
-
-      if (allowOugon && Math.random() < OUGON_RATE) {
-        const u = new OugonUnchiDrop(x, y);
-        dropsOnField.push(u);
-        continue;
-      }
-
-      const tier = tierPicker();
-      const c = new CoinDrop(x, y, tier);
-      dropsOnField.push(c);
-    }
-  }
-
-  /* =========================
-   * Bunny
-   * ========================= */
-  const bunnies = [];
-
-  class Bunny {
-    constructor(bornAt, kind = "bunny1") {
-      this.bornAt = Number(bornAt) || Date.now();
-      this.kind   = safeKind(kind);
-      this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
-
-      this.wrap = document.createElement("div");
-      this.wrap.className = "bunnyWrap";
-      this.wrap.style.position = "absolute";
-      this.wrap.style.left = "0px";
-      this.wrap.style.top  = "0px";
-
-      this.el = document.createElement("img");
-      this.el.className = "bunny";
-      this.el.draggable = false;
-
-      this.wrap.appendChild(this.el);
-      bunnyLayer.appendChild(this.wrap);
-
-      // 個体チャージ（ハート）
-      this.charge = 0;
-      this.chargeReady = false;
-      this.hartEl = null;
-
-      // 個体うんちゲージ
-      this.unchiCharge = 0;
-
-      refreshFieldSize();
-      this.x = rand(20, Math.max(21, FIELD_W - 140));
-      this.y = groundY() - 120;
-      this.dir = Math.random() < 0.5 ? -1 : 1;
-      this.baseSpeed = 55 + Math.random() * 60;
-
-      this.evolveIfNeeded(true);
-      this.syncSprite();
-
-      const tap = (e) => {
-        e?.preventDefault?.();
-        unlockAudioOnce();
-
-        playSE(this.isBaby ? seBaby : sePoyo);
-
-        if (this.isBaby) {
-          const plan = this.getDropPlanFromOwnCharge();
-          spawnClickCoins(this, plan.count, () => 0, { allowOugon: false });
-        } else {
-          const plan = this.getDropPlanFromOwnCharge();
-          spawnClickCoins(this, plan.count, plan.pickTier, { allowOugon: true });
-        }
-
-        this.consumeOwnCharge();
-        this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
-      };
-
-      this.wrap.addEventListener("pointerdown", tap);
-      this.wrap.addEventListener("click", tap);
-
-      this.el.addEventListener("load", () => {
-        this.clampInside();
-        this.applyPos();
-        this.positionHeart();
-      });
-
-      this.clampInside();
-      this.applyPos();
-    }
-
-    syncSprite() {
-      this.el.src = this.isBaby
-        ? ASSETS.babyBunny
-        : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
-    }
-
-    ensureHeartEl() {
-      if (this.hartEl && this.hartEl.isConnected) return this.hartEl;
-      const el = document.createElement("img");
-      el.className = "wbChargeHart";
-      el.src = ASSETS.hart;
-      el.draggable = false;
-      el.style.display = "none";
-      field.appendChild(el);
-      this.hartEl = el;
-      return el;
-    }
-
-    showHeart() {
-      const el = this.ensureHeartEl();
-      el.style.display = "block";
-      this.positionHeart();
-    }
-
-    hideHeart() {
-      if (!this.hartEl) return;
-      this.hartEl.style.display = "none";
-    }
-
-    positionHeart() {
-      if (!this.hartEl || this.hartEl.style.display === "none") return;
-      const r  = this.wrap.getBoundingClientRect();
-      const fr = field.getBoundingClientRect();
-      const x = (r.left - fr.left) + r.width * 0.5;
-      const y = (r.top  - fr.top)  + r.height * 0.08;
-      this.hartEl.style.left = `${x}px`;
-      this.hartEl.style.top  = `${y}px`;
-    }
-
-    addOwnCharge(delta) {
-      if (this.chargeReady) return;
-      delta = Number(delta) || 0;
-      if (delta <= 0) return;
-
-      this.charge = clamp(this.charge + delta, 0, CHARGE_MAX);
-      if (this.charge >= CHARGE_MAX) {
-        this.charge = CHARGE_MAX;
-        this.chargeReady = true;
-        this.showHeart();
-        emit("bunnyChargeReady", { bornAt: this.bornAt });
-      }
-    }
-
-    consumeOwnCharge() {
-      this.charge = 0;
-      this.chargeReady = false;
-      this.hideHeart();
-      emit("bunnyChargeConsumed", { bornAt: this.bornAt });
-    }
-
-    addUnchiCharge(delta) {
-      delta = Number(delta) || 0;
-      if (delta <= 0) return;
-
-      if (UNCHI_ADULT_ONLY && this.isBaby) return;
-
-      this.unchiCharge = clamp(this.unchiCharge + delta, 0, UNCHI_CHARGE_MAX);
-      if (this.unchiCharge >= UNCHI_CHARGE_MAX) {
-        this.unchiCharge = 0;
-        spawnUnchiNearBunny(this);
-        emit("bunnyUnchiSpawned", { bornAt: this.bornAt });
-      }
-    }
-
-    getChargeRatio() { return clamp(this.charge / CHARGE_MAX, 0, 1); }
-
-    getDropPlanFromOwnCharge() {
-      const r = this.getChargeRatio();
-      const count = 3 + Math.floor(r * 15);
-      const maxTier = Math.floor(r * 3 + 1e-9);
-
-      const pickTier = () => {
-        if (maxTier <= 0) return 0;
-        let sum = 0;
-        const w = [];
-        for (let t = 0; t <= maxTier; t++) {
-          const wt = (t + 1) * (t + 1);
-          w.push(wt);
-          sum += wt;
-        }
-        let x = Math.random() * sum;
-        for (let t = 0; t <= maxTier; t++) {
-          x -= w[t];
-          if (x <= 0) return t;
-        }
-        return maxTier;
-      };
-
-      return { count, pickTier };
-    }
-
-    getWrapWidth() {
-      const w1 = this.wrap.offsetWidth || 0;
-      if (w1 > 0) return w1;
-      const w2 = this.wrap.getBoundingClientRect().width || 0;
-      return Math.max(1, w2 || 140);
-    }
-
-    clampInside() {
-      refreshFieldSize();
-      const w = this.getWrapWidth();
-      const PAD = 6;
-      const minX = PAD;
-      const maxX = Math.max(minX, FIELD_W - w - PAD);
-      this.x = clamp(this.x, minX, maxX);
-      this.y = groundY() - 120;
-    }
-
-    evolveIfNeeded(isInit = false) {
-      if (!this.isBaby) return;
-      if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
-
-      this.isBaby = false;
-      if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) {
-        this.kind = "reabunny";
-      }
-
-      this.syncSprite();
-      this.clampInside();
-      if (isInit) saveBunnyMeta();
-    }
-
-    applyPos() {
-      this.wrap.classList.toggle("flip", this.dir < 0);
-      this.wrap.style.left = `${this.x}px`;
-      this.wrap.style.top  = `${this.y}px`;
-    }
-
-    update(dt) {
-      this.evolveIfNeeded(false);
-
-      this.addOwnCharge(CHARGE_PER_SEC * dt);
-      this.addUnchiCharge(UNCHI_CHARGE_PER_SEC * dt);
-
-      const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
-      this.x += this.dir * this.baseSpeed * speedMul * dt;
-
-      const w = this.getWrapWidth();
-      const PAD = 6;
-      const minX = PAD;
-      const maxX = Math.max(minX, FIELD_W - w - PAD);
-
-      if (this.x <= minX) { this.x = minX; this.dir = 1; }
-      else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
-
-      this.applyPos();
-      if (this.chargeReady) this.positionHeart();
-    }
-  }
-
-  function spawnBunny(kind = "bunny1", bornAt = Date.now()) {
-    const b = new Bunny(bornAt, kind);
-    bunnies.push(b);
-    saveBunnyMeta();
-    emit("bunnyCountChanged", { count: bunnies.length });
-    return b;
-  }
-
-  function removeBunnyInstance(b) {
-    const idx = bunnies.indexOf(b);
-    if (idx < 0) return false;
-    try { b.wrap.remove(); } catch {}
-    try { b.hartEl?.remove(); } catch {}
-    bunnies.splice(idx, 1);
-    saveBunnyMeta();
-    emit("bunnyCountChanged", { count: bunnies.length });
-    return true;
-  }
-
-  /* =========================
-   * Touch: スライド回収（コインだけ）
-   * ========================= */
-  let touchCollectActive = false;
-  let touchPointerId = null;
-
-  function collectAtClientPoint(clientX, clientY) {
-    const el = document.elementFromPoint(clientX, clientY);
-    if (!el) return;
-
-    const target = (el.classList?.contains("coin")) ? el : el.closest?.(".coin");
-    if (!target) return;
-
-    const drop = dropByEl.get(target);
-    if (drop && typeof drop.collect === "function") drop.collect();
-  }
-
-  field.addEventListener("pointerdown", (e) => {
-    if (e.pointerType !== "touch") return;
-    touchCollectActive = true;
-    touchPointerId = e.pointerId;
-    collectAtClientPoint(e.clientX, e.clientY);
-  }, { passive: true });
-
-  field.addEventListener("pointermove", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (!touchCollectActive) return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    collectAtClientPoint(e.clientX, e.clientY);
-  }, { passive: true });
-
-  window.addEventListener("pointerup", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    touchCollectActive = false;
-    touchPointerId = null;
-  }, { passive: true });
-
-  window.addEventListener("pointercancel", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    touchCollectActive = false;
-    touchPointerId = null;
-  }, { passive: true });
-
-  /* =========================
-   * Buttons（emit only）
-   * ========================= */
-  shopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
-  departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
-  rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
-  slotBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:slot",   {}); });
-
-  if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
-      unlockAudioOnce();
-      if (!confirm("リセットしますか？")) return;
-      localStorage.removeItem(LS.coins);
-      localStorage.removeItem(LS.bunnies);
-      localStorage.removeItem(LS.dex);
-      localStorage.removeItem(LS.unchi);
-      localStorage.removeItem(LS.title);
-      localStorage.removeItem(LS.titleList);
-      emit("resetRequested", {});
-      location.reload();
-    });
-  }
-
-  /* =========================
-   * ✅ WB Public API（上書き禁止：マージ）
-   * - これで WB.bgm / WB.shop / WB.zukan 等が消えない
-   * ========================= */
-  (function exportWB() {
-    const prev = (window.WB && typeof window.WB === "object") ? window.WB : {};
-
-    const api = {
-      on, off, emit,
-      ASSETS, BUNNY_DEFS, LS, DEPART_COST,
-      field, shopBtn, departBtn, rankBtn, resetBtn, slotBtn,
-
-      get coins() { return coins; },
-      set coins(v) {
-        coins = Math.max(0, Math.floor(Number(v) || 0));
-        saveCoins();
-        updateHud();
-      },
-
-      getCoin: () => coins,
-      spendCoin: (n) => {
-        n = Math.floor(Number(n) || 0);
-        if (n <= 0) return true;
-        if (coins < n) return false;
-        coins -= n;
-        saveCoins();
-        updateHud();
-        return true;
-      },
-
-      bunnies,
-      getBunnies: () => bunnies,
-      spawnBunny,
-      removeBunnyInstance,
-
-      saveCoins,
-      saveBunnyMeta,
-
-      unlockAudioOnce,
-      playSE,
-      getSEVolume,
-
-      seTabidati,
-      seUnchi,
-
-      updateHud,
-
-      getBunnyCharge: (bornAt) => {
-        const t = Number(bornAt);
-        const b = bunnies.find(x => x && x.bornAt === t);
-        return b ? { charge: b.charge, ready: b.chargeReady, unchi: b.unchiCharge } : null;
-      },
-
-      spawnUnchiNearBunny: (bornAt) => {
-        const t = Number(bornAt);
-        const b = bunnies.find(x => x && x.bornAt === t);
-        if (b) spawnUnchiNearBunny(b);
-      },
+    // 外側クリックで閉じる
+    backdrop.onclick = () => closeModal();
+
+    // クリックが背景に抜けない
+    panel.onclick = (e) => e.stopPropagation();
+
+    // bind
+    const mute = $("#bgmMuteToggle", panel);
+    const bgmR = $("#bgmVolRange", panel);
+    const seR  = $("#seVolRange", panel);
+    const bgmV = $("#bgmVolVal", panel);
+    const seV  = $("#seVolVal", panel);
+
+    const syncUI = () => {
+      mute.checked = !!settings.muted;
+      bgmR.value = String(settings.bgmVol);
+      seR.value  = String(settings.seVol);
+      bgmV.textContent = Math.round(settings.bgmVol * 100) + "%";
+      seV.textContent  = Math.round(settings.seVol * 100) + "%";
     };
 
-    window.WB = Object.assign({}, prev, api);
+    mute.onchange = () => { setMuted(mute.checked); syncUI(); };
+    bgmR.oninput  = () => { setBgmVolume(bgmR.value); syncUI(); };
+    seR.oninput   = () => { setSeVolume(seR.value); syncUI(); };
 
-    // 念のためネストも保持
-    if (prev.bgm && !window.WB.bgm) window.WB.bgm = prev.bgm;
-    if (prev.shop && !window.WB.shop) window.WB.shop = prev.shop;
-    if (prev.zukan && !window.WB.zukan) window.WB.zukan = prev.zukan;
-  })();
+    $("#bgmPlayBtn", panel).onclick = () => play();
+    $("#bgmPauseBtn", panel).onclick = () => pause();
+    $("#bgmReloadBtn", panel).onclick = () => {
+      try { bgm.src = ""; } catch {}
+      play();
+    };
+    $("#bgmCloseBtn", panel).onclick = () => closeModal();
+
+    // 初期同期
+    syncUI();
+
+    return { backdrop, panel, syncUI };
+  }
+
+  let modal = null;
+
+  function openModal() {
+    unlockAudioOnce();
+    modal = modal || ensureModal();
+    modal.syncUI?.();
+    modal.backdrop.style.display = "block";
+    modal.panel.style.display = "block";
+  }
+
+  function closeModal() {
+    if (!modal) return;
+    modal.backdrop.style.display = "none";
+    modal.panel.style.display = "none";
+  }
 
   /* =========================
-   * Init / Loop
+   * WB Export (merge)
    * ========================= */
-  function initBunnies() {
-    const meta = loadBunnyMeta();
+  function exportWB() {
+    const prev = (window.WB && typeof window.WB === "object") ? window.WB : {};
+    const bgmApi = {
+      openModal,
+      closeModal,
+      play,
+      pause,
+      setMuted,
+      setBgmVolume,
+      setSeVolume,
 
-    if (meta && meta.length) {
-      meta.forEach(m => spawnBunny(m.kind, m.bornAt));
-      saveBunnyMeta();
-      return;
+      // ✅ 追加：UFO.mp3 など任意SEを登録してスライダー追従
+      registerSE,
+      unregisterSE,
+
+      getState: () => ({ ...settings, playing: !bgm.paused }),
+    };
+
+    // 既存WBを壊さずにマージ
+    const next = Object.assign({}, prev);
+    next.bgm = Object.assign({}, (prev.bgm || {}), bgmApi);
+
+    // 互換：WB.getSEVolume を持ってない場合に提供
+    if (typeof next.getSEVolume !== "function") {
+      next.getSEVolume = () => clamp(Number(window.__milkpopSeVolume) || settings.seVol || 0.85, 0, 1);
+    }
+    // 互換：WB.unlockAudioOnce が無い場合
+    if (typeof next.unlockAudioOnce !== "function") {
+      next.unlockAudioOnce = unlockAudioOnce;
     }
 
-    const t = Date.now();
-    spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
-    spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
-    saveBunnyMeta();
+    window.WB = next;
   }
 
-  let lastFrame = performance.now();
-  function tick(ts) {
-    const dt = Math.min(0.033, (ts - lastFrame) / 1000);
-    lastFrame = ts;
-
-    for (const b of bunnies) b.update(dt);
-    for (const d of dropsOnField) d.update(dt);
-
-    requestAnimationFrame(tick);
-  }
-
-  function init() {
-    refreshFieldSize();
-    initBunnies();
-    updateHud();
-    emit("bunnyCountChanged", { count: bunnies.length });
-
-    requestAnimationFrame(tick);
-
-    window.addEventListener("resize", () => {
-      refreshFieldSize();
-      for (const b of bunnies) { b.clampInside(); b.applyPos(); b.positionHeart?.(); }
-      emit("resize", {});
-    }, { passive: true });
-  }
-
-  init();
+  exportWB();
 
   /* =========================
-   * WB差し替えガード（最低限）
+   * app.js からの emit("ui:bgm") を受けて開く
    * ========================= */
-  (function wbRePatchGuard() {
-    let last = window.WB;
-    setInterval(() => {
-      if (!window.WB || typeof window.WB !== "object") return;
-      if (window.WB === last) return;
-      last = window.WB;
+  function hookUiEvent() {
+    try {
+      if (window.WB?.on) {
+        window.WB.on("ui:bgm", () => openModal());
+      }
+    } catch {}
 
-      if (typeof window.WB.playSE !== "function") window.WB.playSE = playSE;
-      if (typeof window.WB.getSEVolume !== "function") window.WB.getSEVolume = getSEVolume;
-      if (typeof window.WB.unlockAudioOnce !== "function") window.WB.unlockAudioOnce = unlockAudioOnce;
+    // 保険：DOMイベントでも開ける
+    window.addEventListener("milkpop:openBgm", () => openModal());
+  }
+  hookUiEvent();
 
-      // ネストが消えないように（他jsが再代入しても拾う）
-      if (window.WB && last && last.bgm && !window.WB.bgm) window.WB.bgm = last.bgm;
-      if (window.WB && last && last.shop && !window.WB.shop) window.WB.shop = last.shop;
-      if (window.WB && last && last.zukan && !window.WB.zukan) window.WB.zukan = last.zukan;
-    }, 300);
-  })();
+  /* =========================
+   * Optional: HUDにBGMボタンを生やす（無ければ）
+   * ========================= */
+  function ensureHudButton() {
+    if (document.getElementById(UI.btnInHud)) return;
+
+    const hudButtons = document.getElementById("hudButtons");
+    if (!hudButtons) return;
+
+    const btn = document.createElement("button");
+    btn.id = UI.btnInHud;
+    btn.type = "button";
+    btn.textContent = "🎵BGM";
+    btn.style.marginLeft = "6px";
+    btn.addEventListener("click", () => openModal());
+    hudButtons.appendChild(btn);
+  }
+
+  setTimeout(ensureHudButton, 200);
+
+  // 初期はミュート/音量反映
+  applyMute();
+  applyBgmVolume();
+  applySeSettingsToRegistered(); // ✅ 念のため
 
 })();
