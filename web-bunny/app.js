@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.9 (unchi gauge +10%)", Date.now());
+  console.log("[app.js] LOADED v16.9.1 (unchi gauge +10% fixed comment)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -71,8 +71,8 @@
    * ========================= */
   const UNCHI_CHARGE_MAX = 100;
 
-  // ★排出量をちょっとだけ上げる：0.18 → 0.28（+10%）
-  // 目安：満タンまで約505秒（8.4分）
+  // ✅ +10%：0.18 → 0.198（0.18 × 1.10）
+  // 目安：満タンまで約 100 / 0.198 = 505.05 秒（約 8.4 分）
   const UNCHI_CHARGE_PER_SEC = 0.198;
 
   // クリックでコイン加算するなら（不要なら 0 に）
