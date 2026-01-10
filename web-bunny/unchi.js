@@ -1,7 +1,7 @@
-// unchi.js（非module）— クリックで消滅 / 上限N個で古い順に消去
+// unchi.js（非module）— ✅クリックで消滅 / ✅上限N個で古い順に消去 / ✅約1分ごと排出 / ✅排出時レア抽選
 (() => {
   "use strict";
-  console.log("[unchi.js] LOADED v1.2 (cap & click-priority)", Date.now());
+  console.log("[unchi.js] LOADED v1.3 (1min spawn + rare ougon on spawn)", Date.now());
 
   /* =========================
    * Config
@@ -12,12 +12,14 @@
     unchiSE:    "./assets/unchi.mp3",
   };
 
-  const UNCHI_CHARGE_MAX = 100;
-  const UNCHI_CHARGE_PER_SEC = 0.198;
-  const UNCHI_VALUE = 10;
+  // ✅ ここを触れば “何分周期” も簡単に変えられる
+  const UNCHI_INTERVAL_SEC = 60;     // ← 1分
+  const UNCHI_CHARGE_MAX = 100;      // 内部ゲージ上限（見た目無し）
+  const UNCHI_CHARGE_PER_SEC = UNCHI_CHARGE_MAX / UNCHI_INTERVAL_SEC;
 
-  const ENABLE_OUGON_RANDOM = true;
-  const OUGON_RATE_PER_SEC = 0.002;
+  // ✅ レア抽選（排出時）
+  const OUGON_CHANCE = 0.03;         // 3%（レアにしたいなら 0.01、もっと出したいなら 0.05 など）
+  const UNCHI_VALUE = 10;
   const OUGON_VALUE = 120;
 
   const UNCHI_SE_BASE = 1.0;
@@ -67,9 +69,9 @@
    * DOM / CSS
    * ========================= */
   function injectCssOnce() {
-    if (document.getElementById("unchiCssV2")) return;
+    if (document.getElementById("unchiCssV3")) return;
     const st = document.createElement("style");
-    st.id = "unchiCssV2";
+    st.id = "unchiCssV3";
     st.textContent = `
       .unchiDrop,.ougonunchiDrop{
         width:24px;height:24px;
@@ -91,7 +93,7 @@
     l.style.position = "absolute";
     l.style.inset = "0";
     l.style.pointerEvents = "none";
-    l.style.zIndex = Z.UNCHI_LAYER;
+    l.style.zIndex = String(Z.UNCHI_LAYER);
     field.appendChild(l);
     return l;
   }
@@ -121,7 +123,7 @@
       this.vy = -(420 + Math.random() * 240);
       this.gravity = 2200;
       this.bounce  = 0.2;
-      this.floor   = field.clientHeight - 60;
+      this.floor   = (field.clientHeight || window.innerHeight || 600) - 60;
 
       const el = document.createElement("img");
       el.src = src;
@@ -150,6 +152,9 @@
     }
 
     update(dt) {
+      // field高さ変化に追従
+      this.floor = (this.field.clientHeight || window.innerHeight || 600) - 60;
+
       this.vy += this.gravity * dt;
       this.x += this.vx * dt;
       this.y += this.vy * dt;
@@ -179,10 +184,11 @@
       super({ ...o, cls: "unchiDrop", src: ASSETS.unchiImg });
     }
     collect() {
-      window.WB.coins += UNCHI_VALUE;
+      try { window.WB.coins += UNCHI_VALUE; } catch {}
       window.WB.updateHud?.();
       playSE();
       this.destroy(true);
+      try { window.WB.emit?.("sy:add", { key: "unchi", n: 1 }); } catch {}
     }
   }
 
@@ -191,10 +197,11 @@
       super({ ...o, cls: "ougonunchiDrop", src: ASSETS.ougonUnchi });
     }
     collect() {
-      window.WB.coins += OUGON_VALUE;
+      try { window.WB.coins += OUGON_VALUE; } catch {}
       window.WB.updateHud?.();
       playSE();
       this.destroy(true);
+      try { window.WB.emit?.("sy:add", { key: "ougon_unchi", n: 1 }); } catch {}
     }
   }
 
@@ -210,25 +217,30 @@
   }
 
   /* =========================
-   * Gauge loop
+   * Gauge loop（排出瞬間にレア抽選）
    * ========================= */
   const gauge = new Map();
 
   function tick(WB, field, layer, dt) {
-    for (const b of WB.getBunnies()) {
-      const id = b.bornAt;
+    const list = WB.getBunnies?.();
+    if (!Array.isArray(list)) return;
+
+    for (const b of list) {
+      const id = b?.bornAt;
+      if (!id) continue;
+
       if (!gauge.has(id)) gauge.set(id, 0);
 
       let v = gauge.get(id) + UNCHI_CHARGE_PER_SEC * dt;
 
-      if (ENABLE_OUGON_RANDOM && Math.random() < OUGON_RATE_PER_SEC * dt) {
-        spawnNearBunny(field, layer, b, "ougon");
+      if (v >= UNCHI_CHARGE_MAX) {
+        v = v - UNCHI_CHARGE_MAX; // 余りを持ち越し（重い端末でも周期ズレにくい）
+
+        // ✅ 排出の瞬間だけ黄金抽選
+        const type = (Math.random() < OUGON_CHANCE) ? "ougon" : "normal";
+        spawnNearBunny(field, layer, b, type);
       }
 
-      if (v >= UNCHI_CHARGE_MAX) {
-        v = 0;
-        spawnNearBunny(field, layer, b, "normal");
-      }
       gauge.set(id, v);
     }
   }
@@ -238,7 +250,11 @@
    * ========================= */
   waitForWB().then(WB => {
     injectCssOnce();
-    const field = WB.field;
+    const field = WB.field || document.getElementById("field");
+    if (!field) {
+      console.warn("[unchi.js] field not found");
+      return;
+    }
     const layer = ensureLayer(field);
 
     let last = performance.now();
@@ -253,6 +269,10 @@
     }
     requestAnimationFrame(loop);
 
-    console.log("[unchi.js] ready");
+    console.log("[unchi.js] ready", {
+      intervalSec: UNCHI_INTERVAL_SEC,
+      perSec: UNCHI_CHARGE_PER_SEC,
+      ougonChance: OUGON_CHANCE
+    });
   });
 })();
