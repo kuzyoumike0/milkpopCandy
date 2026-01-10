@@ -34,11 +34,14 @@
       <button id="hanabiBtn" type="button">🎆 花火</button>
 
       <!-- ✅ 互換用：DOMとしては置いてOK（見せない/押さない）。他JSが click() で呼ぶ -->
-      <button id="shopBtn"   type="button" style="display:none;">ショップ</button>
-      <button id="slotBtn"   type="button" style="display:none;">スロット</button>
-      <button id="departBtn" type="button" style="display:none;">旅立ち</button>
-      <button id="rankBtn"   type="button" style="display:none;">ランキング</button>
-      <button id="resetBtn"  type="button" style="display:none;">リセット</button>
+      <button id="shopBtn"     type="button" style="display:none;">ショップ</button>
+      <button id="slotBtn"     type="button" style="display:none;">スロット</button>
+      <button id="departBtn"   type="button" style="display:none;">旅立ち</button>
+      <button id="rankBtn"     type="button" style="display:none;">ランキング</button>
+      <button id="resetBtn"    type="button" style="display:none;">リセット</button>
+
+      <!-- ✅ 追加：転生（牧場の星）互換ボタン（基本はハンバーガーメニューから呼ぶ想定） -->
+      <button id="prestigeBtn" type="button" style="display:none;">転生</button>
     </div>
 
     <div id="title" aria-label="current-title"></div>
@@ -82,9 +85,18 @@
   <!-- ✅ アイテム配置（shop購入アイテムを赤枠で配置） -->
   <script src="./itemPlace.js?v=20260110_1"></script>
 
+  <!-- ✅ 追加：ベッド付近で休む＋コイン微増（後付け拡張） -->
+  <script src="./bed_rest_bonus.js?v=20260110_1"></script>
+
+  <!-- ✅ 追加：ミラーボール範囲内で踊る（SE/モーション）（後付け拡張） -->
+  <script src="./mirrorball_dance.js?v=20260110_1"></script>
+
   <!-- ===== 拡張（WB依存） ===== -->
   <script src="./zisseki.js?v=20260110_1"></script>
   <script src="./syougou.js?v=20260110_1"></script>
+
+  <!-- ✅ 追加：転生（牧場の星） -->
+  <script src="./prestige.js?v=20260110_1"></script>
 
   <!-- ✅ omukae は「お迎えボタン」で開く -->
   <script src="./omukae.js?v=20260110_1"></script>
@@ -101,6 +113,34 @@
 
   <!-- ✅ 右上ハンバーガーメニュー（最後に読み込む） -->
   <script src="./gameMenu.js?v=20260110_1"></script>
+
+  <!-- ✅ 追加：互換ボタン（prestigeBtn）が押されたら転生UIを開く（安全） -->
+  <script>
+    (function () {
+      function hook() {
+        const b = document.getElementById("prestigeBtn");
+        if (!b) return;
+
+        b.addEventListener("click", function (e) {
+          e.preventDefault();
+          try { window.WB?.prestige?.open?.(); } catch {}
+        });
+
+        // 他JSが click() で呼ぶ用の互換
+        try {
+          window.WB = window.WB || {};
+          window.WB.openPrestige = function () {
+            try { window.WB?.prestige?.open?.(); } catch {}
+          };
+        } catch {}
+      }
+      if (document.readyState === "loading") {
+        window.addEventListener("load", hook);
+      } else {
+        hook();
+      }
+    })();
+  </script>
 
   <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
   <script>
