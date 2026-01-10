@@ -33,7 +33,7 @@
     night:   "./assets/bgm_night.mp3",
 
     // 特別
-    depart:  "./assets/bgm_depart.mp3",
+    depart:  "./assets/旅立ち.mp3",
 
     // 追加BGM（例：添付mp3を assets に入れた想定）
     cocktail: "./assets/bgm/Cocktail_Glass.mp3",
