@@ -1,7 +1,10 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.3 (no-outside clamp + field-ready init)", Date.now());
+  console.log("[app.js] LOADED v16.3 FIXED (no-outside clamp + stable flip + field-ready init)", Date.now());
 
+  /* =========================
+   * Assets / Defs
+   * ========================= */
   const ASSETS = {
     babyBunny: "./assets/babybunny.png",
     hart: "./assets/hart.png",
@@ -9,17 +12,20 @@
     poyoSE: "./assets/poyo.mp3",
     babySE: "./assets/babybunny.mp3",
     tabidatiSE: "./assets/tabidati.mp3",
-    coins: ["./assets/coin1.png","./assets/coin2.png","./assets/coin3.png","./assets/coin4.png"],
+    coins: ["./assets/coin1.png", "./assets/coin2.png", "./assets/coin3.png", "./assets/coin4.png"],
   };
 
   const BUNNY_DEFS = {
-    bunny1:  { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+    bunny1:   { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:   { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:   { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:   { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
+  /* =========================
+   * Balance
+   * ========================= */
   const BABY_DURATION_MS = 3 * 60 * 1000;
   const BABY_SPEED_MUL   = 0.65;
   const REA_EVOLVE_RATE  = 0.01;
@@ -31,6 +37,9 @@
   const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
   const COIN_VALUE_MULTIPLIER = 2;
 
+  /* =========================
+   * Storage
+   * ========================= */
   const LS = {
     coins:     "wb_coins_v6",
     bunnies:   "wb_bunnies_v6",
@@ -40,6 +49,9 @@
     titleList: "wb_title_list_v1",
   };
 
+  /* =========================
+   * DOM
+   * ========================= */
   const field       = document.getElementById("field");
   const bunnyLayer  = document.getElementById("bunnyLayer");
   const coinLayer   = document.getElementById("coinLayer");
@@ -81,32 +93,28 @@
   let FIELD_W = 1, FIELD_H = 1;
 
   function refreshFieldSize() {
-    // 0になりやすい環境対策：getBoundingClientRect優先
     const r = field.getBoundingClientRect();
     FIELD_W = Math.max(1, Math.round(r.width  || field.clientWidth  || 1));
     FIELD_H = Math.max(1, Math.round(r.height || field.clientHeight || 1));
   }
 
-  // ✅ groundを安全化（高さが潰れても地面がマイナスにならない）
   function groundY() {
-    // 画面が小さくても最低この辺に地面が来る
+    // 画面が小さくても地面がマイナスにならない
     const minGround = 120;
     return Math.max(minGround, FIELD_H - 60);
   }
 
-  // ✅ 初期化前にfieldが実サイズになるまで待つ
   async function ensureFieldReady() {
-    for (let i = 0; i < 80; i++) { // 最大約4秒（50ms×80）
+    // 初回だけ field が 0x0 になりがちなので待つ
+    for (let i = 0; i < 80; i++) {
       refreshFieldSize();
       if (FIELD_W >= 100 && FIELD_H >= 120) return true;
       await new Promise(r => setTimeout(r, 50));
     }
-    // 最悪でも続行（ただしminGroundが守る）
     console.warn("[app.js] field size not ready; continue with guarded groundY()");
     return false;
   }
 
-  // resize系（URLバー/回転/ズーム）も拾う
   window.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
   if (window.visualViewport) {
     window.visualViewport.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
@@ -121,6 +129,7 @@
   const seCoin     = new Audio(ASSETS.coinSE);
   const seTabidati = new Audio(ASSETS.tabidatiSE);
 
+  // BGM.jsがあればSE登録（スライダー追従）
   try { prevWB?.bgm?.registerSE?.(sePoyo); } catch {}
   try { prevWB?.bgm?.registerSE?.(seBaby); } catch {}
   try { prevWB?.bgm?.registerSE?.(seCoin); } catch {}
@@ -141,29 +150,62 @@
   window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
 
   function getSeVolume() {
-    try { if (typeof window.WB?.getSEVolume === "function") return clamp(Number(window.WB.getSEVolume()) || 0.85, 0, 1); } catch {}
+    try {
+      if (typeof window.WB?.getSEVolume === "function") {
+        return clamp(Number(window.WB.getSEVolume()) || 0.85, 0, 1);
+      }
+    } catch {}
     const v = Number(window.__milkpopSeVolume);
     return clamp(Number.isFinite(v) ? v : 0.85, 0, 1);
   }
+
   function playSE(a) {
-    try { a.volume = getSeVolume(); a.muted = false; a.currentTime = 0; a.play().catch(()=>{}); } catch {}
+    try {
+      a.volume = getSeVolume();
+      a.muted = false;
+      a.currentTime = 0;
+      a.play().catch(() => {});
+    } catch {}
   }
 
   /* =========================
-   * CSS minimal
+   * CSS minimal (flipはimgで行う)
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV163")) return;
+    if (document.getElementById("wbAppCoreCssV163Fixed")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV163";
+    st.id = "wbAppCoreCssV163Fixed";
     st.textContent = `
       #bunnyLayer{ position:absolute; inset:0; }
-      .bunnyWrap{ position:absolute; width:140px; height:140px; pointer-events:auto; }
-      .bunnyWrap.flip{ transform: scaleX(-1); transform-origin: 50% 50%; }
-      .bunny{ width:140px; height:auto; display:block; user-select:none; -webkit-user-drag:none; }
-      .coin{ width:22px !important; height:22px !important; position:absolute; user-select:none; -webkit-user-drag:none; }
-      .wbChargeHart{ position:absolute; z-index:9999; pointer-events:none; transform:translate(-50%,-50%); animation:wbHartBob 1.05s ease-in-out infinite; width:40px; height:40px; filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));}
-      @keyframes wbHartBob{0%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}50%{transform:translate(-50%,-50%) translateY(-7px) rotate(3deg) scale(1.03);}100%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}}
+      .bunnyWrap{ position:absolute; pointer-events:auto; }
+      .bunny{
+        display:block;
+        user-select:none;
+        -webkit-user-drag:none;
+        transform-origin: 50% 50%;
+      }
+      .coin{
+        width:22px !important;
+        height:22px !important;
+        position:absolute;
+        user-select:none;
+        -webkit-user-drag:none;
+      }
+      .wbChargeHart{
+        position:absolute;
+        z-index:9999;
+        pointer-events:none;
+        transform:translate(-50%,-50%);
+        animation:wbHartBob 1.05s ease-in-out infinite;
+        width:40px;
+        height:40px;
+        filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));
+      }
+      @keyframes wbHartBob{
+        0%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}
+        50%{transform:translate(-50%,-50%) translateY(-7px) rotate(3deg) scale(1.03);}
+        100%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}
+      }
     `;
     document.head.appendChild(st);
   })();
@@ -248,6 +290,7 @@
 
   function spawnCoinDropAt(x, y, tier = 0) {
     const c = new CoinDrop(x, y, tier);
+    // ✅ これが無いと updateされない
     dropsOnField.push(c);
     return c;
   }
@@ -280,6 +323,10 @@
       this.el.className = "bunny";
       this.el.draggable = false;
 
+      // ★画像の自然サイズが出るまではCSSに任せるが、最低サイズは確保
+      this.el.style.width = "140px";
+      this.el.style.height = "auto";
+
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
@@ -288,10 +335,9 @@
       this.hartEl = null;
 
       refreshFieldSize();
-      this.x = rand(20, Math.max(21, FIELD_W - 140));
-      this.y = groundY() - 120;
+      this.x = rand(20, Math.max(21, FIELD_W - 160));
+      this.y = groundY() - 140;
 
-      // ✅ 画面外に行くのを強力に抑える：初期dir/speedも安全
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 45 + Math.random() * 55;
 
@@ -314,6 +360,7 @@
       this.wrap.addEventListener("click", tap);
 
       this.el.addEventListener("load", () => {
+        // サイズが確定したら救出
         this.clampInside(true);
         this.applyPos();
         this.positionHeart();
@@ -324,7 +371,9 @@
     }
 
     syncSprite() {
-      this.el.src = this.isBaby ? ASSETS.babyBunny : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
+      this.el.src = this.isBaby
+        ? ASSETS.babyBunny
+        : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
     }
 
     ensureHeartEl() {
@@ -392,17 +441,19 @@
       return { count, pickTier };
     }
 
-    // ✅ サイズが取れない時でも140扱いに固定してズレを抑える
+    // ★natural優先 + fallback（0対策）
     getWrapWidth() {
-      const w = this.wrap.offsetWidth || this.wrap.getBoundingClientRect().width || 140;
-      return Math.max(80, Math.round(w));
+      const nw = this.el?.naturalWidth || 0;
+      const w = (nw > 0) ? Math.round(nw * (this.el.getBoundingClientRect().width / Math.max(1, this.el.getBoundingClientRect().width))) : 0;
+      const rectW = this.wrap.getBoundingClientRect().width || 0;
+      return Math.max(80, Math.round(rectW || w || 140));
     }
     getWrapHeight() {
-      const h = this.wrap.offsetHeight || this.wrap.getBoundingClientRect().height || 140;
-      return Math.max(80, Math.round(h));
+      const rectH = this.wrap.getBoundingClientRect().height || 0;
+      return Math.max(80, Math.round(rectH || 140));
     }
 
-    // ✅ xもyも“画面内”に強制
+    // ✅ xもyも“画面内”に強制（足元が地面）
     clampInside(force = false) {
       refreshFieldSize();
 
@@ -413,19 +464,20 @@
       const minX = PAD;
       const maxX = Math.max(minX, FIELD_W - w - PAD);
 
-      // yの範囲：上はPAD、下はground - h（地面より下へ出さない）
       const gy = groundY();
       const minY = PAD;
       const maxY = Math.max(minY, gy - h);
 
-      // 通常は地面付近に寄せるが、外に出てたら救出
       if (force) {
         this.x = clamp(this.x, minX, maxX);
+        // 地面に寄せつつ、範囲内
+        const targetY = clamp(gy - h, minY, maxY);
         this.y = clamp(this.y, minY, maxY);
+        // 変な初期値なら地面へ
+        if (!Number.isFinite(this.y) || Math.abs(this.y - targetY) > 9999) this.y = targetY;
         return;
       }
 
-      // “外に出てる時だけ”救出（毎回固定しすぎない）
       if (this.x < minX || this.x > maxX) this.x = clamp(this.x, minX, maxX);
       if (this.y < minY || this.y > maxY) this.y = clamp(this.y, minY, maxY);
     }
@@ -443,7 +495,9 @@
     }
 
     applyPos() {
-      this.wrap.classList.toggle("flip", this.dir < 0);
+      // ✅ flipはwrapじゃなくimgで（座標ズレ根絶）
+      this.el.style.transform = (this.dir < 0) ? "scaleX(-1)" : "scaleX(1)";
+
       this.wrap.style.left = `${this.x}px`;
       this.wrap.style.top  = `${this.y}px`;
     }
@@ -455,12 +509,11 @@
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
       this.x += this.dir * this.baseSpeed * speedMul * dt;
 
-      // ✅ yは基本“地面位置”へ寄せる（ただし外へは出さない）
-      // 画面高さが変動しても追従
+      // 地面追従
       const h = this.getWrapHeight();
       const gy = groundY();
-      const targetY = gy - h;            // 地面ぴったり
-      this.y += (targetY - this.y) * 0.25; // ふわっと追従
+      const targetY = gy - h;
+      this.y += (targetY - this.y) * 0.25;
 
       // x反射
       const w = this.getWrapWidth();
@@ -471,7 +524,6 @@
       if (this.x <= minX) { this.x = minX; this.dir = 1; }
       else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
 
-      // ✅ 毎フレーム救出（外に出たら戻す）
       this.clampInside(false);
 
       this.applyPos();
@@ -606,8 +658,6 @@
   /* =========================
    * Init / Loop
    * ========================= */
-  function saveCoins(){ localStorage.setItem(LS.coins, String(coins)); }
-
   async function initBunnies() {
     const meta = loadBunnyMeta();
     if (meta && meta.length) {
@@ -641,7 +691,7 @@
 
     requestAnimationFrame(tick);
 
-    // resize時は全員を救出
+    // resize時は全員救出
     const rescueAll = () => {
       refreshFieldSize();
       for (const b of bunnies) { b.clampInside(true); b.applyPos(); b.positionHeart?.(); }
