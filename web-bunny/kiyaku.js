@@ -1,13 +1,13 @@
-// kiyaku.js（非module）— 利用規約モーダル（予約キュー対応で必ず開く）
+// kiyaku.js（非module）— 利用規約モーダル（予約キュー対応で必ず開く） v1.2.0
 // ✅ window.KIYAKU.open()/close()/setText()
 // ✅ gameMenu.js が先に呼んでも「予約」→ kiyaku.js 読込後に自動で開く
-// ✅ さらに保険：window.dispatchEvent(new Event("milkpop:openKiyaku")) でも開く
 // ✅ 背景クリック / × / Esc で閉じる
 // ✅ スクロールOK・超前面
+// ✅ 追加：window event "milkpop:openKiyaku" でも開く（保険）
 
 (() => {
   "use strict";
-  console.log("[kiyaku.js] LOADED v1.2.1 (queue+event+guaranteed)", Date.now());
+  console.log("[kiyaku.js] LOADED v1.2.0 (queue+event+guaranteed)", Date.now());
 
   const UI = {
     modal: "milkpopKiyakuModalV1",
@@ -15,12 +15,7 @@
     text:  "milkpopKiyakuTextV1",
   };
 
-  const X_HANDLE = "Soni_complaint";
-  const X_URL = `https://x.com/${encodeURIComponent(X_HANDLE)}`;
-
   // ====== 利用規約本文（ここを編集） ======
-  // ※ 本文内に https://... を直書きすると環境によっては自動リンク化等で崩れることがあるため
-  //    URLは「文字」として書く（下の SOURCES_TEXT にまとめる）
   const KIYAKU_TEXT = `
 ■ 利用規約（Milkpop）
 
@@ -58,11 +53,11 @@
 ────────────────────────
 4. 使用素材
 ────────────────────────
-効果音ラボ様
-DOVA-SYNDROME様
-サクソラ様
+効果音ラボ様　https://soundeffect-lab.info/
+DOVA-SYNDROME様　https://dova-s.jp/
+サクソラ様　https://39sora.com/
+32°様
 
-（URLは下の「素材リンク」に記載）
 ────────────────────────
 5. お問い合わせ
 ────────────────────────
@@ -70,15 +65,10 @@ X（旧Twitter） @Soni_complaint
 
 ※DMやリプライの返信は保証できません。
 `.trim();
-
-  // ✅ URLは本文から分離（表示崩れ・自動リンク化事故を避ける）
-  const SOURCES_TEXT = `
-■ 素材リンク
-効果音ラボ：https://soundeffect-lab.info/
-DOVA-SYNDROME：https://dova-s.jp/
-サクソラ：https://39sora.com/
-`.trim();
   // ======================================
+
+  const X_HANDLE = "Soni_complaint";
+  const X_URL = `https://x.com/${encodeURIComponent(X_HANDLE)}`;
 
   const $ = (q, p = document) => p.querySelector(q);
 
@@ -91,23 +81,26 @@ DOVA-SYNDROME：https://dova-s.jp/
   position:fixed; inset:0;
   z-index:2147483500;
   display:none;
+  pointer-events:auto; /* ✅ 念のため */
 }
 #${UI.modal} .backdrop{
   position:absolute; inset:0;
   background:rgba(0,0,0,.48);
+  pointer-events:auto;
 }
 #${UI.modal} .card{
   position:absolute;
   left:50%; top:50%;
   transform:translate(-50%,-50%);
-  width:min(680px, 92vw);
-  max-height:min(78vh, 680px);
+  width:min(620px, 92vw);
+  max-height:min(74vh, 620px);
   overflow:auto;
   background:rgba(255,255,255,.98);
   border-radius:18px;
   box-shadow:0 22px 70px rgba(0,0,0,.30);
   padding:14px 14px 12px;
   -webkit-overflow-scrolling:touch;
+  pointer-events:auto;
 }
 #${UI.modal} .row{
   display:flex; align-items:center; justify-content:space-between; gap:8px;
@@ -138,10 +131,6 @@ DOVA-SYNDROME：https://dova-s.jp/
   margin-top:10px;
   font-size:12px;
   opacity:.78;
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  align-items:center;
 }
 #${UI.modal} .link{
   font-weight:1000;
@@ -149,10 +138,6 @@ DOVA-SYNDROME：https://dova-s.jp/
   text-decoration:none;
 }
 #${UI.modal} .link:hover{ text-decoration:underline; }
-#${UI.modal} .mini{
-  font-size:12px;
-  opacity:.78;
-}
 `;
     document.head.appendChild(s);
   }
@@ -175,15 +160,14 @@ DOVA-SYNDROME：https://dova-s.jp/
         <pre id="${UI.text}"></pre>
 
         <div class="hint">
-          <span class="mini">お問い合わせ：</span>
-          <a class="link" href="${X_URL}" target="_blank" rel="noopener noreferrer">@${X_HANDLE}</a>
+          お問い合わせ：<a class="link" href="${X_URL}" target="_blank" rel="noopener noreferrer">@${X_HANDLE}</a>
         </div>
       </div>
     `;
     document.body.appendChild(m);
 
     const pre = $(`#${UI.text}`, m);
-    if (pre) pre.textContent = `${KIYAKU_TEXT}\n\n${SOURCES_TEXT}`;
+    if (pre) pre.textContent = KIYAKU_TEXT;
 
     // 背景/× で閉じる
     m.addEventListener("click", (e) => {
@@ -219,7 +203,7 @@ DOVA-SYNDROME：https://dova-s.jp/
     if (pre) pre.textContent = String(text ?? "");
   };
 
-  // ✅ 予約キュー（gameMenuが先でも後でもOK）
+  // ✅ 予約キュー吸収
   window.__milkpopOpenModalQueue = window.__milkpopOpenModalQueue || [];
   function drainQueue() {
     try {
@@ -239,7 +223,7 @@ DOVA-SYNDROME：https://dova-s.jp/
     } catch {}
   }
 
-  // ✅ 追加保険：イベントでも開く（gameMenu側がこれを叩けば確実）
+  // ✅ イベント保険：gameMenu から飛んできても開く
   window.addEventListener("milkpop:openKiyaku", () => {
     try { open(); } catch {}
   });
