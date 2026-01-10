@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.2 (BGM kick + coin smaller)", Date.now());
+  console.log("[app.js] LOADED v16.7.3 (baby no gauge + baby coin1 fixed)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -91,9 +91,9 @@
    * ✅ 座標系を強制（最重要）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1672")) return;
+    if (document.getElementById("wbAppCoreCssV1673")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1672";
+    st.id = "wbAppCoreCssV1673";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -406,6 +406,7 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
+      // ✅ baby はゲージを持たせない（増えない・readyにならない・ハート出ない）
       this.charge = 0;
       this.chargeReady = false;
       this.hartEl = null;
@@ -423,6 +424,13 @@
       const tap = (e) => {
         e?.preventDefault?.();
         playSE(this.isBaby ? seBaby : sePoyo);
+
+        // ✅ baby は coin1 固定（tier=0固定）＆ゲージ無しなので常に同じ
+        if (this.isBaby) {
+          // 好みで count を変えたいならここだけ調整
+          spawnClickCoins(this, 3, () => 0); // coin1 固定
+          return;
+        }
 
         const plan = this.getDropPlanFromOwnCharge();
         spawnClickCoins(this, plan.count, plan.pickTier);
@@ -471,6 +479,9 @@
     }
 
     addOwnCharge(delta) {
+      // ✅ baby はゲージを持たせない（一切増やさない）
+      if (this.isBaby) return;
+
       if (this.chargeReady) return;
       delta = Number(delta) || 0;
       if (delta <= 0) return;
@@ -485,6 +496,9 @@
     }
 
     consumeOwnCharge() {
+      // ✅ baby はゲージ無し
+      if (this.isBaby) return;
+
       this.charge = 0;
       this.chargeReady = false;
       this.hideHeart();
@@ -494,6 +508,7 @@
     getChargeRatio() { return clamp(this.charge / CHARGE_MAX, 0, 1); }
 
     getDropPlanFromOwnCharge() {
+      // ここに baby 分岐を置いても良いが、tap側で固定しているので不要
       const r = this.getChargeRatio();
       const count = 3 + Math.floor(r * 15);
       const maxTier = Math.floor(r * 3 + 1e-9);
@@ -515,7 +530,14 @@
       if (!this.isBaby) return;
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
+      // baby → adult
       this.isBaby = false;
+
+      // ✅ adult化した瞬間にゲージ開始（初期値0、ハート消す）
+      this.charge = 0;
+      this.chargeReady = false;
+      this.hideHeart();
+
       if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
 
       this.syncSprite();
@@ -543,7 +565,9 @@
 
     update(dt) {
       this.evolveIfNeeded(false);
-      this.addOwnCharge(CHARGE_PER_SEC * dt);
+
+      // ✅ baby はゲージを持たない（増やさない）
+      if (!this.isBaby) this.addOwnCharge(CHARGE_PER_SEC * dt);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
       this.x += this.dir * this.baseSpeed * speedMul * dt;
@@ -687,7 +711,8 @@
     getBunnyCharge: (bornAt) => {
       const t = Number(bornAt);
       const b = bunnies.find(x => x && x.bornAt === t);
-      return b ? { charge: b.charge, ready: b.chargeReady } : null;
+      // ✅ baby は常にゲージ無し（charge=0/ready=false）
+      return b ? { charge: b.isBaby ? 0 : b.charge, ready: b.isBaby ? false : b.chargeReady } : null;
     },
   };
   window.WB = Object.assign({}, prevWB, api);
