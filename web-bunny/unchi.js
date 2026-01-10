@@ -1,7 +1,7 @@
 // unchi.js（非module）— 個体別ゲージ / 同時排出防止 / 分散排出
 (() => {
   "use strict";
-  console.log("[unchi.js] LOADED v1.4.1 (ougon=10000)", Date.now());
+  console.log("[unchi.js] LOADED v1.4.2 (skip babybunny unchi)", Date.now());
 
   /* =========================
    * Config
@@ -201,6 +201,33 @@
   }
 
   /* =========================
+   * ✅ babybunny判定（ここが追加）
+   * ========================= */
+  function isBabyBunny(b){
+    try{
+      const t = String(
+        b?.kind ?? b?.type ?? b?.key ?? b?.name ?? b?.species ?? ""
+      ).toLowerCase();
+      // "babybunny" / "baby_bunny" / "baby" など幅広く拾う
+      if (t.includes("babybunny")) return true;
+      if (t.includes("baby_bunny")) return true;
+      if (t === "baby") return true;
+
+      // もし wrapにクラス名が入ってる実装でも拾う
+      const cls = String(b?.wrap?.className ?? "").toLowerCase();
+      if (cls.includes("babybunny")) return true;
+
+      // もし画像パスで判定できる実装でも拾う
+      const src = String(b?.img?.src ?? b?.src ?? "").toLowerCase();
+      if (src.includes("babybunny")) return true;
+
+      return false;
+    }catch{
+      return false;
+    }
+  }
+
+  /* =========================
    * 個体別ゲージ（分散の核心）
    * ========================= */
   const gauge=new Map(); // bornAt -> 0..100
@@ -213,6 +240,9 @@
 
     for(const b of list){
       if(spawnedThisFrame)break;
+
+      // ✅ babybunnyは排出しない（ゲージも進めない）
+      if (isBabyBunny(b)) continue;
 
       const id=b?.bornAt;
       if(!id)continue;
@@ -256,6 +286,6 @@
     }
     requestAnimationFrame(loop);
 
-    console.log("[unchi.js] ready (ougon=10000)");
+    console.log("[unchi.js] ready (skip babybunny)");
   });
 })();
