@@ -56,7 +56,7 @@
 効果音ラボ様　https://soundeffect-lab.info/
 DOVA-SYNDROME様　https://dova-s.jp/
 サクソラ様　https://39sora.com/
-
+Shu＊Arts様
 
 ────────────────────────
 5. お問い合わせ
