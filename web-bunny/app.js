@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.8 (unchi above bunny + click SE + remove + slower)", Date.now());
+  console.log("[app.js] LOADED v16.9 (unchi gauge +10%)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -71,9 +71,9 @@
    * ========================= */
   const UNCHI_CHARGE_MAX = 100;
 
-  // ★頻度を落とす：前 0.35 → 今 0.18（約556秒=9.3分で満タン）
-  // もっと減らしたいなら 0.12 とかにしてOK
-  const UNCHI_CHARGE_PER_SEC = 0.18;
+  // ★排出量をちょっとだけ上げる：0.18 → 0.198（+10%）
+  // 目安：満タンまで約505秒（8.4分）
+  const UNCHI_CHARGE_PER_SEC = 0.198;
 
   // クリックでコイン加算するなら（不要なら 0 に）
   const UNCHI_VALUE = 10 * COIN_VALUE_MULTIPLIER;
@@ -117,8 +117,6 @@
 
   /* =========================
    * ✅ うんちレイヤー（うさぎより上）
-   * - bunnyLayer の後ろにcoinLayerがある構成でも確実に上
-   * - field 直下に専用レイヤーを作る
    * ========================= */
   function ensureUnchiLayer() {
     let layer = document.getElementById("unchiLayer");
@@ -271,7 +269,7 @@
         width:24px !important; height:24px !important;
         position:absolute;
         user-select:none; -webkit-user-drag:none;
-        pointer-events:auto; /* ✅ クリックできる */
+        pointer-events:auto;
         cursor:pointer;
         z-index: 9992;
       }
@@ -447,7 +445,6 @@
     }
   }
 
-  // ✅ 通常うんち：うさぎより上（unchiLayerに入れる）+ クリックでSE + 削除
   class UnchiDrop {
     constructor(x, y) {
       this.x = x;
@@ -462,18 +459,14 @@
       el.className = "unchiDrop";
       el.src = ASSETS.unchiImg;
       el.draggable = false;
-
-      // ✅ unchiLayer は pointer-events:none なので子だけON
       el.style.pointerEvents = "auto";
 
       this.el = el;
       dropByEl.set(el, this);
 
-      // hover回収しない（黄金と同じ）
       el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
       el.addEventListener("click", () => this.collect());
 
-      // ✅ うさぎより上のレイヤー
       unchiLayer.appendChild(el);
       this.render();
     }
@@ -507,15 +500,12 @@
 
       unlockAudioOnce();
 
-      // コイン加算（不要なら0に）
       coins += UNCHI_VALUE;
       saveCoins();
       updateHud();
 
-      // ✅ クリックで unchi.mp3（スライダーに追従）
       playSE(seUnchi, UNCHI_SE_BASE);
 
-      // ✅ クリックで削除
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
@@ -558,9 +548,6 @@
     }
   }
 
-  /* =========================
-   * Bunny
-   * ========================= */
   const bunnies = [];
 
   class Bunny {
@@ -582,12 +569,10 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      // 個体チャージ（ハート）
       this.charge = 0;
       this.chargeReady = false;
       this.hartEl = null;
 
-      // ✅ 個体うんちゲージ（さらに頻度低い）
       this.unchiCharge = 0;
 
       refreshFieldSize();
@@ -690,7 +675,6 @@
       emit("bunnyChargeConsumed", { bornAt: this.bornAt });
     }
 
-    // ✅ うんちゲージ：満タンで unchi.png を落とす（頻度低い）
     addUnchiCharge(delta) {
       delta = Number(delta) || 0;
       if (delta <= 0) return;
@@ -773,8 +757,6 @@
       this.evolveIfNeeded(false);
 
       this.addOwnCharge(CHARGE_PER_SEC * dt);
-
-      // ✅ うんちゲージ（頻度低い）
       this.addUnchiCharge(UNCHI_CHARGE_PER_SEC * dt);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
@@ -822,7 +804,6 @@
     const el = document.elementFromPoint(clientX, clientY);
     if (!el) return;
 
-    // ✅ coinだけ（unchi/黄金は対象外）
     const target = (el.classList?.contains("coin")) ? el : el.closest?.(".coin");
     if (!target) return;
 
@@ -937,9 +918,6 @@
     },
   };
 
-  /* =========================
-   * Init / Loop
-   * ========================= */
   function initBunnies() {
     const meta = loadBunnyMeta();
 
@@ -983,9 +961,6 @@
 
   init();
 
-  /* =========================
-   * WB差し替えガード
-   * ========================= */
   (function wbRePatchGuard() {
     let last = window.WB;
     setInterval(() => {
