@@ -1,12 +1,12 @@
-// BGM.js — Milkpop牧場（ハンバーガーメニュー対応 / 自動再生制限対策 / WB待機）V6
+// BGM.js — Milkpop牧場（ハンバーガーメニュー対応 / 自動再生制限対策 / WB待機 / 404&blocked可視化）V6.1
 (() => {
   "use strict";
-  console.log("[BGM.js] LOADED v6", Date.now());
+  console.log("[BGM.js] LOADED v6.1", Date.now());
 
   const LS_ENABLED = "milkpop_bgm_enabled_v1";
   const LS_VOL     = "milkpop_bgm_volume_v1";
 
-  // ✅ BGM素材（あなたの実ファイル名に合わせて変えてOK）
+  // ✅ BGM素材（実ファイル名に合わせてOK）
   const TRACKS = {
     morning: "./assets/bgm/morning.mp3",
     day:     "./assets/bgm/day.mp3",
@@ -14,11 +14,10 @@
   };
 
   const $ = (q, p = document) => p.querySelector(q);
-
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // ✅ WB待機（app.jsより先に読み込まれても動く）
+  // ✅ WB待機（app.jsより先でもOK）
   async function waitForWB(maxMs = 8000) {
     const t0 = Date.now();
     while (Date.now() - t0 < maxMs) {
@@ -32,38 +31,30 @@
   let enabled = (localStorage.getItem(LS_ENABLED) ?? "0") === "1";
   let volume  = clamp(Number(localStorage.getItem(LS_VOL) ?? "0.35"), 0, 1);
 
-  let audio = new Audio();            // HTMLAudioで安定運用
+  // ✅ Audio
+  const audio = new Audio();
   audio.loop = true;
   audio.preload = "auto";
   audio.volume = volume;
 
-  let unlocked = false;
-  async function unlockAudio() {
-    if (unlocked) return true;
-    unlocked = true;
-    try {
-      // 無音で一瞬再生 → 即停止（iOS/Chrome対策）
-      audio.muted = true;
-      audio.currentTime = 0;
-      await audio.play();
-      audio.pause();
-      audio.currentTime = 0;
-      audio.muted = false;
-      return true;
-    } catch (e) {
-      // unlock失敗でも、次のユーザー操作で再挑戦する
-      audio.muted = false;
-      return false;
-    }
+  // 失敗理由の可視化
+  let lastError = "";
+
+  function setEnabled(v) {
+    enabled = !!v;
+    localStorage.setItem(LS_ENABLED, enabled ? "1" : "0");
+    updateUi();
+  }
+  function setVolume(v) {
+    volume = clamp(Number(v), 0, 1);
+    audio.volume = volume;
+    localStorage.setItem(LS_VOL, String(volume));
+    updateUi();
   }
 
-  // クリック/タップでunlock（保険）
-  window.addEventListener("pointerdown", () => { unlockAudio(); }, { passive: true });
-
-  // ✅ JSTで朝昼夜（必要なら調整）
+  // ✅ JSTで朝昼夜
   function getJstHours() {
     const now = new Date();
-    // UTC -> JST (+9)
     const jst = new Date(now.getTime() + (9 * 60 * 60 * 1000) - (now.getTimezoneOffset() * 60 * 1000));
     return jst.getUTCHours();
   }
@@ -81,21 +72,61 @@
     return TRACKS[slot] || TRACKS.day;
   }
 
-  async function play() {
-    audio.src = pickTrack();
+  // ✅ srcを確実にセットしてから unlock する（src無しunlockは詰む環境がある）
+  function ensureSrc() {
+    const src = pickTrack();
+    if (audio.src !== new URL(src, location.href).href) {
+      audio.src = src;
+    }
     audio.volume = volume;
+    return src;
+  }
 
-    // ✅ ここが重要：ユーザー操作中に呼ばれる想定（openModal→再生ボタン）
+  let unlocked = false;
+
+  async function unlockAudio() {
+    if (unlocked) return true;
+
+    // src無しunlockが詰む環境があるので必ずセット
+    ensureSrc();
+
+    try {
+      audio.muted = true;
+      audio.currentTime = 0;
+      await audio.play();            // ユーザー操作中なら通る
+      audio.pause();
+      audio.currentTime = 0;
+      audio.muted = false;
+      unlocked = true;
+      return true;
+    } catch (e) {
+      audio.muted = false;
+      lastError = (e && e.name) ? `${e.name}: ${e.message || ""}` : String(e);
+      console.warn("[BGM] unlock blocked", e);
+      updateUi(true);
+      return false;
+    }
+  }
+
+  // クリック/タップでunlock（保険）
+  window.addEventListener("pointerdown", () => { unlockAudio(); }, { passive: true });
+
+  async function play() {
+    lastError = "";
+    ensureSrc();
+
+    // ✅ ユーザー操作中に呼ばれる想定
     await unlockAudio();
+
     try {
       await audio.play();
-      enabled = true;
-      localStorage.setItem(LS_ENABLED, "1");
-      updateUi();
+      setEnabled(true);
       console.log("[BGM] playing", currentSlot, audio.src);
       return true;
     } catch (e) {
+      lastError = (e && e.name) ? `${e.name}: ${e.message || ""}` : String(e);
       console.warn("[BGM] play blocked", e);
+      setEnabled(true); // ON状態は維持（UI上はONだが鳴ってないのが分かるようにする）
       updateUi(true);
       return false;
     }
@@ -103,34 +134,43 @@
 
   function stop() {
     try { audio.pause(); } catch {}
-    enabled = false;
-    localStorage.setItem(LS_ENABLED, "0");
-    updateUi();
+    setEnabled(false);
   }
 
-  function setVolume(v) {
-    volume = clamp(Number(v), 0, 1);
-    audio.volume = volume;
-    localStorage.setItem(LS_VOL, String(volume));
-    updateUi();
+  async function toggle() {
+    if (enabled && !audio.paused) {
+      stop();
+      return false;
+    }
+    await play();
+    return true;
   }
 
-  // ✅ 60秒ごとに時間帯が変わったら曲を差し替え（再生中のみ）
+  // ✅ 60秒ごとに時間帯が変わったら差し替え（再生中のみ）
   setInterval(() => {
     const slot = timeSlot();
     if (!enabled) return;
     if (slot === currentSlot) return;
+
     const wasPlaying = !audio.paused;
-    audio.src = pickTrack();
-    audio.volume = volume;
-    if (wasPlaying) {
-      audio.play().catch(() => {});
-    }
+    ensureSrc();
+    if (wasPlaying) audio.play().catch(() => {});
     updateUi();
   }, 60 * 1000);
 
-  // ===== Modal UI =====
-  const MODAL_ID = "milkpopBgmModalV6";
+  // ✅ 404なども拾ってUIに出す
+  audio.addEventListener("error", () => {
+    const err = audio.error;
+    lastError = err ? `MediaError code=${err.code}` : "MediaError";
+    console.warn("[BGM] audio error", err, audio.src);
+    updateUi(true);
+  });
+
+  /* =========================
+   * Modal UI
+   * ========================= */
+  const MODAL_ID = "milkpopBgmModalV61";
+
   function ensureModal() {
     let wrap = document.getElementById(MODAL_ID);
     if (wrap) return wrap;
@@ -155,41 +195,46 @@
     panel.innerHTML = `
       <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
         <div style="font-weight:900; font-size:16px;">🎵 BGM</div>
-        <button id="bgmCloseBtnV6" style="border:none;background:#f3f3f3;border-radius:12px;padding:8px 10px;font-weight:800;cursor:pointer;">閉じる</button>
+        <button id="bgmCloseBtnV61" style="border:none;background:#f3f3f3;border-radius:12px;padding:8px 10px;font-weight:800;cursor:pointer;">閉じる</button>
       </div>
 
       <div style="margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-        <button id="bgmPlayBtnV6" style="border:none;background:#ffe3ef;border-radius:14px;padding:10px 12px;font-weight:900;cursor:pointer;">▶ 再生</button>
-        <button id="bgmStopBtnV6" style="border:none;background:#f3f3f3;border-radius:14px;padding:10px 12px;font-weight:900;cursor:pointer;">⏸ 停止</button>
-        <span id="bgmStatusV6" style="font-weight:800; opacity:.75;">-</span>
+        <button id="bgmPlayBtnV61" style="border:none;background:#ffe3ef;border-radius:14px;padding:10px 12px;font-weight:900;cursor:pointer;">▶ 再生</button>
+        <button id="bgmStopBtnV61" style="border:none;background:#f3f3f3;border-radius:14px;padding:10px 12px;font-weight:900;cursor:pointer;">⏸ 停止</button>
+        <button id="bgmToggleBtnV61" style="border:none;background:#e8f3ff;border-radius:14px;padding:10px 12px;font-weight:900;cursor:pointer;">🔁 トグル</button>
+      </div>
+
+      <div style="margin-top:8px; font-weight:900;">
+        <span id="bgmStatusV61">-</span>
       </div>
 
       <div style="margin-top:10px;">
         <div style="font-weight:800; margin-bottom:6px;">音量</div>
-        <input id="bgmVolV6" type="range" min="0" max="1" step="0.01" style="width:100%;" />
+        <input id="bgmVolV61" type="range" min="0" max="1" step="0.01" style="width:100%;" />
       </div>
 
-      <div style="margin-top:10px; font-size:12px; opacity:.6;">
-        ※再生がブロックされる場合は「▶ 再生」をもう一度押してください（ブラウザ制限対策）
+      <div id="bgmErrBoxV61" style="margin-top:10px; font-size:12px; background:#fff6f6; border:1px solid #ffd2d2; padding:8px 10px; border-radius:12px; display:none;">
+        <div style="font-weight:900;">⚠ 再生できません</div>
+        <div id="bgmErrTextV61" style="margin-top:4px; opacity:.85;"></div>
+        <div style="margin-top:6px; opacity:.7;">・ファイルパス(404)か、ブラウザの自動再生制限の可能性があります</div>
       </div>
     `;
 
     wrap.appendChild(panel);
     document.body.appendChild(wrap);
 
-    // close
     const close = () => (wrap.style.display = "none");
     wrap.addEventListener("pointerdown", (e) => { if (e.target === wrap) close(); });
 
-    $("#bgmCloseBtnV6", wrap).addEventListener("click", close);
+    $("#bgmCloseBtnV61", wrap).addEventListener("click", close);
 
-    $("#bgmPlayBtnV6", wrap).addEventListener("click", async () => {
-      // ✅ “ユーザー操作” の中で確実に鳴らす
+    $("#bgmPlayBtnV61", wrap).addEventListener("click", async () => {
       await play();
     });
-    $("#bgmStopBtnV6", wrap).addEventListener("click", () => stop());
+    $("#bgmStopBtnV61", wrap).addEventListener("click", () => stop());
+    $("#bgmToggleBtnV61", wrap).addEventListener("click", async () => { await toggle(); });
 
-    const volEl = $("#bgmVolV6", wrap);
+    const volEl = $("#bgmVolV61", wrap);
     volEl.value = String(volume);
     volEl.addEventListener("input", () => setVolume(volEl.value));
 
@@ -200,72 +245,92 @@
   function updateUi(showBlockedHint = false) {
     const wrap = document.getElementById(MODAL_ID);
     if (!wrap) return;
-    const status = $("#bgmStatusV6", wrap);
-    const volEl = $("#bgmVolV6", wrap);
+
+    const status = $("#bgmStatusV61", wrap);
+    const volEl = $("#bgmVolV61", wrap);
+    const errBox = $("#bgmErrBoxV61", wrap);
+    const errText = $("#bgmErrTextV61", wrap);
+
     if (volEl) volEl.value = String(volume);
 
-    if (showBlockedHint) {
-      status.textContent = "⚠ 再生がブロックされました（もう一度▶再生）";
-      return;
+    const playing = enabled && !audio.paused;
+    const slot = currentSlot || timeSlot();
+
+    status.textContent = playing
+      ? `再生中：${slot}`
+      : enabled
+        ? `ON（未再生）：${slot}`
+        : "停止中";
+
+    if (showBlockedHint && lastError) {
+      errBox.style.display = "block";
+      errText.textContent = `${lastError} / src=${audio.src || "(none)"}`;
+    } else {
+      errBox.style.display = "none";
+      errText.textContent = "";
     }
-    status.textContent = enabled && !audio.paused
-      ? `再生中：${currentSlot || timeSlot()}`
-      : "停止中";
   }
 
-  function openModal() {
+  async function openModal() {
     const wrap = ensureModal();
     wrap.style.display = "flex";
-    // ✅ モーダルを開く行為もユーザー操作なのでunlockしておく
-    unlockAudio();
-    updateUi();
+
+    // ✅ モーダルを開いた時点でsrcだけ確定（ここで404も見える）
+    ensureSrc();
+
+    // ✅ ここでunlockを試す（ユーザー操作）
+    await unlockAudio();
+
+    // ✅ 保存がONなら「再生も試す」（ブロックされてもUIに出す）
+    if ((localStorage.getItem(LS_ENABLED) ?? "0") === "1") {
+      await play();
+    } else {
+      updateUi();
+    }
   }
 
-  // ===== SE register hook（app.js が積むキューを吸収） =====
+  /* =========================
+   * SE register hook（app.js のキュー吸収）
+   * ========================= */
   const seRegistry = new Set();
   function registerSE(audioEl) {
     if (!audioEl) return;
-    try {
-      // SEもBGM同様、最初のユーザー操作でunlockされると鳴りやすい
-      seRegistry.add(audioEl);
-    } catch {}
+    try { seRegistry.add(audioEl); } catch {}
   }
 
-  // WBへ公開
+  /* =========================
+   * WBへ公開
+   * ========================= */
   (async () => {
     const WB = await waitForWB();
 
-    // app.jsが貯めたSE登録キューを吸収
     try {
       const q = window.__milkpopSeRegisterQueue;
-      if (Array.isArray(q)) {
-        q.splice(0).forEach(a => registerSE(a));
-      }
+      if (Array.isArray(q)) q.splice(0).forEach(a => registerSE(a));
     } catch {}
 
-    // 外部から呼べるAPI
     WB.bgm = Object.assign({}, WB.bgm || {}, {
       openModal,
       play,
       stop,
+      toggle,
       setVolume,
       getVolume: () => volume,
       isPlaying: () => enabled && !audio.paused,
       registerSE,
     });
 
-    // app.js側がWB.unlockAudioOnceを持ってる場合に合わせる（相互互換）
+    // app.js互換
     if (typeof WB.unlockAudioOnce !== "function") {
       WB.unlockAudioOnce = () => { unlockAudio(); };
     }
 
-    // enabled保存がONなら起動後に再生を試みる（ただしブロックされるので、最初のユーザー操作後に鳴る想定）
+    // enabled保存がONなら「srcだけ先に決めておく」（自動再生はしない）
     if (enabled) {
-      // “自動再生”はブロックされがちなので、unlock後に再挑戦される
-      audio.src = pickTrack();
+      ensureSrc();
       audio.volume = volume;
     }
 
-    console.log("[BGM] WB.bgm ready", { enabled, volume });
+    console.log("[BGM] WB.bgm ready", { enabled, volume, src: audio.src });
   })();
 })();
