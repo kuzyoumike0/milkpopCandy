@@ -1,6 +1,8 @@
+// app.js — Milkpop牧場（コア）
+// v16.4: ✅「画面外に行く」根絶（field座標系をJSで強制固定 + clamp強化 + viewport変動救出）
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.3 FIXED (no-outside clamp + stable flip + field-ready init)", Date.now());
+  console.log("[app.js] LOADED v16.4 (hard clamp + field fixed layout)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -8,19 +10,26 @@
   const ASSETS = {
     babyBunny: "./assets/babybunny.png",
     hart: "./assets/hart.png",
+
     coinSE: "./assets/coin.mp3",
     poyoSE: "./assets/poyo.mp3",
     babySE: "./assets/babybunny.mp3",
     tabidatiSE: "./assets/tabidati.mp3",
-    coins: ["./assets/coin1.png", "./assets/coin2.png", "./assets/coin3.png", "./assets/coin4.png"],
+
+    coins: [
+      "./assets/coin1.png", // tier0
+      "./assets/coin2.png", // tier1
+      "./assets/coin3.png", // tier2
+      "./assets/coin4.png", // tier3
+    ],
   };
 
   const BUNNY_DEFS = {
-    bunny1:   { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3:   { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4:   { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5:   { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+    bunny1:  { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
   /* =========================
@@ -32,9 +41,16 @@
 
   const DEPART_COST = 10;
 
+  /* =========================
+   * Charge（個体ごと / UIなし）
+   * ========================= */
   const CHARGE_MAX = 100;
-  const CHARGE_PER_SEC = 3.0;
+  const CHARGE_PER_SEC = 3.0; // 約34秒で満タン
   const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
+
+  /* =========================
+   * Coin boost
+   * ========================= */
   const COIN_VALUE_MULTIPLIER = 2;
 
   /* =========================
@@ -44,7 +60,7 @@
     coins:     "wb_coins_v6",
     bunnies:   "wb_bunnies_v6",
     dex:       "wb_dex_v1",
-    unchi:     "wb_unchi_v1",
+    unchi:     "wb_unchi_v1",       // unchi.js 側が使う
     title:     "wb_title_v1",
     titleList: "wb_title_list_v1",
   };
@@ -71,14 +87,58 @@
   }
 
   /* =========================
-   * WB bus (merge-safe)
+   * ✅超重要：fieldを「座標系の基準」に強制固定（CSSが欠けても直す）
+   * - これが無いと、iPad/Chrome/URLバー伸縮等で x/y が狂って「画面外」になります
+   * ========================= */
+  function forceFieldLayout() {
+    const hud = document.getElementById("hud");
+    const hudH = hud ? Math.ceil(hud.getBoundingClientRect().height || 56) : 56;
+
+    // fieldを画面に固定＆overflowで外を見せない
+    try {
+      field.style.position = "fixed";
+      field.style.left = "0";
+      field.style.right = "0";
+      field.style.top = `${hudH}px`;
+      field.style.bottom = "0";
+      field.style.overflow = "hidden";
+      field.style.touchAction = "manipulation";
+    } catch {}
+
+    // レイヤーはfield内にピッタリ
+    const layers = [
+      document.getElementById("bgLayer"),
+      document.getElementById("tenkiLayer"),
+      bunnyLayer,
+      coinLayer,
+    ].filter(Boolean);
+
+    for (const el of layers) {
+      try {
+        el.style.position = "absolute";
+        el.style.left = "0";
+        el.style.top = "0";
+        el.style.right = "0";
+        el.style.bottom = "0";
+      } catch {}
+    }
+  }
+
+  // 起動直後・フォント反映・HUD高さ変化などを拾って複数回かける
+  forceFieldLayout();
+  setTimeout(forceFieldLayout, 0);
+  setTimeout(forceFieldLayout, 200);
+  setTimeout(forceFieldLayout, 800);
+
+  /* =========================
+   * WB bus（merge-safe）
    * ========================= */
   const prevWB = (window.WB && typeof window.WB === "object") ? window.WB : {};
 
   const __events = new Map();
-  function localOn(ev, fn) { if (!__events.has(ev)) __events.set(ev, new Set()); __events.get(ev).add(fn); }
-  function localOff(ev, fn){ __events.get(ev)?.delete(fn); }
-  function localEmit(ev, payload){ __events.get(ev)?.forEach(fn=>{ try{fn(payload);}catch{} }); }
+  function localOn(ev, fn)  { if (!__events.has(ev)) __events.set(ev, new Set()); __events.get(ev).add(fn); }
+  function localOff(ev, fn) { __events.get(ev)?.delete(fn); }
+  function localEmit(ev, payload) { __events.get(ev)?.forEach(fn => { try { fn(payload); } catch {} }); }
 
   const on   = (typeof prevWB.on   === "function") ? prevWB.on.bind(prevWB)   : localOn;
   const off  = (typeof prevWB.off  === "function") ? prevWB.off.bind(prevWB)  : localOff;
@@ -93,32 +153,47 @@
   let FIELD_W = 1, FIELD_H = 1;
 
   function refreshFieldSize() {
+    // “fieldが0”になる環境対策：rect優先
     const r = field.getBoundingClientRect();
     FIELD_W = Math.max(1, Math.round(r.width  || field.clientWidth  || 1));
     FIELD_H = Math.max(1, Math.round(r.height || field.clientHeight || 1));
   }
 
   function groundY() {
-    // 画面が小さくても地面がマイナスにならない
-    const minGround = 120;
+    // 画面が潰れても地面がマイナスにならない
+    const minGround = 140;
     return Math.max(minGround, FIELD_H - 60);
   }
 
   async function ensureFieldReady() {
-    // 初回だけ field が 0x0 になりがちなので待つ
-    for (let i = 0; i < 80; i++) {
+    for (let i = 0; i < 80; i++) { // ~4秒
+      forceFieldLayout();
       refreshFieldSize();
-      if (FIELD_W >= 100 && FIELD_H >= 120) return true;
+      if (FIELD_W >= 160 && FIELD_H >= 180) return true;
       await new Promise(r => setTimeout(r, 50));
     }
-    console.warn("[app.js] field size not ready; continue with guarded groundY()");
+    console.warn("[app.js] field size not ready; continue (guarded)");
     return false;
   }
 
-  window.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
+  // viewport変動（iOS URLバー等）も拾う
+  const scheduleRescue = (() => {
+    let raf = 0;
+    return () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        forceFieldLayout();
+        refreshFieldSize();
+        rescueAll("viewport-change");
+      });
+    };
+  })();
+
+  window.addEventListener("resize", scheduleRescue, { passive: true });
   if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
-    window.visualViewport.addEventListener("scroll", () => requestAnimationFrame(refreshFieldSize), { passive: true });
+    window.visualViewport.addEventListener("resize", scheduleRescue, { passive: true });
+    window.visualViewport.addEventListener("scroll", scheduleRescue, { passive: true });
   }
 
   /* =========================
@@ -129,7 +204,7 @@
   const seCoin     = new Audio(ASSETS.coinSE);
   const seTabidati = new Audio(ASSETS.tabidatiSE);
 
-  // BGM.jsがあればSE登録（スライダー追従）
+  // ✅ BGM.js があるなら登録（スライダー追従）
   try { prevWB?.bgm?.registerSE?.(sePoyo); } catch {}
   try { prevWB?.bgm?.registerSE?.(seBaby); } catch {}
   try { prevWB?.bgm?.registerSE?.(seCoin); } catch {}
@@ -169,36 +244,25 @@
   }
 
   /* =========================
-   * CSS minimal (flipはimgで行う)
+   * CSS injection（最低限）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV163Fixed")) return;
+    if (document.getElementById("wbAppCoreCssV164")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV163Fixed";
+    st.id = "wbAppCoreCssV164";
     st.textContent = `
       #bunnyLayer{ position:absolute; inset:0; }
-      .bunnyWrap{ position:absolute; pointer-events:auto; }
-      .bunny{
-        display:block;
-        user-select:none;
-        -webkit-user-drag:none;
-        transform-origin: 50% 50%;
-      }
-      .coin{
-        width:22px !important;
-        height:22px !important;
-        position:absolute;
-        user-select:none;
-        -webkit-user-drag:none;
-      }
+      .bunnyWrap{ position:absolute; width:140px; height:140px; pointer-events:auto; }
+      .bunnyWrap.flip{ transform: scaleX(-1); transform-origin: 50% 50%; }
+      .bunny{ width:140px; height:auto; display:block; user-select:none; -webkit-user-drag:none; }
+
+      .coin{ width:22px !important; height:22px !important; position:absolute; user-select:none; -webkit-user-drag:none; }
+
       .wbChargeHart{
-        position:absolute;
-        z-index:9999;
-        pointer-events:none;
+        position:absolute; z-index:9999; pointer-events:none;
         transform:translate(-50%,-50%);
         animation:wbHartBob 1.05s ease-in-out infinite;
-        width:40px;
-        height:40px;
+        width:40px; height:40px;
         filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));
       }
       @keyframes wbHartBob{
@@ -219,7 +283,12 @@
   })();
 
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
-  function updateHud() { coinValueEl.textContent = String(coins); emit("hudUpdated", { coins }); }
+
+  function updateHud() {
+    coinValueEl.textContent = String(coins);
+    emit("hudUpdated", { coins });
+  }
+
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
   const bunnies = [];
@@ -264,8 +333,13 @@
       coinLayer.appendChild(el);
       this.render();
     }
-    render(){ this.el.style.left = `${this.x}px`; this.el.style.top = `${this.y}px`; }
-    update(dt){
+
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+
+    update(dt) {
       this.floor = groundY();
       this.vy += this.gravity * dt;
       this.x  += this.vx * dt;
@@ -273,15 +347,31 @@
 
       if (this.y >= this.floor) {
         this.y = this.floor;
-        if (Math.abs(this.vy) > 260) { this.vy = -this.vy * this.bounce; this.vx *= 0.72; }
-        else { this.vy = 0; this.vx = 0; }
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+          this.vx *= 0.72;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
       }
+
+      // ✅ コインが画面外に飛んだら救出（左右だけ）
+      const pad = 2;
+      if (this.x < pad) this.x = pad;
+      if (this.x > FIELD_W - 22 - pad) this.x = FIELD_W - 22 - pad;
+
       this.render();
     }
-    collect(){
+
+    collect() {
       if (!this.el || !this.el.isConnected) return;
+
       coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
-      saveCoins(); updateHud(); playSE(seCoin);
+      saveCoins();
+      updateHud();
+      playSE(seCoin);
+
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
@@ -290,16 +380,15 @@
 
   function spawnCoinDropAt(x, y, tier = 0) {
     const c = new CoinDrop(x, y, tier);
-    // ✅ これが無いと updateされない
     dropsOnField.push(c);
     return c;
   }
 
   function spawnClickCoins(bunny, count = 1, tierPicker = () => 0) {
-    const r  = bunny.wrap.getBoundingClientRect();
-    const fr = field.getBoundingClientRect();
-    const baseX  = (r.left - fr.left) + r.width  * 0.55;
-    const baseY  = (r.top  - fr.top)  + r.height * 0.82;
+    // ✅ offset基準で安定（transform/ズームでも破綻しにくい）
+    const baseX = bunny.x + 140 * 0.55;
+    const baseY = bunny.y + 140 * 0.82;
+
     for (let i = 0; i < count; i++) {
       spawnCoinDropAt(baseX + rand(-14, 14), baseY + rand(-6, 6), tierPicker());
     }
@@ -316,16 +405,10 @@
 
       this.wrap = document.createElement("div");
       this.wrap.className = "bunnyWrap";
-      this.wrap.style.left = "0px";
-      this.wrap.style.top  = "0px";
 
       this.el = document.createElement("img");
       this.el.className = "bunny";
       this.el.draggable = false;
-
-      // ★画像の自然サイズが出るまではCSSに任せるが、最低サイズは確保
-      this.el.style.width = "140px";
-      this.el.style.height = "auto";
 
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
@@ -335,8 +418,10 @@
       this.hartEl = null;
 
       refreshFieldSize();
-      this.x = rand(20, Math.max(21, FIELD_W - 160));
-      this.y = groundY() - 140;
+
+      // ✅ 初期位置を「必ず画面内」に作る
+      this.x = rand(8, Math.max(9, FIELD_W - 140 - 8));
+      this.y = clamp(groundY() - 140, 8, Math.max(8, FIELD_H - 140 - 8));
 
       this.dir = Math.random() < 0.5 ? -1 : 1;
       this.baseSpeed = 45 + Math.random() * 55;
@@ -360,7 +445,6 @@
       this.wrap.addEventListener("click", tap);
 
       this.el.addEventListener("load", () => {
-        // サイズが確定したら救出
         this.clampInside(true);
         this.applyPos();
         this.positionHeart();
@@ -383,19 +467,18 @@
       el.src = ASSETS.hart;
       el.draggable = false;
       el.style.display = "none";
-      field.appendChild(el);
+      field.appendChild(el); // field直下（最前面）
       this.hartEl = el;
       return el;
     }
-    showHeart(){ const el = this.ensureHeartEl(); el.style.display="block"; this.positionHeart(); }
-    hideHeart(){ if (this.hartEl) this.hartEl.style.display="none"; }
+    showHeart(){ const el = this.ensureHeartEl(); el.style.display = "block"; this.positionHeart(); }
+    hideHeart(){ if (this.hartEl) this.hartEl.style.display = "none"; }
 
     positionHeart() {
       if (!this.hartEl || this.hartEl.style.display === "none") return;
-      const r  = this.wrap.getBoundingClientRect();
-      const fr = field.getBoundingClientRect();
-      const x = (r.left - fr.left) + r.width * 0.5;
-      const y = (r.top  - fr.top)  + r.height * 0.08;
+      // ✅ x/y から計算（getBoundingClientRect依存をやめてズレ根絶）
+      const x = this.x + 140 * 0.50;
+      const y = this.y + 140 * 0.08;
       this.hartEl.style.left = `${x}px`;
       this.hartEl.style.top  = `${y}px`;
     }
@@ -432,34 +515,27 @@
         if (maxTier <= 0) return 0;
         let sum = 0;
         const w = [];
-        for (let t = 0; t <= maxTier; t++) { const wt = (t + 1) * (t + 1); w.push(wt); sum += wt; }
+        for (let t = 0; t <= maxTier; t++) {
+          const wt = (t + 1) * (t + 1);
+          w.push(wt); sum += wt;
+        }
         let x = Math.random() * sum;
-        for (let t = 0; t <= maxTier; t++) { x -= w[t]; if (x <= 0) return t; }
+        for (let t = 0; t <= maxTier; t++) {
+          x -= w[t];
+          if (x <= 0) return t;
+        }
         return maxTier;
       };
 
       return { count, pickTier };
     }
 
-    // ★natural優先 + fallback（0対策）
-    getWrapWidth() {
-      const nw = this.el?.naturalWidth || 0;
-      const w = (nw > 0) ? Math.round(nw * (this.el.getBoundingClientRect().width / Math.max(1, this.el.getBoundingClientRect().width))) : 0;
-      const rectW = this.wrap.getBoundingClientRect().width || 0;
-      return Math.max(80, Math.round(rectW || w || 140));
-    }
-    getWrapHeight() {
-      const rectH = this.wrap.getBoundingClientRect().height || 0;
-      return Math.max(80, Math.round(rectH || 140));
-    }
-
-    // ✅ xもyも“画面内”に強制（足元が地面）
     clampInside(force = false) {
       refreshFieldSize();
 
-      const w = this.getWrapWidth();
-      const h = this.getWrapHeight();
-      const PAD = 6;
+      const PAD = 8;
+      const w = 140;
+      const h = 140;
 
       const minX = PAD;
       const maxX = Math.max(minX, FIELD_W - w - PAD);
@@ -470,14 +546,9 @@
 
       if (force) {
         this.x = clamp(this.x, minX, maxX);
-        // 地面に寄せつつ、範囲内
-        const targetY = clamp(gy - h, minY, maxY);
         this.y = clamp(this.y, minY, maxY);
-        // 変な初期値なら地面へ
-        if (!Number.isFinite(this.y) || Math.abs(this.y - targetY) > 9999) this.y = targetY;
         return;
       }
-
       if (this.x < minX || this.x > maxX) this.x = clamp(this.x, minX, maxX);
       if (this.y < minY || this.y > maxY) this.y = clamp(this.y, minY, maxY);
     }
@@ -495,9 +566,7 @@
     }
 
     applyPos() {
-      // ✅ flipはwrapじゃなくimgで（座標ズレ根絶）
-      this.el.style.transform = (this.dir < 0) ? "scaleX(-1)" : "scaleX(1)";
-
+      this.wrap.classList.toggle("flip", this.dir < 0);
       this.wrap.style.left = `${this.x}px`;
       this.wrap.style.top  = `${this.y}px`;
     }
@@ -509,24 +578,22 @@
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
       this.x += this.dir * this.baseSpeed * speedMul * dt;
 
-      // 地面追従
-      const h = this.getWrapHeight();
+      // ✅ 地面へ追従（viewport変動でも浮かない）
       const gy = groundY();
-      const targetY = gy - h;
-      this.y += (targetY - this.y) * 0.25;
+      const targetY = gy - 140;
+      this.y += (targetY - this.y) * 0.28;
 
-      // x反射
-      const w = this.getWrapWidth();
-      const PAD = 6;
+      // x反射（絶対に範囲外へ行かせない）
+      const PAD = 8;
       const minX = PAD;
-      const maxX = Math.max(minX, FIELD_W - w - PAD);
+      const maxX = Math.max(minX, FIELD_W - 140 - PAD);
 
       if (this.x <= minX) { this.x = minX; this.dir = 1; }
       else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
 
       this.clampInside(false);
-
       this.applyPos();
+
       if (this.chargeReady) this.positionHeart();
     }
   }
@@ -551,7 +618,7 @@
   }
 
   /* =========================
-   * Touch collect (coin only)
+   * Touch collect（コインだけ）
    * ========================= */
   let touchCollectActive = false;
   let touchPointerId = null;
@@ -594,10 +661,11 @@
   }, { passive: true });
 
   /* =========================
-   * Buttons (emit)
+   * Buttons（emit only）
    * ========================= */
   shopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
   omukaeBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:omukae", {}); });
+  hanabiBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:hanabi", {}); });
   departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
   rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
   slotBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:slot",   {}); });
@@ -623,37 +691,69 @@
   const api = {
     on, off, emit,
     ASSETS, BUNNY_DEFS, LS, DEPART_COST,
+
     field, bunnyLayer, coinLayer,
     shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
+
     get coins() { return coins; },
-    set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
+    set coins(v) {
+      coins = Math.max(0, Math.floor(Number(v) || 0));
+      saveCoins();
+      updateHud();
+    },
+
     getCoin: () => coins,
     spendCoin: (n) => {
       n = Math.floor(Number(n) || 0);
       if (n <= 0) return true;
       if (coins < n) return false;
       coins -= n;
-      saveCoins(); updateHud();
+      saveCoins();
+      updateHud();
       return true;
     },
+
     bunnies,
     getBunnies: () => bunnies,
     spawnBunny,
     removeBunnyInstance,
+
     spawnCoinDropAt,
+
     saveCoins,
     saveBunnyMeta,
+
     unlockAudioOnce,
     playSE,
     seTabidati,
+
     updateHud,
+
+    // デバッグ
     getBunnyCharge: (bornAt) => {
       const t = Number(bornAt);
       const b = bunnies.find(x => x && x.bornAt === t);
       return b ? { charge: b.charge, ready: b.chargeReady } : null;
     },
   };
+
   window.WB = Object.assign({}, prevWB, api);
+
+  /* =========================
+   * ✅ 全員救出（外に出てたら戻す）
+   * ========================= */
+  function rescueAll(reason = "") {
+    refreshFieldSize();
+    for (const b of bunnies) {
+      try {
+        b.clampInside(true);
+        b.applyPos();
+        b.positionHeart?.();
+      } catch {}
+    }
+    if (reason) console.log("[app.js] rescueAll:", reason, "FIELD:", FIELD_W, FIELD_H);
+    emit("resize", {});
+  }
 
   /* =========================
    * Init / Loop
@@ -684,24 +784,22 @@
 
   async function init() {
     await ensureFieldReady();
+    forceFieldLayout();
     refreshFieldSize();
+
     await initBunnies();
     updateHud();
     emit("bunnyCountChanged", { count: bunnies.length });
 
+    rescueAll("init");
     requestAnimationFrame(tick);
 
-    // resize時は全員救出
-    const rescueAll = () => {
+    // 追加保険：一定間隔で「外に出た子だけ」救出（viewportバグ対策）
+    setInterval(() => {
+      forceFieldLayout();
       refreshFieldSize();
-      for (const b of bunnies) { b.clampInside(true); b.applyPos(); b.positionHeart?.(); }
-      emit("resize", {});
-    };
-    window.addEventListener("resize", () => requestAnimationFrame(rescueAll), { passive: true });
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", () => requestAnimationFrame(rescueAll), { passive: true });
-      window.visualViewport.addEventListener("scroll", () => requestAnimationFrame(rescueAll), { passive: true });
-    }
+      rescueAll("interval");
+    }, 4000);
   }
 
   init();
