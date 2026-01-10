@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7 (NEVER outside: absolute layers + stable bounds)", Date.now());
+  console.log("[app.js] LOADED v16.7.1 (NEVER outside + FIX typos)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -74,7 +74,7 @@
   const coinLayer   = document.getElementById("coinLayer");
   const coinValueEl = document.getElementById("coinValue");
 
-  const shoplshopBtn   = document.getElementById("shopBtn");
+  const shopBtn     = document.getElementById("shopBtn");
   const omukaeBtn   = document.getElementById("omukaeBtn");
   const hanabiBtn   = document.getElementById("hanabiBtn");
   const departBtn   = document.getElementById("departBtn");
@@ -88,31 +88,23 @@
   }
 
   /* =========================
-   * ✅ 座標系を強制（これが最重要）
-   * - field: 位置基準の親
-   * - bunnyLayer/coinLayer: field内で絶対配置
-   * - bunnyWrap: 0,0 を基準に translate3d で動かすため absolute 必須
+   * ✅ 座標系を強制（最重要）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV167")) return;
+    if (document.getElementById("wbAppCoreCssV1671")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV167";
+    st.id = "wbAppCoreCssV1671";
     st.textContent = `
-      /* fieldは必ず基準点になる（fixedでもOK。staticは絶対NG） */
       #field{
         position:fixed !important;
         inset:0 !important;
         overflow:hidden !important;
       }
-
-      /* レイヤーはfield内で絶対配置、座標系(0,0)を確定 */
       #bunnyLayer, #coinLayer{
         position:absolute !important;
         inset:0 !important;
         overflow:hidden !important;
       }
-
-      /* wrapは "translate3d(x,y)" を使うので absolute + left/top 0 が必須 */
       .bunnyWrap{
         position:absolute !important;
         left:0 !important;
@@ -122,8 +114,6 @@
         will-change: transform;
         touch-action: manipulation;
       }
-
-      /* 念のため：画像がはみ出す事故を潰す */
       .bunnyWrap .bunny{
         width:100% !important;
         height:100% !important;
@@ -132,7 +122,6 @@
         -webkit-user-drag:none;
         pointer-events:auto;
       }
-
       .wbChargeHart{
         position:absolute;
         z-index:9999;
@@ -174,11 +163,9 @@
 
   let FIELD_W = 1, FIELD_H = 1;
 
-  // ✅ getBoundingClientRect が変な値になる環境があるので「clientWidth/Height」を主にする
   function readFieldSize() {
     const cw = Math.round(field.clientWidth || 0);
     const ch = Math.round(field.clientHeight || 0);
-
     if (cw >= 50 && ch >= 50) return { w: cw, h: ch };
 
     const r = field.getBoundingClientRect();
@@ -193,15 +180,13 @@
     FIELD_H = v.h;
   }
 
-  // ✅ ground を絶対にマイナスにしない
   function groundY() {
     const minGround = Math.max(120, WRAP_H + PAD + 10);
     return Math.max(minGround, FIELD_H - 60);
   }
 
-  // ✅ field が実サイズになるまで待つ（起動直後の0対策）
   async function ensureFieldReady() {
-    for (let i = 0; i < 120; i++) { // 最大約6秒
+    for (let i = 0; i < 120; i++) {
       refreshFieldSize();
       if (FIELD_W >= 200 && FIELD_H >= 200) return true;
       await new Promise(r => setTimeout(r, 50));
@@ -220,8 +205,7 @@
     return { minX, maxX, minY, maxY, gy };
   }
 
-  // ✅ 画面状態変化（URLバー/回転/ズーム）で必ず救出
-  const bunnies = []; // 先に宣言（scheduleRescueAllで参照）
+  const bunnies = [];
   function scheduleRescueAll() {
     requestAnimationFrame(() => {
       const { minX, maxX, minY, maxY } = worldBounds();
@@ -249,7 +233,6 @@
   const seCoin     = new Audio(ASSETS.coinSE);
   const seTabidati = new Audio(ASSETS.tabidatiSE);
 
-  // ✅ BGM.js が先でも後でも OK：registerSE が無ければキューへ
   window.__milkpopSeRegisterQueue = window.__milkpopSeRegisterQueue || [];
   function tryRegisterSE(a) {
     try {
@@ -405,7 +388,6 @@
       this.chargeReady = false;
       this.hartEl = null;
 
-      // ✅ 初期位置：必ず bounds 内で生成
       const { minX, maxX, minY, maxY, gy } = worldBounds();
       this.x = rand(minX, maxX);
       this.y = clamp(gy - WRAP_H, minY, maxY);
@@ -430,7 +412,6 @@
       this.wrap.addEventListener("pointerdown", tap);
       this.wrap.addEventListener("click", tap);
 
-      // 画像ロード後も「必ず救出」
       this.el.addEventListener("load", () => {
         this.hardClamp(true);
         this.applyPos();
@@ -520,11 +501,9 @@
       if (isInit) saveBunnyMeta();
     }
 
-    // ✅ 絶対に外に出さない（毎フレーム適用）
     hardClamp(force = false) {
       const { minX, maxX, minY, maxY, gy } = worldBounds();
 
-      // y は常に地面へ吸着（ただし範囲外は救出）
       const targetY = clamp(gy - WRAP_H, minY, maxY);
       if (force) this.y = targetY;
       else this.y += (targetY - this.y) * 0.35;
@@ -535,7 +514,6 @@
 
     applyPos() {
       this.wrap.classList.toggle("flip", this.dir < 0);
-      // ✅ 小数が溜まると境界で“にじみ”が出るので丸めて固定
       const x = Math.round(this.x);
       const y = Math.round(this.y);
       this.wrap.style.transform = `translate3d(${x}px, ${y}px, 0)`;
@@ -550,11 +528,9 @@
 
       const { minX, maxX } = worldBounds();
 
-      // 反射
       if (this.x <= minX) { this.x = minX; this.dir = 1; }
       else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
 
-      // ✅ 最終救出
       this.hardClamp(false);
 
       this.applyPos();
@@ -627,7 +603,7 @@
   /* =========================
    * Buttons (emit)
    * ========================= */
-  RlshopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
+  shopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
   omukaeBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:omukae", {}); });
   departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
   rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
@@ -655,7 +631,7 @@
     on, off, emit,
     ASSETS, BUNNY_DEFS, LS, DEPART_COST,
     field, bunnyLayer, coinLayer,
-    shopBtn: RlshopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
+    shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
     get coins() { return coins; },
     set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
@@ -715,7 +691,6 @@
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
-    // ✅ 毎フレーム救出（絶対外に出さない）
     refreshFieldSize();
 
     for (const b of bunnies) b.update(dt);
