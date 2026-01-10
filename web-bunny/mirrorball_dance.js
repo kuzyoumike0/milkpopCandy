@@ -1,31 +1,30 @@
-// mirrorball_dance.js (V2.1 - spotlight hit only / DOM-safe)
-// ✅ スポットライト（bgcolor.js V12 の beam DOM）に当たってる時だけうさぎが踊る
+// mirrorball_dance.js (V2.2 - spotlight TRIANGLE hit only / DOM-safe)
+// ✅ bgcolor.js V12 の beam（clip-path三角 + rotate）に “当たってる時だけ” 踊る
+// ✅ 判定は beam の style(left/top/width/height/transform rotate) から三角形を復元して計算
 // ✅ bed_rest_bonus が img をラップしていても壊れない（DOMを組み替えない）
-// ✅ 範囲内に1匹でも居る間だけ SE をループ（WB.se.loop があればそれ優先）
-// ✅ ビーム検出：#bgMirrorFXLeftV12 / #bgMirrorFXRightV12（bgcolor.js V12）
-// ✅ うさぎ検出：.bunnyWrap or #bunnyLayer 下の親要素をwrap扱い
+// ✅ 1匹でも踊ってる間だけ SE ループ（WB.se.loop 優先）
 //
 // 読み込み順：bgcolor.js / app.js / bed_rest_bonus.js 等の後（最後の方）推奨
 
 (() => {
   "use strict";
-  if (window.__MIRRORBALL_DANCE_V21__) return;
-  window.__MIRRORBALL_DANCE_V21__ = true;
+  if (window.__MIRRORBALL_DANCE_V22__) return;
+  window.__MIRRORBALL_DANCE_V22__ = true;
 
   const CFG = {
     tickMs: 140,
 
-    // ✅ bgcolor.js(V12) のスポットライトID
+    // bgcolor.js(V12) の beam DOM id
     fxWrapId: "bgMirrorFXWrapV12",
     leftBeamId: "bgMirrorFXLeftV12",
     rightBeamId: "bgMirrorFXRightV12",
 
-    // ✅ うさぎ中心判定を少し甘く（境界チラつき防止）
-    rectPadPx: 16,
+    // 当たり判定を少し甘く（辺の外側にこれだけ許容）
+    edgePadPx: 10,
 
-    // ✅ SE（任意）
+    // SE
     seSrc: "./assets/mirrorball.mp3",
-    seLoopId: "mirrorball_dance_loop_v21",
+    seLoopId: "mirrorball_dance_loop_v22",
     seStartDelayMs: 120,
     stopFadeMs: 180,
   };
@@ -50,55 +49,34 @@
   }
 
   function ensureStyle() {
-    if (document.getElementById("wbMirrorballDanceStyleV21")) return;
+    if (document.getElementById("wbMirrorballDanceStyleV22")) return;
     const s = document.createElement("style");
-    s.id = "wbMirrorballDanceStyleV21";
+    s.id = "wbMirrorballDanceStyleV22";
     s.textContent = `
-/* 踊ってる状態（wrapに付く） */
-.wbDancing{
-  filter: saturate(1.04) brightness(1.06);
-}
-
-/* ✅ DOMをいじらない：imgだけ揺らす（wrapのtranslate3dと競合しない） */
+.wbDancing{ filter:saturate(1.04) brightness(1.06); }
 .wbDancing img{
   transform-origin: 50% 85%;
-  animation: wbDanceWiggleV21 .42s ease-in-out infinite;
+  animation: wbDanceWiggleV22 .42s ease-in-out infinite;
   will-change: transform;
 }
-
-/* “キラキラ” */
 .wbDanceSparkle{
-  position:absolute;
-  left:50%;
-  top:-18px;
-  transform:translateX(-50%);
-  font-weight:1000;
-  font-size:14px;
-  opacity:.92;
-  pointer-events:none;
-  text-shadow: 0 10px 22px rgba(0,0,0,.18);
-  animation: wbSparkleFloatV21 .7s ease-in-out infinite;
+  position:absolute; left:50%; top:-18px; transform:translateX(-50%);
+  font-weight:1000; font-size:14px; opacity:.92; pointer-events:none;
+  text-shadow:0 10px 22px rgba(0,0,0,.18);
+  animation: wbSparkleFloatV22 .7s ease-in-out infinite;
 }
-
-@keyframes wbDanceWiggleV21{
-  0%   { transform: rotate(-4deg) translateY(0px) scale(1.00); }
-  50%  { transform: rotate(4deg)  translateY(-2px) scale(1.02); }
-  100% { transform: rotate(-4deg) translateY(0px) scale(1.00); }
+@keyframes wbDanceWiggleV22{
+  0%{ transform:rotate(-4deg) translateY(0) scale(1.00); }
+  50%{ transform:rotate(4deg)  translateY(-2px) scale(1.02); }
+  100%{ transform:rotate(-4deg) translateY(0) scale(1.00); }
 }
-@keyframes wbSparkleFloatV21{
+@keyframes wbSparkleFloatV22{
   0%{ transform:translateX(-50%) translateY(0); opacity:.75; }
   50%{ transform:translateX(-50%) translateY(-6px); opacity:1; }
   100%{ transform:translateX(-50%) translateY(0); opacity:.75; }
 }
 `;
     document.head.appendChild(s);
-  }
-
-  function centerOfEl(el) {
-    if (!el || !el.isConnected) return null;
-    const r = el.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   }
 
   function findBunnyWraps() {
@@ -132,37 +110,95 @@
     }
   }
 
-  // ===== スポットライト（beam）を取る =====
-  function getBeams() {
+  function centerOfEl(el) {
+    if (!el || !el.isConnected) return null;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  // ====== beam style から “三角形” を復元 ======
+  function parsePx(v) {
+    const n = parseFloat(String(v || "").replace("px", ""));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function parseRotateDeg(transformStr) {
+    const s = String(transformStr || "");
+    // 例: "translateX(-50%) rotate(-12.34deg)"
+    const m = s.match(/rotate\(\s*([-\d.]+)deg\s*\)/i);
+    if (!m) return 0;
+    const d = parseFloat(m[1]);
+    return Number.isFinite(d) ? d : 0;
+  }
+
+  function rotateAround(pt, origin, deg) {
+    const rad = (deg * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const x = pt.x - origin.x;
+    const y = pt.y - origin.y;
+    return {
+      x: origin.x + (x * cos - y * sin),
+      y: origin.y + (x * sin + y * cos),
+    };
+  }
+
+  // 点が三角形内か（辺pad込み）
+  function pointInTri(p, a, b, c, pad) {
+    // signed area
+    const s = (p1, p2, p3) => (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
+    const d1 = s(p, a, b);
+    const d2 = s(p, b, c);
+    const d3 = s(p, c, a);
+
+    // pad を “面積判定のゆるみ” として使う（単位合わせ簡易）
+    const eps = Math.max(0, Number(pad) || 0) * 80;
+
+    const hasNeg = (d1 < -eps) || (d2 < -eps) || (d3 < -eps);
+    const hasPos = (d1 > eps) || (d2 > eps) || (d3 > eps);
+    return !(hasNeg && hasPos);
+  }
+
+  function beamTriangles() {
     const wrap = document.getElementById(CFG.fxWrapId);
     if (!wrap || !wrap.isConnected) return null;
 
     const cs = getComputedStyle(wrap);
     if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity || "1") <= 0.01) return null;
 
-    const L = document.getElementById(CFG.leftBeamId);
-    const R = document.getElementById(CFG.rightBeamId);
-    const list = [L, R].filter(Boolean).filter(el => el.isConnected);
-    if (!list.length) return null;
+    const els = [
+      document.getElementById(CFG.leftBeamId),
+      document.getElementById(CFG.rightBeamId),
+    ].filter(Boolean).filter(el => el.isConnected);
 
-    const rects = [];
-    for (const el of list) {
-      const r = el.getBoundingClientRect();
-      if (r.width > 5 && r.height > 5) rects.push(r);
+    if (!els.length) return null;
+
+    const tris = [];
+    for (const el of els) {
+      // bgcolor.js が style.left/top/width/height を毎フレ設定してる前提
+      const left = parsePx(el.style.left);
+      const top  = parsePx(el.style.top);
+      const w    = parsePx(el.style.width);
+      const h    = parsePx(el.style.height);
+      if (left === null || top === null || !w || !h) continue;
+
+      const deg = parseRotateDeg(el.style.transform);
+
+      // translateX(-50%) rotate() の結果、三角の頂点（apex）は (left, top) に来る
+      const A = { x: left, y: top };
+      const B0 = { x: left - w * 0.5, y: top + h };
+      const C0 = { x: left + w * 0.5, y: top + h };
+
+      const B = rotateAround(B0, A, deg);
+      const C = rotateAround(C0, A, deg);
+
+      tris.push({ A, B, C });
     }
-    return rects.length ? rects : null;
+
+    return tris.length ? tris : null;
   }
 
-  function inRectPadded(pt, r, pad) {
-    return (
-      pt.x >= (r.left - pad) &&
-      pt.x <= (r.right + pad) &&
-      pt.y >= (r.top - pad) &&
-      pt.y <= (r.bottom + pad)
-    );
-  }
-
-  // ===== SE（WB.se優先、fallback Audio）=====
+  // ===== SE =====
   function getSeVolume(WB) {
     try {
       if (WB && typeof WB.getSEVolume === "function") {
@@ -239,11 +275,7 @@
     return true;
   }
 
-  function syncSeVolume(WB) {
-    audioFallback.syncVolume(WB);
-  }
-
-  // ===== メイン =====
+  // ===== main =====
   waitForWB().then((WB) => {
     ensureStyle();
 
@@ -253,7 +285,6 @@
 
     function applySeState() {
       if (seTimer) { clearTimeout(seTimer); seTimer = 0; }
-
       if (wantSe && !seOn) {
         seTimer = setTimeout(() => {
           seTimer = 0;
@@ -264,34 +295,32 @@
         seOn = false;
         stopLoopSe(WB);
       } else {
-        syncSeVolume(WB);
+        audioFallback.syncVolume(WB);
       }
     }
 
     function tick() {
       const wraps = findBunnyWraps();
-      const beams = getBeams();
+      const tris = beamTriangles();
 
-      // スポットライトが無い/非表示なら解除
-      if (!beams) {
+      if (!tris) {
         wraps.forEach(w => setDancing(w, false));
         wantSe = false;
         applySeState();
         return;
       }
 
-      const pad = Number(CFG.rectPadPx) || 0;
-
+      const pad = Number(CFG.edgePadPx) || 0;
       let dancingCount = 0;
+
       for (const w of wraps) {
-        // ✅ wrap中心より “img中心” の方が当たりが安定（bedがinnerで包んでてもOK）
         const img = w.querySelector?.("img") || null;
         const c = centerOfEl(img) || centerOfEl(w);
         if (!c) { setDancing(w, false); continue; }
 
         let hit = false;
-        for (const r of beams) {
-          if (inRectPadded(c, r, pad)) { hit = true; break; }
+        for (const t of tris) {
+          if (pointInTri(c, t.A, t.B, t.C, pad)) { hit = true; break; }
         }
 
         setDancing(w, hit);
@@ -324,11 +353,10 @@
       };
     }
 
-    console.log("[mirrorball_dance] ready V2.1", {
+    console.log("[mirrorball_dance] ready V2.2 (triangle hit)", {
       fxWrapId: CFG.fxWrapId,
       leftBeamId: CFG.leftBeamId,
-      rightBeamId: CFG.rightBeamId,
-      se: CFG.seSrc
+      rightBeamId: CFG.rightBeamId
     });
   });
 })();
