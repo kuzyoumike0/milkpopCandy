@@ -1,8 +1,8 @@
 // unchi.js（非module）— 個体別ゲージ / 同時排出防止 / 分散排出
-// ✅ babybunny だけ排出対象から除外
+// ✅ 「babybunny.png の個体」から unchi / ougonunchi を出さない（画像パス判定で確実）
 (() => {
   "use strict";
-  console.log("[unchi.js] LOADED v1.4.2 (skip babybunny)", Date.now());
+  console.log("[unchi.js] LOADED v1.4.3 (skip babybunny.png)", Date.now());
 
   /* =========================
    * Config
@@ -202,29 +202,35 @@
   }
 
   /* =========================
-   * babybunny判定
+   * ✅ babybunny.png 判定（ここが要件）
    * ========================= */
-  function isBabyBunny(b){
-    try{
-      const t = String(
-        b?.kind ?? b?.type ?? b?.key ?? b?.name ?? b?.species ?? ""
-      ).toLowerCase();
-      if (t.includes("babybunny") || t.includes("baby_bunny") || t==="baby") return true;
+  function isBabyBunnyByPng(b){
+    // うさぎの画像がどこに入ってても拾えるように多方面チェック
+    const candidates = [
+      b?.img?.src,
+      b?.imgSrc,
+      b?.src,
+      b?.asset,
+      b?.image,
+      b?.texture,
+      b?.wrap?.querySelector?.("img")?.src,
+      b?.wrap?.style?.backgroundImage,
+    ];
 
-      const cls = String(b?.wrap?.className ?? "").toLowerCase();
-      if (cls.includes("babybunny")) return true;
+    for(const v of candidates){
+      const s = String(v ?? "").toLowerCase();
+      if(!s) continue;
 
-      const src = String(b?.img?.src ?? b?.src ?? "").toLowerCase();
-      if (src.includes("babybunny")) return true;
-
-      return false;
-    }catch{
-      return false;
+      // background-image: url("...babybunny.png") 対策
+      if (s.includes("babybunny.png")) return true;
+      if (s.includes("/babybunny.png")) return true;
+      if (s.includes("assets/babybunny.png")) return true;
     }
+    return false;
   }
 
   /* =========================
-   * 個体別ゲージ（分散）
+   * 個体別ゲージ（分散の核心）
    * ========================= */
   const gauge=new Map(); // bornAt -> 0..100
 
@@ -237,13 +243,14 @@
     for(const b of list){
       if(spawnedThisFrame)break;
 
-      // ✅ babybunnyは排出対象外（ゲージも進めない）
-      if(isBabyBunny(b)) continue;
+      // ✅ babybunny.png の個体は排出しない（ゲージも進めない）
+      if(isBabyBunnyByPng(b)) continue;
 
       const id=b?.bornAt;
       if(!id)continue;
 
       if(!gauge.has(id)){
+        // ⭐ 初期値ランダム → 完全に時間がズレる
         gauge.set(id,Math.random()*UNCHI_CHARGE_MAX);
       }
 
@@ -253,7 +260,7 @@
         v-=UNCHI_CHARGE_MAX;
         const type=Math.random()<OUGON_CHANCE?"ougon":"normal";
         spawnNearBunny(field,layer,b,type);
-        spawnedThisFrame=true;
+        spawnedThisFrame=true; // ✅ 同時排出防止
       }
 
       gauge.set(id,v);
@@ -281,6 +288,6 @@
     }
     requestAnimationFrame(loop);
 
-    console.log("[unchi.js] ready (babybunny excluded)");
+    console.log("[unchi.js] ready (babybunny.png excluded)");
   });
 })();
