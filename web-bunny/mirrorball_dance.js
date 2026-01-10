@@ -1,29 +1,28 @@
-// mirrorball_dance.js (V2.3 - spotlight hit only / V12-V13 auto-detect)
-// ✅ bgcolor.js の beam に当たってる時だけ踊る
-// ✅ V12/V13 のID差分を自動検出（壊れにくい）
-// ✅ 判定は beam の style(left/top/width/height/transform rotate) から三角形を復元して計算
-// ✅ SE ループ（WB.se.loop優先）
+// mirrorball_dance.js (V3 - beam triangle hit test / robust)
+// ✅ スポットライト（bgcolor.jsのbeam）に“当たってる時だけ”踊る（本物の三角判定）
+// ✅ V12/V13/V13.1 など IDが違っても自動検出（bgMirrorFXWrapV* / bgMirrorFXLeftV* / RightV*）
+// ✅ 範囲内に1匹でも居る間だけ SE をループ（WB.se.loop があればそれ優先）
+// ✅ うさぎ検出：.bunnyWrap or #bunnyLayer 下の親要素をwrap扱い
 //
-// 読み込み順：bgcolor.js / app.js / BGM.js の後（最後の方）推奨
+// 読み込み順：bgcolor.js / app.js / BGM.js(あれば) の後（最後の方）推奨
 
 (() => {
   "use strict";
-  if (window.__MIRRORBALL_DANCE_V23__) return;
-  window.__MIRRORBALL_DANCE_V23__ = true;
+  if (window.__MIRRORBALL_DANCE_V3__) return;
+  window.__MIRRORBALL_DANCE_V3__ = true;
 
   const CFG = {
-    tickMs: 140,
+    tickMs: 120,
 
-    // ✅ 候補（V12 / V13）
-    idCandidates: [
-      { wrap: "bgMirrorFXWrapV13", L: "bgMirrorFXLeftV13", R: "bgMirrorFXRightV13" },
-      { wrap: "bgMirrorFXWrapV12", L: "bgMirrorFXLeftV12", R: "bgMirrorFXRightV12" },
-    ],
+    // ✅ うさぎ中心の当たり判定を少し甘く（チラつき防止）
+    padPx: 14,
 
-    edgePadPx: 10,
+    // ✅ 近すぎると誤判定するので最低距離（光源ほぼ直上でのノイズ防止）
+    minT: 8,
 
+    // ✅ SE（任意）
     seSrc: "./assets/mirrorball.mp3",
-    seLoopId: "mirrorball_dance_loop_v23",
+    seLoopId: "mirrorball_dance_loop_v3",
     seStartDelayMs: 120,
     stopFadeMs: 180,
   };
@@ -48,34 +47,63 @@
   }
 
   function ensureStyle() {
-    if (document.getElementById("wbMirrorballDanceStyleV23")) return;
+    if (document.getElementById("wbMirrorballDanceStyleV3")) return;
     const s = document.createElement("style");
-    s.id = "wbMirrorballDanceStyleV23";
+    s.id = "wbMirrorballDanceStyleV3";
     s.textContent = `
-.wbDancing{ filter:saturate(1.04) brightness(1.06); }
-.wbDancing img{
+/* 踊ってる状態（wrapに付く） */
+.wbDancing{
+  filter: saturate(1.05) brightness(1.07);
+}
+
+/* transform競合回避：innerだけ踊らせる */
+.wbDanceInner{ width:100%; height:100%; }
+
+.wbDancing .wbDanceInner{
+  animation: wbDanceHopV3 .42s ease-in-out infinite;
+}
+.wbDancing .wbDanceInner img{
   transform-origin: 50% 85%;
-  animation: wbDanceWiggleV23 .42s ease-in-out infinite;
-  will-change: transform;
+  animation: wbDanceWiggleV3 .42s ease-in-out infinite;
 }
+
+@keyframes wbDanceWiggleV3{
+  0%   { transform: rotate(-4deg) translateY(0px) scale(1.00); }
+  50%  { transform: rotate(4deg)  translateY(-1px) scale(1.02); }
+  100% { transform: rotate(-4deg) translateY(0px) scale(1.00); }
+}
+@keyframes wbDanceHopV3{
+  0%   { transform: translateY(0px); }
+  50%  { transform: translateY(-2px); }
+  100% { transform: translateY(0px); }
+}
+
 .wbDanceSparkle{
-  position:absolute; left:50%; top:-18px; transform:translateX(-50%);
-  font-weight:1000; font-size:14px; opacity:.92; pointer-events:none;
-  text-shadow:0 10px 22px rgba(0,0,0,.18);
-  animation: wbSparkleFloatV23 .7s ease-in-out infinite;
+  position:absolute;
+  left:50%;
+  top:-18px;
+  transform:translateX(-50%);
+  font-weight:1000;
+  font-size:14px;
+  opacity:.92;
+  pointer-events:none;
+  text-shadow: 0 10px 22px rgba(0,0,0,.18);
+  animation: wbSparkleFloatV3 .7s ease-in-out infinite;
 }
-@keyframes wbDanceWiggleV23{
-  0%{ transform:rotate(-4deg) translateY(0) scale(1.00); }
-  50%{ transform:rotate(4deg)  translateY(-2px) scale(1.02); }
-  100%{ transform:rotate(-4deg) translateY(0) scale(1.00); }
-}
-@keyframes wbSparkleFloatV23{
+@keyframes wbSparkleFloatV3{
   0%{ transform:translateX(-50%) translateY(0); opacity:.75; }
   50%{ transform:translateX(-50%) translateY(-6px); opacity:1; }
   100%{ transform:translateX(-50%) translateY(0); opacity:.75; }
 }
 `;
     document.head.appendChild(s);
+  }
+
+  function centerOfEl(el) {
+    if (!el || !el.isConnected) return null;
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, rect: r };
   }
 
   function findBunnyWraps() {
@@ -87,6 +115,32 @@
     const imgs = Array.from(bunnyLayer.querySelectorAll("img"));
     const parents = imgs.map(img => img.parentElement).filter(Boolean);
     return Array.from(new Set(parents));
+  }
+
+  // ✅ 既存 inner を再利用：bed_rest_bonus の wbRestInner があるならそれを使う（二重ラップ防止）
+  function ensureMotionInner(wrap) {
+    if (!wrap) return null;
+
+    // 既にあるならそれ
+    let inner = null;
+    try { inner = wrap.querySelector(":scope > .wbRestInner"); } catch {}
+    if (!inner) { try { inner = wrap.querySelector(":scope > .wbDanceInner"); } catch {} }
+
+    if (!inner) inner = wrap.querySelector(".wbRestInner") || wrap.querySelector(".wbDanceInner");
+    if (inner) {
+      // dance用classも付けて統一
+      if (!inner.classList.contains("wbDanceInner")) inner.classList.add("wbDanceInner");
+      return inner;
+    }
+
+    const img = wrap.querySelector("img");
+    if (!img) return null;
+
+    inner = document.createElement("div");
+    inner.className = "wbDanceInner";
+    wrap.insertBefore(inner, img);
+    inner.appendChild(img);
+    return inner;
   }
 
   function ensureSparkle(wrap) {
@@ -101,6 +155,7 @@
     if (!wrap) return;
     if (on) {
       wrap.classList.add("wbDancing");
+      ensureMotionInner(wrap);
       ensureSparkle(wrap);
     } else {
       wrap.classList.remove("wbDancing");
@@ -109,98 +164,127 @@
     }
   }
 
-  function centerOfEl(el) {
-    if (!el || !el.isConnected) return null;
-    const r = el.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  // ===== beam検出（V12/V13/V13.1など自動対応）=====
+  function pickFXWrap() {
+    // 最優先：id が bgMirrorFXWrapV*
+    const wraps = Array.from(document.querySelectorAll('[id^="bgMirrorFXWrapV"]'));
+    // それが無いなら：beamっぽい子を持つもの
+    if (!wraps.length) {
+      const maybe = Array.from(document.querySelectorAll("div")).filter(el => {
+        const id = (el.id || "");
+        if (/bgMirrorFXWrap/i.test(id)) return true;
+        const hasBeamId = el.querySelector?.('[id^="bgMirrorFXLeftV"],[id^="bgMirrorFXRightV"]');
+        return !!hasBeamId;
+      });
+      wraps.push(...maybe);
+    }
+
+    // visible のものを優先
+    for (const w of wraps) {
+      if (!w || !w.isConnected) continue;
+      let cs;
+      try { cs = getComputedStyle(w); } catch { cs = null; }
+      if (!cs) continue;
+      if (cs.display === "none" || cs.visibility === "hidden") continue;
+      if (Number(cs.opacity || "1") <= 0.01) continue;
+      return w;
+    }
+    return wraps.find(w => w && w.isConnected) || null;
   }
 
-  // ===== beam を “存在するID” から探す =====
-  function detectBeamIds() {
-    for (const c of CFG.idCandidates) {
-      const wrap = document.getElementById(c.wrap);
-      const L = document.getElementById(c.L);
-      const R = document.getElementById(c.R);
-      if (wrap && wrap.isConnected && (L || R)) return c;
+  function getBeamsFromWrap(wrap) {
+    if (!wrap || !wrap.isConnected) return [];
+
+    // V12/V13の典型 id
+    const list = [];
+    wrap.querySelectorAll('[id^="bgMirrorFXLeftV"],[id^="bgMirrorFXRightV"]').forEach(el => list.push(el));
+
+    // それが無いなら class beam を拾う（bgcolor.jsの .beam）
+    if (!list.length) {
+      wrap.querySelectorAll(".beam").forEach(el => list.push(el));
     }
-    return null;
+
+    return list.filter(el => el && el.isConnected);
   }
 
   function parsePx(v) {
-    const n = parseFloat(String(v || "").replace("px", ""));
-    return Number.isFinite(n) ? n : null;
+    const n = Number(String(v || "").replace("px", ""));
+    return Number.isFinite(n) ? n : 0;
   }
 
   function parseRotateDeg(transformStr) {
+    // "translateX(-50%) rotate(12.34deg)" から deg を抜く（bgcolor.jsはこれを inline で入れてる）
     const s = String(transformStr || "");
-    const m = s.match(/rotate\(\s*([-\d.]+)deg\s*\)/i);
-    if (!m) return 0;
-    const d = parseFloat(m[1]);
-    return Number.isFinite(d) ? d : 0;
+    const m = s.match(/rotate\(\s*(-?\d+(?:\.\d+)?)deg\s*\)/i);
+    if (m) return Number(m[1]) || 0;
+    return 0;
   }
 
-  function rotateAround(pt, origin, deg) {
+  // ✅ 三角ビーム判定（本命）
+  // beam は「先端が光源、下に広がる三角形」
+  // - anchor(先端) は beam.style.left/top（bgcolorが設定）
+  // - rotate(deg) は beam.style.transform から読む（bgcolorが設定）
+  // - width/height も style から読む
+  function buildBeamInfo(beamEl) {
+    if (!beamEl || !beamEl.isConnected) return null;
+
+    const field = document.getElementById("field");
+    if (!field) return null;
+    const fr = field.getBoundingClientRect();
+    if (!fr.width || !fr.height) return null;
+
+    // 非表示なら無効
+    let cs;
+    try { cs = getComputedStyle(beamEl); } catch { cs = null; }
+    if (!cs) return null;
+    if (cs.display === "none" || cs.visibility === "hidden") return null;
+    if (Number(cs.opacity || "1") <= 0.001) return null;
+
+    const left = parsePx(beamEl.style.left || cs.left);
+    const top  = parsePx(beamEl.style.top  || cs.top);
+    const w    = parsePx(beamEl.style.width  || cs.width);
+    const h    = parsePx(beamEl.style.height || cs.height);
+
+    if (!(w > 10 && h > 10)) return null;
+
+    const deg = parseRotateDeg(beamEl.style.transform || cs.transform);
+
+    // anchor（先端）をviewport座標へ：field左上 + beam.left/top
+    const ax = fr.left + left;
+    const ay = fr.top  + top;
+
+    // beamは rotate(0) のとき下向き（+y方向）
     const rad = (deg * Math.PI) / 180;
-    const cos = Math.cos(rad), sin = Math.sin(rad);
-    const x = pt.x - origin.x;
-    const y = pt.y - origin.y;
-    return {
-      x: origin.x + (x * cos - y * sin),
-      y: origin.y + (x * sin + y * cos),
-    };
+    const dir = { x: Math.sin(rad), y: Math.cos(rad) }; // ✅ screen座標(y下)
+
+    const halfWidth = w / 2;
+    const halfAngle = Math.atan2(halfWidth, h); // 先端から見た左右境界角（rad）
+
+    return { ax, ay, w, h, dir, halfAngle };
   }
 
-  function pointInTri(p, a, b, c, pad) {
-    const s = (p1, p2, p3) => (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
-    const d1 = s(p, a, b);
-    const d2 = s(p, b, c);
-    const d3 = s(p, c, a);
+  function hitBeamTriangle(pt, beam, padPx) {
+    // pt: viewport座標
+    const vx = pt.x - beam.ax;
+    const vy = pt.y - beam.ay;
 
-    const eps = Math.max(0, Number(pad) || 0) * 80;
-    const hasNeg = (d1 < -eps) || (d2 < -eps) || (d3 < -eps);
-    const hasPos = (d1 > eps) || (d2 > eps) || (d3 > eps);
-    return !(hasNeg && hasPos);
+    // 先端方向への射影（t）
+    const t = vx * beam.dir.x + vy * beam.dir.y;
+    if (t < (CFG.minT || 0)) return false;
+    if (t > beam.h + padPx) return false;
+
+    // 垂直距離（perp）
+    const px = vx - beam.dir.x * t;
+    const py = vy - beam.dir.y * t;
+    const perp = Math.sqrt(px * px + py * py);
+
+    // 三角形は t に比例して太くなる：maxPerp = (t/h) * (w/2)
+    const maxPerp = (t / beam.h) * (beam.w / 2);
+
+    return perp <= (maxPerp + padPx);
   }
 
-  function beamTriangles() {
-    const ids = detectBeamIds();
-    if (!ids) return null;
-
-    const wrap = document.getElementById(ids.wrap);
-    if (!wrap || !wrap.isConnected) return null;
-
-    const cs = getComputedStyle(wrap);
-    if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity || "1") <= 0.01) return null;
-
-    const els = [document.getElementById(ids.L), document.getElementById(ids.R)]
-      .filter(Boolean).filter(el => el.isConnected);
-
-    if (!els.length) return null;
-
-    const tris = [];
-    for (const el of els) {
-      const left = parsePx(el.style.left);
-      const top  = parsePx(el.style.top);
-      const w    = parsePx(el.style.width);
-      const h    = parsePx(el.style.height);
-      if (left === null || top === null || !w || !h) continue;
-
-      const deg = parseRotateDeg(el.style.transform);
-
-      // apex
-      const A = { x: left, y: top };
-      const B0 = { x: left - w * 0.5, y: top + h };
-      const C0 = { x: left + w * 0.5, y: top + h };
-      const B = rotateAround(B0, A, deg);
-      const C = rotateAround(C0, A, deg);
-
-      tris.push({ A, B, C });
-    }
-    return tris.length ? tris : null;
-  }
-
-  // ===== SE =====
+  // ===== SE（WB.se優先、fallback Audio）=====
   function getSeVolume(WB) {
     try {
       if (WB && typeof WB.getSEVolume === "function") {
@@ -277,6 +361,11 @@
     return true;
   }
 
+  function syncSeVolume(WB) {
+    audioFallback.syncVolume(WB);
+  }
+
+  // ===== メイン =====
   waitForWB().then((WB) => {
     ensureStyle();
 
@@ -286,6 +375,7 @@
 
     function applySeState() {
       if (seTimer) { clearTimeout(seTimer); seTimer = 0; }
+
       if (wantSe && !seOn) {
         seTimer = setTimeout(() => {
           seTimer = 0;
@@ -296,32 +386,51 @@
         seOn = false;
         stopLoopSe(WB);
       } else {
-        audioFallback.syncVolume(WB);
+        syncSeVolume(WB);
       }
     }
 
     function tick() {
       const wraps = findBunnyWraps();
-      const tris = beamTriangles();
+      const fxWrap = pickFXWrap();
+      const beamEls = getBeamsFromWrap(fxWrap);
 
-      if (!tris) {
+      if (!fxWrap || !beamEls.length) {
         wraps.forEach(w => setDancing(w, false));
         wantSe = false;
         applySeState();
         return;
       }
 
-      const pad = Number(CFG.edgePadPx) || 0;
-      let dancingCount = 0;
+      // wrap自体が非表示なら無効
+      try {
+        const cs = getComputedStyle(fxWrap);
+        if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity || "1") <= 0.01) {
+          wraps.forEach(w => setDancing(w, false));
+          wantSe = false;
+          applySeState();
+          return;
+        }
+      } catch {}
 
+      const beams = beamEls.map(buildBeamInfo).filter(Boolean);
+      if (!beams.length) {
+        wraps.forEach(w => setDancing(w, false));
+        wantSe = false;
+        applySeState();
+        return;
+      }
+
+      const pad = Number(CFG.padPx) || 0;
+
+      let dancingCount = 0;
       for (const w of wraps) {
-        const img = w.querySelector?.("img") || null;
-        const c = centerOfEl(img) || centerOfEl(w);
+        const c = centerOfEl(w);
         if (!c) { setDancing(w, false); continue; }
 
         let hit = false;
-        for (const t of tris) {
-          if (pointInTri(c, t.A, t.B, t.C, pad)) { hit = true; break; }
+        for (const b of beams) {
+          if (hitBeamTriangle(c, b, pad)) { hit = true; break; }
         }
 
         setDancing(w, hit);
@@ -335,6 +444,7 @@
     tick();
     const timer = setInterval(tick, CFG.tickMs);
 
+    // 変化フック（あれば拾う）
     try { WB?.on?.("itemplace:state_changed", tick); } catch {}
     try { WB?.on?.("itemPlaced", tick); } catch {}
     try { WB?.on?.("itemRemoved", tick); } catch {}
@@ -354,6 +464,9 @@
       };
     }
 
-    console.log("[mirrorball_dance] ready V2.3 (auto detect V12/V13)");
+    console.log("[mirrorball_dance] ready V3 (triangle hit test)", {
+      se: CFG.seSrc,
+      pad: CFG.padPx,
+    });
   });
 })();
