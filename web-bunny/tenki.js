@@ -1,11 +1,16 @@
-// tenki.js（UFO強化 + 特殊演出PNGランダム表示）
+// tenki.js（UFO強化 + 特殊演出PNGランダム表示：軽量化版）
 // ✅ UFO.mp3 を SEスライダーに紐づけ（WB.se.loop） + ITEMより上
 // ✅ UFOは ITEM（ベッド/ミラーボール/oak）より上に表示：超高z-index
 // ✅ UFO出現中は UFO.mp3 をずっと鳴らし続ける（ループ）
 // ✅ BGM.js の SE API（WB.se.loop / WB.getSEVolume / milkpop_se_settings_v1 muted）に完全追従
 // ✅ BGM.js が無い場合はフォールバックで鳴る
-// ✅ 修正：UFO出現を “もう少しレア” に
+// ✅ UFO出現を “もう少しレア” に
 // ✅ 追加：assets/tenki の PNG（大雨/大雪/雷/オーロラ/桜/紅葉）をランダムで表示（UFOより下）
+// ✅ 重要：PNG演出で重くならないように軽量化
+//    - specialは <div background-image> で表示（imgより軽いことが多い）
+//    - JSで毎フレームtransform更新しない（CSSアニメに移行）
+//    - drop-shadow等の重いfilterを廃止
+//    - will-change / translateZ で合成に寄せる
 
 (() => {
   "use strict";
@@ -48,19 +53,21 @@
      ✅ 特殊演出PNG（assets/tenki に置く）
      - “たまに” ランダムで1枚だけ表示
      - UFOより下 / アイテムより上
+     - ✅ 軽量化：div + background-image + CSS drift（JS毎フレーム更新なし）
   ========================= */
   const SPECIAL_Z_INDEX = 340000; // UFO(350000)より下 / アイテムより上想定
-  const SPECIAL_CHANCE_PER_SEC = 0.0016; // 0.16%/sec（だいたい10分に1回くらい目安）
+  const SPECIAL_CHANCE_PER_SEC = 0.0016; // 0.16%/sec（目安：10分に1回くらい）
   const SPECIAL_MIN_DURATION_SEC = 5.5;
   const SPECIAL_MAX_DURATION_SEC = 10.0;
 
+  // ✅ さらに軽くしたいなら opacity を 0.45〜0.5 に下げると合成コストが下がることが多い
   const SPECIALS = [
-    { key: "rain",   src: "./assets/tenki/w02_大雨.png",   opacity: 0.55, blend: "screen" },
-    { key: "snow",   src: "./assets/tenki/w05_大雪.png",   opacity: 0.55, blend: "screen" },
-    { key: "thun",   src: "./assets/tenki/w09_雷.png",     opacity: 0.60, blend: "screen" },
+    { key: "rain",   src: "./assets/tenki/w02_大雨.png",     opacity: 0.55, blend: "screen" },
+    { key: "snow",   src: "./assets/tenki/w05_大雪.png",     opacity: 0.55, blend: "screen" },
+    { key: "thun",   src: "./assets/tenki/w09_雷.png",       opacity: 0.60, blend: "screen" },
     { key: "aurora", src: "./assets/tenki/w33_オーロラ.png", opacity: 0.55, blend: "screen" },
-    { key: "sakura", src: "./assets/tenki/w34_桜.png",     opacity: 0.55, blend: "screen" },
-    { key: "momiji", src: "./assets/tenki/w35_紅葉.png",   opacity: 0.55, blend: "screen" },
+    { key: "sakura", src: "./assets/tenki/w34_桜.png",       opacity: 0.55, blend: "screen" },
+    { key: "momiji", src: "./assets/tenki/w35_紅葉.png",     opacity: 0.55, blend: "screen" },
   ];
 
   const field = document.getElementById(FIELD_ID);
@@ -94,6 +101,36 @@
     const maxY = Math.max(minY + 10, top + fr.height * 0.35);
     return Math.floor(minY + Math.random() * (maxY - minY));
   };
+
+  /* =========================
+     ✅ CSS（特殊演出：軽量 drift）
+  ========================= */
+  function ensureSpecialCssOnce() {
+    if (document.getElementById("tenkiSpecialCssV1")) return;
+    const s = document.createElement("style");
+    s.id = "tenkiSpecialCssV1";
+    s.textContent = `
+@keyframes milkpopSpecialDriftV1{
+  0%   { transform: translate3d(0px, 0px, 0); }
+  50%  { transform: translate3d(1.2px, -0.8px, 0); }
+  100% { transform: translate3d(0px, 0px, 0); }
+}
+#tenkiSpecialOverlayV1{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  z-index:${SPECIAL_Z_INDEX};
+  opacity:0;
+  background-repeat:no-repeat;
+  background-position:center;
+  background-size:cover;
+  will-change: opacity, transform;
+  transform: translate3d(0,0,0);
+  animation: milkpopSpecialDriftV1 6.5s ease-in-out infinite;
+}
+`;
+    document.head.appendChild(s);
+  }
 
   /* =========================
      ☀️ 太陽
@@ -183,8 +220,10 @@
       zIndex: String(UFO_Z_INDEX),
       opacity: "0",
       transform: "translate3d(0,0,0)",
+      // ✅ filterは重いのでUFO側だけ最低限（必要なら残してOK）
       filter: "drop-shadow(0 14px 22px rgba(0,0,0,.22))",
       transition: "opacity .25s ease",
+      willChange: "transform, opacity",
     });
 
     field.appendChild(img);
@@ -263,9 +302,11 @@
   }
 
   /* =========================
-     ✅ 特殊演出PNG（ランダム表示）
+     ✅ 特殊演出（軽量）
   ========================= */
-  let specialEl = null;
+  ensureSpecialCssOnce();
+
+  let specialEl = null;       // div
   let specialActive = false;
   let specialTLeft = 0;
   let specialTargetOpacity = 0.55;
@@ -274,26 +315,15 @@
   function ensureSpecialEl() {
     if (specialEl && specialEl.isConnected) return specialEl;
 
-    const img = document.createElement("img");
-    img.draggable = false;
+    const d = document.createElement("div");
+    d.id = "tenkiSpecialOverlayV1";
 
-    Object.assign(img.style, {
-      position: "absolute",
-      left: "0px",
-      top: "0px",
-      width: "100%",
-      height: "100%",
-      objectFit: "cover",
-      pointerEvents: "none",
-      zIndex: String(SPECIAL_Z_INDEX),
-      opacity: "0",
-      transform: "translate3d(0,0,0)",
-      // ちょい雰囲気
-      filter: "drop-shadow(0 10px 30px rgba(0,0,0,.18))",
-    });
+    // 初期は何も出さない
+    d.style.opacity = "0";
+    d.style.mixBlendMode = "normal";
 
-    field.appendChild(img);
-    specialEl = img;
+    field.appendChild(d);
+    specialEl = d;
     return specialEl;
   }
 
@@ -308,23 +338,22 @@
     const s = which || pickSpecial();
     const el = ensureSpecialEl();
 
-    el.src = s.src;
-    el.style.mixBlendMode = s.blend || "normal";
+    // ✅ img.src じゃなく background-image
+    el.style.backgroundImage = `url("${s.src}")`;
+    el.style.mixBlendMode = (s.blend || "normal");
 
     specialTargetOpacity = Math.max(0, Math.min(1, Number(s.opacity ?? 0.55)));
     specialNowOpacity = 0.0;
     el.style.opacity = "0";
 
     specialActive = true;
-    specialTLeft = (SPECIAL_MIN_DURATION_SEC + Math.random() * (SPECIAL_MAX_DURATION_SEC - SPECIAL_MIN_DURATION_SEC));
-
-    // ほんの少し動き（固定画像でも“生きてる”感）
-    el._shakeSeed = Math.random() * 1000;
+    specialTLeft =
+      (SPECIAL_MIN_DURATION_SEC + Math.random() * (SPECIAL_MAX_DURATION_SEC - SPECIAL_MIN_DURATION_SEC));
   }
 
   function stopSpecial() {
     specialActive = false;
-    // すぐ消さず、フェードアウトは animate 側で
+    // フェードアウトはanimate側で
   }
 
   // デバッグ用：コンソールから強制表示
@@ -342,16 +371,25 @@
   ========================= */
   let lastT = performance.now();
 
+  // ✅ タブ非表示中は描画を軽くする（ブラウザ負担減）
+  let hiddenSlow = false;
+  document.addEventListener("visibilitychange", () => {
+    hiddenSlow = document.hidden;
+  });
+
   function animate(t) {
     const fr = fieldRect();
-    const dt = Math.min(0.05, (t - lastT) / 1000);
+
+    // タブ裏は更新頻度を落とす（体感軽い）
+    const dtRaw = (t - lastT) / 1000;
+    const dt = Math.min(0.05, dtRaw);
     lastT = t;
 
     layoutSun();
 
     // 雲移動
     clouds.forEach(c => {
-      c._x += c._speed;
+      c._x += c._speed * (hiddenSlow ? 0.35 : 1.0);
       if (c._x > fr.width + 150) {
         c._x = -200;
         c.style.top = `${pickCloudYpx()}px`;
@@ -399,18 +437,11 @@
       if (specialTLeft <= 0) stopSpecial();
     }
 
-    // ✅ 特殊演出フェード＆微小ゆらぎ
+    // ✅ 特殊演出フェード（JSでtransform触らない＝軽い）
     if (specialEl) {
       const target = specialActive ? specialTargetOpacity : 0;
-      // 早すぎないフェード
       specialNowOpacity = approach(specialNowOpacity, target, 0.08);
       specialEl.style.opacity = String(specialNowOpacity);
-
-      // うっすら漂う（見えない程度に）
-      const seed = specialEl._shakeSeed || 0;
-      const sx = Math.sin((t / 1400) + seed) * 0.8;
-      const sy = Math.cos((t / 1600) + seed) * 0.6;
-      specialEl.style.transform = `translate3d(${sx}px, ${sy}px, 0)`;
 
       // 完全に消えたらDOM掃除（残骸ゼロ）
       if (!specialActive && specialNowOpacity < 0.01) {
