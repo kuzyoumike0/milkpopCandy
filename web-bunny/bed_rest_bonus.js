@@ -1,23 +1,37 @@
-// bed_rest_bonus.js (V4 - 演出強化版)
-// ✅ ベッド付近で「休む」(呼吸/うとうと/Zzz強化) + ✅ 速度も実際に落とす + ✅ コイン微増
+// bed_rest_bonus.js (V4.1 - ランダム睡眠 + 演出強化 + 速度も実際に落とす)
+// ✅ ベッド付近で「ランダムに寝る/起きる」(呼吸/うとうと/Zzz強化) + ✅ 速度も実際に落とす + ✅ コイン微増
 // ✅ ベッド検出：assets/bg/bed.png を含む src / background-image を最優先
 // ✅ うさぎ検出：.bunnyWrap or #bunnyLayer 親
-// ✅ 速度減衰：WB.getBunnies() の各bunny.baseSpeed を退避して 0.15倍（解除で復帰）
+// ✅ 速度減衰：WB.getBunnies() の各bunny.baseSpeed を退避して slowMul 倍（解除で復帰）
 // ✅ コイン加算：WB.addCoin / WB.setCoin / WB.coins / #coinValue
 //
 // 読み込み順：app.js / itemPlace.js の後（最後の方）推奨
 
 (() => {
   "use strict";
-  if (window.__BED_REST_BONUS_V4__) return;
-  window.__BED_REST_BONUS_V4__ = true;
+  if (window.__BED_REST_BONUS_V41__) return;
+  window.__BED_REST_BONUS_V41__ = true;
 
   const CFG = {
     bedSrcNeedle: "assets/bg/bed.png",
 
+    // ベッド中心からこの距離以内で「睡眠抽選対象」
     radiusPx: 170,
+    fatPx: 12,
+
     tickMs: 180,
 
+    // ✅ ランダム睡眠
+    // ベッド付近 & 起きてる時：1tickごとにこの確率で寝る
+    sleepChancePerTick: 0.018,  // 0.01〜0.03 くらいで好み調整
+    // ベッド付近 & 寝てる時：最低睡眠時間経過後、1tickごとにこの確率で起きる
+    wakeChancePerTick: 0.012,
+    // 寝たら最低この時間は寝続ける（チラつき防止）
+    minSleepMs: 2600,
+    // ベッドから離れたら強制的に起きるまでの猶予（自然にする）
+    awayGraceMs: 900,
+
+    // ✅ ボーナス
     bonusEveryMs: 1200,
     bonusPerBunny: 2,
 
@@ -33,7 +47,7 @@
     // ✅ 本当に遅くする（0.15倍）
     slowMul: 0.15,
 
-    fatPx: 12,
+    // bg scan
     bgScanMax: 900,
   };
 
@@ -57,23 +71,28 @@
   }
 
   function ensureStyle() {
-    if (document.getElementById("wbBedRestStyleV4")) return;
+    if (document.getElementById("wbBedRestStyleV41")) return;
     const s = document.createElement("style");
-    s.id = "wbBedRestStyleV4";
+    s.id = "wbBedRestStyleV41";
     s.textContent = `
+/* 休憩ベース */
 .wbResting{
   filter: saturate(0.92) brightness(1.02);
   opacity: 0.98;
+}
+
+/* Zzzが見切れないように（重要） */
+.bunnyWrap.wbResting{
+  overflow: visible !important;
 }
 
 /* transform競合回避：innerだけ動かす */
 .wbRestInner{ width:100%; height:100%; }
 
 .wbResting .wbRestInner{
-  ${CFG.breathing ? "animation: wbBreathV4 1.45s ease-in-out infinite;" : ""}
+  ${CFG.breathing ? "animation: wbBreathV41 1.45s ease-in-out infinite;" : ""}
 }
-
-@keyframes wbBreathV4{
+@keyframes wbBreathV41{
   0%{ transform: translateY(0px) scale(1.00); }
   50%{ transform: translateY(-1.2px) scale(0.985); }
   100%{ transform: translateY(0px) scale(1.00); }
@@ -84,35 +103,33 @@
   ${CFG.dimBunny ? "filter: brightness(0.96) contrast(0.98);" : ""}
 }
 
-/* Zzz 本体 */
+/* Zzz Wrap */
 .wbZzzWrap{
   position:absolute;
   left:50%;
-  top:-26px;
+  top:-28px;
   transform: translateX(-50%);
   pointer-events:none;
   display:flex;
   gap:6px;
   align-items:center;
   justify-content:center;
+  z-index: 999999;
 }
-
 .wbZzz{
   font-weight: 1000;
   font-size: ${CFG.zzzBig ? "16px" : "14px"};
   opacity: .95;
   text-shadow: 0 8px 18px rgba(0,0,0,.20);
-  animation: wbZzzFloatV4 1.15s ease-in-out infinite;
+  animation: wbZzzFloatV41 1.15s ease-in-out infinite;
 }
-
 .wbSleepIcon{
   font-weight:1000;
   font-size:${CFG.zzzBig ? "16px" : "14px"};
   opacity:.92;
-  animation: wbZzzFloatV4 1.15s ease-in-out infinite;
+  animation: wbZzzFloatV41 1.15s ease-in-out infinite;
 }
-
-@keyframes wbZzzFloatV4{
+@keyframes wbZzzFloatV41{
   0%{ transform: translateY(0); opacity:.85; }
   50%{ transform: translateY(-7px); opacity:1; }
   100%{ transform: translateY(0); opacity:.85; }
@@ -122,16 +139,16 @@
 .wbSnorePuff{
   position:absolute;
   left:50%;
-  top:-34px;
+  top:-38px;
   transform: translateX(-50%);
-  width: 44px;
-  height: 26px;
+  width: 48px;
+  height: 28px;
   border-radius: 999px;
-  background: rgba(255,255,255,.85);
+  background: rgba(255,255,255,.86);
   box-shadow: 0 14px 26px rgba(0,0,0,.10);
-  filter: blur(.0px);
   pointer-events:none;
-  opacity:.85;
+  opacity:.88;
+  z-index: 999998;
 }
 `;
     document.head.appendChild(s);
@@ -157,7 +174,7 @@
     const out = [];
     const needle = getNeedle();
 
-    // img src
+    // img src 最優先
     if (needle) {
       document.querySelectorAll("img").forEach(img => {
         const src = String(img.getAttribute("src") || "").toLowerCase();
@@ -215,7 +232,10 @@
   // transform競合回避：imgをinnerで包む
   function ensureRestInner(wrap) {
     if (!wrap) return null;
-    let inner = wrap.querySelector(":scope > .wbRestInner");
+    // :scopeが怪しい環境があるので安全に
+    let inner = null;
+    try { inner = wrap.querySelector(":scope > .wbRestInner"); } catch {}
+    if (!inner) inner = wrap.querySelector(".wbRestInner");
     if (inner) return inner;
 
     const img = wrap.querySelector("img");
@@ -272,7 +292,7 @@
     if (puff) { try { puff.remove(); } catch {} }
   }
 
-  function setResting(wrap, on) {
+  function setRestingVisual(wrap, on) {
     if (!wrap) return;
     if (on) {
       wrap.classList.add("wbResting");
@@ -284,8 +304,20 @@
     }
   }
 
-  // ✅ 速度制御：wrap -> WB.bunny を紐付ける（bornAtがDOMに無いので、index順で対応）
-  //    (十分実用。ズレても「休む見た目」は出る)
+  // ========= ランダム睡眠状態（wrapごと） =========
+  // { sleeping:boolean, since:number, lastNear:number }
+  const sleepState = new WeakMap();
+
+  function getState(wrap) {
+    let s = sleepState.get(wrap);
+    if (!s) {
+      s = { sleeping: false, since: 0, lastNear: 0 };
+      sleepState.set(wrap, s);
+    }
+    return s;
+  }
+
+  // ========= 速度制御 =========
   const speedBackup = new WeakMap(); // bunnyObj -> originalBaseSpeed
 
   function getWBunnies(WB) {
@@ -301,24 +333,19 @@
     return [];
   }
 
-  function applySpeedSlow(WB, restingFlags) {
-    // restingFlags: wraps.length と同数の true/false
+  function applySpeedSlow(WB, sleepingFlags) {
     const list = getWBunnies(WB);
     if (!list.length) return;
 
-    // wrap数とbunny数が違う可能性はあるので短い方で合わせる
-    const n = Math.min(list.length, restingFlags.length);
+    const n = Math.min(list.length, sleepingFlags.length);
 
     for (let i = 0; i < n; i++) {
       const b = list[i];
       if (!b) continue;
-
-      const isRest = !!restingFlags[i];
-
-      // baseSpeed が無い構造もあるのでガード
+      const sleep = !!sleepingFlags[i];
       if (!("baseSpeed" in b)) continue;
 
-      if (isRest) {
+      if (sleep) {
         if (!speedBackup.has(b)) speedBackup.set(b, Number(b.baseSpeed) || 0);
         const orig = speedBackup.get(b);
         const slowed = Math.max(6, (Number(orig) || 40) * CFG.slowMul);
@@ -333,6 +360,7 @@
     }
   }
 
+  // ========= コイン加算 =========
   function addCoinsSafe(WB, delta) {
     const d = Math.max(0, Math.floor(Number(delta) || 0));
     if (!d) return;
@@ -366,6 +394,7 @@
     }
   }
 
+  // ========= メイン =========
   waitForWB().then((WB) => {
     ensureStyle();
 
@@ -375,57 +404,93 @@
       const beds = findBedElements();
       const wraps = findBunnyWraps();
 
-      if (!beds.length) {
-        wraps.forEach(w => setResting(w, false));
+      if (!beds.length || !wraps.length) {
+        wraps.forEach(w => setRestingVisual(w, false));
         applySpeedSlow(WB, wraps.map(() => false));
         return;
       }
 
       const bedCenters = beds.map(centerOfEl).filter(Boolean);
       if (!bedCenters.length) {
-        wraps.forEach(w => setResting(w, false));
+        wraps.forEach(w => setRestingVisual(w, false));
         applySpeedSlow(WB, wraps.map(() => false));
         return;
       }
 
-      const bunnyCenters = [];
-      for (const w of wraps) {
-        const c = centerOfEl(w);
-        if (c) bunnyCenters.push({ wrap: w, c });
-        else bunnyCenters.push({ wrap: w, c: null });
-      }
-
+      const now = Date.now();
       const thresh = (Number(CFG.radiusPx) || 0) + (Number(CFG.fatPx) || 0);
 
-      let restingCount = 0;
-      const restingFlags = new Array(wraps.length).fill(false);
+      let sleepingCount = 0;
+      const sleepingFlags = new Array(wraps.length).fill(false);
 
-      for (let i = 0; i < bunnyCenters.length; i++) {
-        const b = bunnyCenters[i];
-        if (!b.c) { setResting(b.wrap, false); continue; }
+      for (let i = 0; i < wraps.length; i++) {
+        const w = wraps[i];
+        const c = centerOfEl(w);
 
-        let near = false;
-        for (const bc of bedCenters) {
-          if (dist(b.c, bc) <= thresh) { near = true; break; }
+        // 中心が取れないなら解除
+        if (!c) {
+          const st = getState(w);
+          st.sleeping = false;
+          st.since = 0;
+          setRestingVisual(w, false);
+          continue;
         }
 
-        restingFlags[i] = near;
-        setResting(b.wrap, near);
-        if (near) restingCount++;
+        // ベッド付近判定
+        let near = false;
+        for (const bc of bedCenters) {
+          if (dist(c, bc) <= thresh) { near = true; break; }
+        }
+
+        const st = getState(w);
+
+        if (near) st.lastNear = now;
+
+        // ベッドから離れたら猶予後に強制で起床
+        if (!near && st.sleeping) {
+          if (now - st.lastNear > CFG.awayGraceMs) {
+            st.sleeping = false;
+            st.since = 0;
+          }
+        }
+
+        // 近い時だけ寝る抽選
+        if (near && !st.sleeping) {
+          if (Math.random() < CFG.sleepChancePerTick) {
+            st.sleeping = true;
+            st.since = now;
+          }
+        }
+
+        // 寝ている時は最低睡眠時間後に起床抽選（近い時のみ）
+        if (st.sleeping) {
+          const slept = now - (st.since || now);
+          if (near && slept >= CFG.minSleepMs) {
+            if (Math.random() < CFG.wakeChancePerTick) {
+              st.sleeping = false;
+              st.since = 0;
+            }
+          }
+        }
+
+        // 見た目反映
+        setRestingVisual(w, st.sleeping);
+        sleepingFlags[i] = st.sleeping;
+
+        if (st.sleeping) sleepingCount++;
       }
 
-      // ✅ 本当に遅くする
-      applySpeedSlow(WB, restingFlags);
+      // ✅ 本当に遅くする（寝てる間だけ）
+      applySpeedSlow(WB, sleepingFlags);
 
-      // コイン微増
-      const now = Date.now();
-      if (restingCount > 0 && now - lastBonusAt >= CFG.bonusEveryMs) {
+      // ✅ コイン微増（寝てる子だけ）
+      if (sleepingCount > 0 && now - lastBonusAt >= CFG.bonusEveryMs) {
         lastBonusAt = now;
-        const bonus = restingCount * CFG.bonusPerBunny;
+        const bonus = sleepingCount * CFG.bonusPerBunny;
         addCoinsSafe(WB, bonus);
 
-        // 実績用イベント（任意）
-        try { WB?.emit?.("sy:add", { key: "bed_rest", delta: 1 }); } catch {}
+        // 実績用（任意）
+        try { WB?.emit?.("sy:add", { key: "bed_sleep_bonus", delta: bonus }); } catch {}
       }
     }
 
@@ -445,9 +510,12 @@
       };
     }
 
-    console.log("[bed_rest_bonus] ready V4 (visual strong)", {
-      radius: CFG.radiusPx,
+    console.log("[bed_rest_bonus] ready V4.1 (random sleep)", {
       needle: CFG.bedSrcNeedle,
+      radius: CFG.radiusPx,
+      sleepChancePerTick: CFG.sleepChancePerTick,
+      wakeChancePerTick: CFG.wakeChancePerTick,
+      minSleepMs: CFG.minSleepMs,
       slowMul: CFG.slowMul,
       bonusPerBunny: CFG.bonusPerBunny,
     });
