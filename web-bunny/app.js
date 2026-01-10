@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.5 (WB.coins defineProperty fix + compat)", Date.now());
+  console.log("[app.js] LOADED v16.7.6 (coinsChanged emit + sy:add helper + compat)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -275,7 +275,6 @@
     try {
       window.WB?.bgm?.start?.();
       window.WB?.bgm?.play?.();
-      // UI生成だけ先に（openModalはメニューから呼ぶ想定）
       window.WB?.bgm?.mountUI?.({ position: "top-right", title: "BGM" });
     } catch {}
   }
@@ -305,7 +304,19 @@
   })();
 
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
-  function updateHud() { coinValueEl.textContent = String(coins); emit("hudUpdated", { coins }); }
+
+  // ✅ coins 変更通知を強化（zisseki等の互換）
+  function emitCoinChanged() {
+    try { emit("coinsChanged", { coins }); } catch {}
+    try { emit("coinChanged",  { coins }); } catch {}
+    try { emit("hudUpdated",   { coins }); } catch {}
+  }
+
+  function updateHud() {
+    coinValueEl.textContent = String(coins);
+    emitCoinChanged();
+  }
+
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
   function loadBunnyMeta() {
@@ -366,7 +377,14 @@
     collect(){
       if (!this.el || !this.el.isConnected) return;
       coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
-      saveCoins(); updateHud(); playSE(seCoin);
+      saveCoins();
+      updateHud();
+      playSE(seCoin);
+
+      // ✅ コイン獲得の統一イベント（必要なら他モジュールで拾える）
+      try { emit("coinCollected", { tier: this.tier, add: (this.tier + 1) * COIN_VALUE_MULTIPLIER }); } catch {}
+      try { emit("sy:add", { key: "coin_collect", delta: 1, tier: this.tier }); } catch {} // 実績用の拡張キー（使わなくてもOK）
+
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
@@ -406,7 +424,7 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      // ✅ baby はゲージを持たせない（増えない・readyにならない・ハート出ない）
+      // ✅ baby はゲージを持たせない
       this.charge = 0;
       this.chargeReady = false;
       this.hartEl = null;
@@ -425,9 +443,9 @@
         e?.preventDefault?.();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        // ✅ baby は coin1 固定（tier=0固定）＆ゲージ無しなので常に同じ
+        // ✅ baby は coin1 固定＆ゲージ無し
         if (this.isBaby) {
-          spawnClickCoins(this, 3, () => 0); // coin1 固定
+          spawnClickCoins(this, 3, () => 0);
           return;
         }
 
@@ -478,9 +496,7 @@
     }
 
     addOwnCharge(delta) {
-      // ✅ baby はゲージを持たせない（一切増やさない）
       if (this.isBaby) return;
-
       if (this.chargeReady) return;
       delta = Number(delta) || 0;
       if (delta <= 0) return;
@@ -495,9 +511,7 @@
     }
 
     consumeOwnCharge() {
-      // ✅ baby はゲージ無し
       if (this.isBaby) return;
-
       this.charge = 0;
       this.chargeReady = false;
       this.hideHeart();
@@ -528,10 +542,8 @@
       if (!this.isBaby) return;
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
-      // baby → adult
       this.isBaby = false;
 
-      // ✅ adult化した瞬間にゲージ開始（初期値0、ハート消す）
       this.charge = 0;
       this.chargeReady = false;
       this.hideHeart();
@@ -564,7 +576,6 @@
     update(dt) {
       this.evolveIfNeeded(false);
 
-      // ✅ baby はゲージを持たない（増やさない）
       if (!this.isBaby) this.addOwnCharge(CHARGE_PER_SEC * dt);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
@@ -587,6 +598,9 @@
     bunnies.push(b);
     saveBunnyMeta();
     emit("bunnyCountChanged", { count: bunnies.length });
+
+    // ✅ 図鑑側の発見トリガを安全に送る
+    try { emit("bunnySpawned", { kind: b.kind, bornAt: b.bornAt }); } catch {}
     return b;
   }
 
@@ -653,6 +667,9 @@
   rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
   slotBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:slot",   {}); });
 
+  // ✅ 花火ボタンもコアが軽く通知（実際の加算は hanabi.js 側で sy:add 推奨）
+  hanabiBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:hanabi", {}); });
+
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       unlockAudioOnce();
@@ -706,6 +723,10 @@
       return true;
     },
 
+    // ✅ 実績加算の共通入口（他モジュールがこれだけ呼べばOK）
+    // 例：WB.syAdd({ key:"unchi", delta:1 })
+    syAdd: (payload) => { try { emit("sy:add", payload); } catch {} },
+
     bunnies,
     getBunnies: () => bunnies,
     spawnBunny,
@@ -732,9 +753,7 @@
   // まずは素直にマージ
   window.WB = Object.assign({}, prevWB, api);
 
-  // ✅ ここが今回の本命修正：
-  // Object.assign で coins の getter/setter が「数値としてコピー」されて潰れるため、
-  // defineProperty で WB.coins を “必ず coins変数と同期する” 形に復活させる
+  // ✅ coins getter/setter を “必ず coins変数と同期する” 形に復活
   try {
     Object.defineProperty(window.WB, "coins", {
       configurable: true,
