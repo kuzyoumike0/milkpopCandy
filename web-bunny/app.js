@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.6 (unchi gauge per bunny: slower than charge, spawns unchi drop when full)", Date.now());
+  console.log("[app.js] LOADED v16.7 (unchi click removes + unchi gauge slower)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -58,28 +58,25 @@
   const COIN_VALUE_MULTIPLIER = 2;
 
   /* =========================
-   * ✅ 黄金うんち（クリックでのみ回収）
+   * 黄金うんち（クリックでのみ回収）
    * ========================= */
   const OUGON_RATE  = 0.005;
   const OUGON_VALUE = 120 * COIN_VALUE_MULTIPLIER;
 
   /* =========================
-   * ✅ 通常うんち（ougonunchi と同じドロップ仕様）
-   * - ただし「うんちゲージ」が貯まったら出現
+   * ✅ 通常うんち（うんちゲージ満タンで出現）
    * - うさぎゲージより遅く貯まる
+   * - クリックで回収（削除）+ unchi.mp3
    * ========================= */
   const UNCHI_CHARGE_MAX = 100;
 
-  // ★ここが「うさぎゲージより遅く」：CHARGE_PER_SEC(=3.0) より小さく
-  const UNCHI_CHARGE_PER_SEC = 0.75; // 約133秒で満タン（必要なら調整）
+  // ★さらに遅く（前:0.75）→ 今:0.35（約286秒で満タン）
+  // ここを小さくするほど「うんちを落とす速度」が下がる
+  const UNCHI_CHARGE_PER_SEC = 0.35;
 
-  // うんちの価値
   const UNCHI_VALUE = 10 * COIN_VALUE_MULTIPLIER;
-
-  // クリック時SEの基礎倍率（SEスライダーに掛かる）
   const UNCHI_SE_BASE = 1.0;
 
-  // うんちを出す対象（成体だけにしたい場合は true）
   const UNCHI_ADULT_ONLY = true;
 
   /* =========================
@@ -363,7 +360,6 @@
     }
   }
 
-  // ✅ 黄金うんち（クリック/タップのみ回収 + unchi.mp3）
   class OugonUnchiDrop {
     constructor(x, y) {
       this.x = x;
@@ -430,7 +426,7 @@
     }
   }
 
-  // ✅ 通常うんち（黄金うんちと同じ仕様：クリック/タップのみ回収 + unchi.mp3）
+  // ✅ 通常うんち：クリックしたら「画面から削除」される（= collectでremove）
   class UnchiDrop {
     constructor(x, y) {
       this.x = x;
@@ -486,13 +482,14 @@
 
       unlockAudioOnce();
 
+      // コイン加算（不要なら 0 にしてもOK）
       coins += UNCHI_VALUE;
       saveCoins();
       updateHud();
 
-      // ✅ 要望：unchi.pngクリック時に unchi.mp3
       playSE(seUnchi, UNCHI_SE_BASE);
 
+      // ✅ 要望：クリックしたら画面から削除
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
@@ -559,13 +556,13 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      // ===== 個体チャージ（ハート） =====
+      // 個体チャージ（ハート）
       this.charge = 0;
       this.chargeReady = false;
       this.hartEl = null;
 
-      // ===== ✅ 個体うんちゲージ（遅い） =====
-      this.unchiCharge = 0; // 0..UNCHI_CHARGE_MAX
+      // ✅ 個体うんちゲージ（さらに遅く）
+      this.unchiCharge = 0;
 
       refreshFieldSize();
       this.x = rand(20, Math.max(21, FIELD_W - 140));
@@ -667,20 +664,16 @@
       emit("bunnyChargeConsumed", { bornAt: this.bornAt });
     }
 
-    // ✅ うんちゲージ：貯まったら「unchi.png をドロップとして表示」してリセット
+    // ✅ うんちゲージ：満タンで unchi.png を落とす（速度は UNCHI_CHARGE_PER_SEC で制御）
     addUnchiCharge(delta) {
       delta = Number(delta) || 0;
       if (delta <= 0) return;
 
-      // 対象制限
       if (UNCHI_ADULT_ONLY && this.isBaby) return;
 
       this.unchiCharge = clamp(this.unchiCharge + delta, 0, UNCHI_CHARGE_MAX);
-
       if (this.unchiCharge >= UNCHI_CHARGE_MAX) {
         this.unchiCharge = 0;
-
-        // ✅ 満タンで unchi.png を「黄金うんちと同じ仕様」で出す（= ドロップ表示）
         spawnUnchiNearBunny(this);
         emit("bunnyUnchiSpawned", { bornAt: this.bornAt });
       }
@@ -753,10 +746,9 @@
     update(dt) {
       this.evolveIfNeeded(false);
 
-      // ★時間経過で個体チャージ（ハート）
       this.addOwnCharge(CHARGE_PER_SEC * dt);
 
-      // ✅ 時間経過で個体うんちゲージ（遅い）
+      // ✅ うんちゲージ（さらに遅い）
       this.addUnchiCharge(UNCHI_CHARGE_PER_SEC * dt);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
@@ -796,7 +788,6 @@
 
   /* =========================
    * Touch: スライド回収（コインだけ）
-   * - ✅ うんち（通常/黄金）はスライド回収しない（クリック/タップのみ）
    * ========================= */
   let touchCollectActive = false;
   let touchPointerId = null;
@@ -913,7 +904,6 @@
       return b ? { charge: b.charge, ready: b.chargeReady, unchi: b.unchiCharge } : null;
     },
 
-    // デバッグ用：強制うんち
     spawnUnchiNearBunny: (bornAt) => {
       const t = Number(bornAt);
       const b = bunnies.find(x => x && x.bornAt === t);
