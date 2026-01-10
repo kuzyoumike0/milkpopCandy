@@ -1,5 +1,6 @@
 // BGM.js（非module / ✅BGM購入＆選択 + ✅BGM音量 + ✅SE音量スライダー + ✅openModal確実
-//        + ✅購入前プレビュー試聴 + ✅モーダルスクロール対応 + ✅日本語ファイル名でも確実再生）
+//        + ✅購入前プレビュー試聴 + ✅モーダルスクロール対応 + ✅日本語ファイル名でも確実再生
+//        + ✅購入したBGMが流れない問題の対策（audio.load + play失敗理由toast + 再生押し直し））
 // ✅ gameMenu.js の WB.bgm.openModal() で「必ず開く」
 // ✅ 旧UI(V1/V2)が残ってても削除して作り直す（出ない問題根絶）
 // ✅ SEスライダー：WB.getSEVolume / WB.setSEVolume / WB.se.play/loop/stop / registerSE まで全部提供
@@ -12,10 +13,11 @@
 // ✅ ブラウザ自動再生対策：ユーザー操作（pointerdown/keydown）で unlock → 再生開始
 // ✅ FIX：日本語ファイル名（例：旅立ち.mp3）でも購入後に流れない問題を根絶
 //        → Audio.src へは必ず encodeURI した「絶対URL」を入れる
+// ✅ FIX：購入したBGMが流れないことがある → src差し替え後に audio.load() / play失敗理由をtoast / 購入＆流すで startBgm(true) 追い押し
 
 (() => {
   "use strict";
-  console.log("[BGM.js] LOADED v3.3.1 (preview+scrollbar+encodeURI fix)", Date.now());
+  console.log("[BGM.js] LOADED v3.3.2 (play reliability patch)", Date.now());
 
   /* =========================
    * Storage
@@ -268,10 +270,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   function applyBgmVolume() {
     ensureBgmAudio();
     audio.volume = bgmSettings.muted ? 0 : bgmSettings.volume;
+    audio.muted = !!bgmSettings.muted;
   }
   function applyPreviewVolume() {
     ensurePreviewAudio();
     previewAudio.volume = bgmSettings.muted ? 0 : bgmSettings.volume;
+    previewAudio.muted = !!bgmSettings.muted;
   }
 
   function pickByTime() {
@@ -286,7 +290,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     return null;
   }
 
-  // ✅ FIX：audio.src へは encodeURI した絶対URLを入れる
+  // ✅ 追加：最後に落ちた理由（デバッグ用）
+  let __lastPlayErr = "";
+
+  // ✅ FIX強化：audio.src 差し替え後に load() / 失敗理由をtoastに出す
   async function tryPlayBgm(src, keyHint = null) {
     ensureBgmAudio();
     if (!src) return false;
@@ -296,18 +303,33 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
     const abs = toAbsUrlEncoded(src);
 
-    if (audio.src !== abs) {
+    // src変更時は確実にリセット
+    const changed = (audio.src !== abs);
+    if (changed) {
       try { audio.pause(); } catch {}
       audio.src = abs;
-      audio.currentTime = 0;
+      try { audio.load(); } catch {}          // ← ★重要：ブラウザ差分対策
+      try { audio.currentTime = 0; } catch {}
     }
 
     applyBgmVolume();
 
     if (!bgmSettings.enabled) return false;
-    if (!unlocked) return false;
+    if (!unlocked) {
+      __lastPlayErr = "locked";
+      return false;
+    }
 
-    try { await audio.play(); return true; } catch { return false; }
+    try {
+      const p = audio.play();
+      if (p && typeof p.then === "function") await p;
+      __lastPlayErr = "";
+      return true;
+    } catch (e) {
+      __lastPlayErr = String(e?.name || e?.message || e || "play failed");
+      toast(`⚠️ BGM再生失敗：${__lastPlayErr}`);
+      return false;
+    }
   }
 
   function stopBgm() {
@@ -364,6 +386,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     if (previewAudio.src !== abs) {
       try { previewAudio.pause(); } catch {}
       previewAudio.src = abs;           // ✅ FIX
+      try { previewAudio.load(); } catch {}
       previewAudio.currentTime = 0;
     }
     previewKey = key;
@@ -374,10 +397,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     if (!unlocked) return false;
 
     try {
-      await previewAudio.play();
+      const p = previewAudio.play();
+      if (p && typeof p.then === "function") await p;
       toast(`👂 試聴中：${LABELS[key] || key}`);
       return true;
-    } catch {
+    } catch (e) {
+      toast(`⚠️ 試聴失敗：${String(e?.name || e?.message || e || "preview play failed")}`);
       return false;
     }
   }
@@ -468,6 +493,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       a.preload = "auto";
       a.loop = true;
       a.src = abs; // ✅ FIX
+      try { a.load(); } catch {}
       a.__base = base;
       a.volume = isMutedAll() ? 0 : clamp(base * getSEVolume(), 0, 1);
       a.muted = !!isMutedAll();
@@ -909,11 +935,15 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     autoBtn.addEventListener("click", async () => {
       await unlockBgmOnce();
       selectBgm(null);
+      // ★追い押し
+      startBgm(true);
       refresh();
     });
 
     prevStopBtn.addEventListener("click", () => {
       stopPreview({ resumeBgm: true });
+      // ★追い押し（プレビュー停止後に通常BGMが出ないブラウザ対策）
+      startBgm(true);
       refresh();
     });
 
@@ -922,6 +952,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
         await unlockBgmOnce();
         if (previewKey === k) {
           stopPreview({ resumeBgm: true });
+          startBgm(true);
         } else {
           stopPreview({ resumeBgm: false });
           await startPreview(k);
@@ -939,6 +970,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
           stopPreview({ resumeBgm: false });
           selectBgm(k);
         }
+        // ★追加：ここで確実に再生を押し直す
+        startBgm(true);
         refresh();
       });
 
@@ -947,6 +980,8 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
         stopPreview({ resumeBgm: false });
         const r = selectBgm(k);
         if (!r.ok) toast("未購入です");
+        // ★追加：ここで確実に再生を押し直す
+        startBgm(true);
         refresh();
       });
     }
@@ -975,7 +1010,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   function patchWB(WB) {
     if (!WB || typeof WB !== "object") return;
-    if (lastWBRef === WB && WB.__bgmPatchedV331) return;
+    if (lastWBRef === WB && WB.__bgmPatchedV332) return;
     lastWBRef = WB;
 
     const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
@@ -1015,9 +1050,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     WB.bgm.getSelected = () => selected?.selectedKey ?? null;
     WB.bgm.getCoins = () => getCoinsWB();
 
+    // デバッグ用（必要なら）
+    WB.bgm.getLastPlayError = () => __lastPlayErr;
+
     WB.bgm.registerSE = registerSE;
 
-    WB.__bgmPatchedV331 = true;
+    WB.__bgmPatchedV332 = true;
 
     if (unlocked && bgmSettings.enabled && !previewKey) startBgm(false);
   }
