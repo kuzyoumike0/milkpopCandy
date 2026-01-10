@@ -1,14 +1,19 @@
-// BGM.js（非module / ✅BGM購入＆選択 + ✅BGM音量 + ✅SE音量スライダー + ✅openModal確実）
+// BGM.js（非module / ✅BGM購入＆選択 + ✅BGM音量 + ✅SE音量スライダー + ✅openModal確実
+//        + ✅購入前プレビュー試聴 + ✅モーダルスクロール対応）
 // ✅ gameMenu.js の WB.bgm.openModal() で「必ず開く」
 // ✅ 旧UI(V1/V2)が残ってても削除して作り直す（出ない問題根絶）
 // ✅ SEスライダー：WB.getSEVolume / WB.setSEVolume / WB.se.play/loop/stop / registerSE まで全部提供
 // ✅ tenki.js / unchi.js / app.js からのSE登録（__milkpopSeRegisterQueue）も拾って追従
 // ✅ BGMは「選択中」が時間帯より優先 / 「自動に戻す」あり
+// ✅ プレビュー：未購入でも「試聴」できる（BGM音量に従う）
+//    - 試聴中は通常BGMを一時停止してプレビューを鳴らす
+//    - 「停止」か、購入/流す/自動に戻す/閉じる等で復帰
+// ✅ モーダル：max-height + overflow-y:auto でスクロールバー表示
 // ✅ ブラウザ自動再生対策：ユーザー操作（pointerdown/keydown）で unlock → 再生開始
 
 (() => {
   "use strict";
-  console.log("[BGM.js] LOADED v3.2 (openModal+SE slider+shop)", Date.now());
+  console.log("[BGM.js] LOADED v3.3 (preview+scrollbar)", Date.now());
 
   /* =========================
    * Storage
@@ -20,7 +25,6 @@
 
   /* =========================
    * Tracks（ここを書き換えるだけで増やせる）
-   *  - あなたが添付した mp3 は「プロジェクト内 assets に置いたパス」にして使ってください
    * ========================= */
   const TRACKS = {
     // 時間帯
@@ -38,33 +42,33 @@
   };
 
   const PRICES = {
-    morning: 3000,
-    day:     3000,
-    night:   3000,
-    depart:  8000,
+    morning:  3000,
+    day:      3000,
+    night:    3000,
+    depart:   8000,
     cocktail: 4000,
     stream:   4000,
     dokkan:   5000,
   };
 
   const LABELS = {
-    morning: "朝BGM",
-    day:     "昼BGM",
-    night:   "夜BGM",
-    depart:  "旅立ちBGM",
-    cocktail:"Cocktail Glass",
-    stream:  "Stream",
-    dokkan:  "おもしろすぎてどっかん",
+    morning:  "朝BGM",
+    day:      "昼BGM",
+    night:    "夜BGM",
+    depart:   "旅立ちBGM",
+    cocktail: "Cocktail Glass",
+    stream:   "Stream",
+    dokkan:   "おもしろすぎてどっかん",
   };
 
   const DESCS = {
-    morning: "朝の時間帯（5-10時）",
-    day:     "昼の時間帯（11-17時）",
-    night:   "夜の時間帯（それ以外）",
-    depart:  "特別BGM（旅立ち演出など）",
-    cocktail:"追加BGM（購入して選択すると流せる）",
-    stream:  "追加BGM（購入して選択すると流せる）",
-    dokkan:  "追加BGM（購入して選択すると流せる）",
+    morning:  "朝の時間帯（5-10時）",
+    day:      "昼の時間帯（11-17時）",
+    night:    "夜の時間帯（それ以外）",
+    depart:   "特別BGM（旅立ち演出など）",
+    cocktail: "追加BGM（購入して選択すると流せる）",
+    stream:   "追加BGM（購入して選択すると流せる）",
+    dokkan:   "追加BGM（購入して選択すると流せる）",
   };
 
   /* =========================
@@ -223,9 +227,15 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
    * BGM Audio
    * ========================= */
   let unlocked = false;
-  let audio = null;
+
+  let audio = null;          // 通常BGM
   let currentKey = null;
   let specialKey = null;
+
+  // ✅ プレビュー専用
+  let previewAudio = null;
+  let previewKey = null;     // 試聴中のkey
+  let bgmWasPlayingBeforePreview = false;
 
   function ensureBgmAudio() {
     if (audio) return audio;
@@ -236,9 +246,22 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     return audio;
   }
 
+  function ensurePreviewAudio() {
+    if (previewAudio) return previewAudio;
+    previewAudio = new Audio();
+    previewAudio.loop = true; // 試聴なのでループでOK（停止ボタンで止める）
+    previewAudio.preload = "auto";
+    applyPreviewVolume();
+    return previewAudio;
+  }
+
   function applyBgmVolume() {
     ensureBgmAudio();
     audio.volume = bgmSettings.muted ? 0 : bgmSettings.volume;
+  }
+  function applyPreviewVolume() {
+    ensurePreviewAudio();
+    previewAudio.volume = bgmSettings.muted ? 0 : bgmSettings.volume;
   }
 
   function pickByTime() {
@@ -280,7 +303,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     try { audio.pause(); } catch {}
   }
 
+  function isBgmPlaying() {
+    return !!(audio && !audio.paused && unlocked && bgmSettings.enabled && !bgmSettings.muted && audio.volume > 0);
+  }
+
   function decideKeyToPlay() {
+    // プレビュー中は通常BGMは鳴らさない（優先）
+    if (previewKey) return null;
+
     if (specialKey && TRACKS[specialKey] && isOwned(specialKey)) return specialKey;
 
     const sk = selected?.selectedKey ?? null;
@@ -294,6 +324,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function startBgm(force = false) {
+    if (previewKey) { stopBgm(); return; } // プレビュー優先
     const key = decideKeyToPlay();
     if (!key) { currentKey = null; stopBgm(); return; }
     if (!force && key === currentKey) return;
@@ -308,13 +339,59 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   /* =========================
+   * ✅ Preview（購入前試聴）
+   * ========================= */
+  async function startPreview(key) {
+    if (!TRACKS[key]) return false;
+
+    await unlockBgmOnce();
+
+    // 通常BGMの状態を退避して停止
+    bgmWasPlayingBeforePreview = isBgmPlaying();
+    stopBgm();
+
+    ensurePreviewAudio();
+    const href = new URL(TRACKS[key], location.href).href;
+    if (previewAudio.src !== href) {
+      try { previewAudio.pause(); } catch {}
+      previewAudio.src = TRACKS[key];
+      previewAudio.currentTime = 0;
+    }
+    previewKey = key;
+
+    applyPreviewVolume();
+
+    if (!bgmSettings.enabled) return false;
+    if (!unlocked) return false;
+
+    try {
+      await previewAudio.play();
+      toast(`👂 試聴中：${LABELS[key] || key}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function stopPreview({ resumeBgm = true } = {}) {
+    if (!previewKey) return;
+    previewKey = null;
+    try { previewAudio?.pause(); } catch {}
+    try { previewAudio && (previewAudio.currentTime = 0); } catch {}
+
+    // 通常BGMへ復帰
+    if (resumeBgm && bgmSettings.enabled && unlocked) {
+      startBgm(true);
+    }
+  }
+
+  /* =========================
    * SE system（register / play / loop / stop）
    * ========================= */
   const seRegistry = new Set();          // Audio elements
   const loopMap = new Map();             // key -> Audio
 
   function getSEVolume() {
-    // 共有変数も更新しておく（他JSが参照しやすい）
     return clamp(Number(window.__milkpopSeVolume ?? seVolume), 0, 1);
   }
   function setSEVolume(v) {
@@ -322,7 +399,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     window.__milkpopSeVolume = seVolume;
     saveSeVol(seVolume);
 
-    // 登録SEに反映（loopはbase×slider方式）
     try {
       for (const a of seRegistry) {
         if (a && typeof a.volume === "number") a.volume = seVolume;
@@ -335,13 +411,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     } catch {}
   }
 
-  function isMutedAll() { return !!bgmSettings.muted; } // 仕様：BGMミュート＝SEもミュート扱いでOK
+  function isMutedAll() { return !!bgmSettings.muted; } // 仕様：BGMミュート＝SEもミュート扱い
 
   function registerSE(audioEl) {
     try {
       if (!audioEl) return;
       seRegistry.add(audioEl);
-      // 初期適用
       audioEl.volume = isMutedAll() ? 0 : getSEVolume();
       audioEl.muted = !!isMutedAll();
     } catch {}
@@ -356,7 +431,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       a.volume = isMutedAll() ? 0 : clamp(base * getSEVolume(), 0, 1);
       a.muted = !!isMutedAll();
       a.play().catch(() => {});
-      // 短命なので registry には入れない（入れると増え続ける）
       return true;
     } catch {
       return false;
@@ -367,7 +441,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     try {
       if (!unlocked) return false;
 
-      // 既存があれば同じsrcならそのまま、違うなら差し替え
       const prev = loopMap.get(key);
       const href = new URL(src, location.href).href;
 
@@ -446,6 +519,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function selectBgm(keyOrNull) {
+    // 選択/自動に戻す操作が来たらプレビューは止める
+    stopPreview({ resumeBgm: false });
+
     const k = keyOrNull || null;
     if (k === null) {
       selected.selectedKey = null;
@@ -465,14 +541,14 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function playSpecial(keyOrSrc) {
-    // key
+    stopPreview({ resumeBgm: false });
+
     if (TRACKS[keyOrSrc]) {
       if (!isOwned(keyOrSrc)) { toast("未購入です"); return; }
       specialKey = keyOrSrc;
       tryPlayBgm(TRACKS[keyOrSrc], keyOrSrc);
       return;
     }
-    // src
     const src = keyOrSrc;
     if (!src) return;
     specialKey = "__custom__";
@@ -489,15 +565,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
    * ========================= */
   function removeOldUI() {
     const ids = [
-      // old
       "bgmHamburgerV1","bgmPanelV1","bgmHamburgerV2","bgmPanelV2",
-      // maybe older styles
       "bgmStyleV1","bgmStyleV2",
     ];
     for (const id of ids) {
       try { document.getElementById(id)?.remove(); } catch {}
     }
-    // toast は残ってても害ない
   }
 
   function ensureStyle() {
@@ -533,6 +606,12 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   box-shadow:0 18px 44px rgba(0,0,0,.22);
   padding:12px 12px 10px;
   display:none;
+
+  /* ✅ スクロール対応（スクロールバー表示） */
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 #${UI.panel} .row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
 #${UI.panel} .ttl{ font-weight:900; }
@@ -549,6 +628,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 #${UI.panel} .slider{ width:100%; margin:10px 0 6px; }
 #${UI.panel} .fine{ font-size:12px; opacity:.75; }
 #${UI.panel} .sep{ height:1px; background:rgba(0,0,0,.08); margin:10px 0; }
+
+/* ✅ スクロールバーを少し見やすく（任意） */
+#${UI.panel}::-webkit-scrollbar{ width: 8px; }
+#${UI.panel}::-webkit-scrollbar-thumb{
+  background: rgba(0,0,0,.18);
+  border-radius: 999px;
+}
+#${UI.panel}::-webkit-scrollbar-track{
+  background: transparent;
+}
 
 #bgmShopV3 .item{
   display:flex; align-items:flex-start; justify-content:space-between;
@@ -579,6 +668,17 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 }
 #bgmShopV3 .select[disabled]{ opacity:.55; cursor:not-allowed; }
 #bgmShopV3 .select.active{ background:#333; color:#fff; box-shadow:none; }
+
+/* ✅ プレビュー（試聴）ボタン */
+#bgmShopV3 .preview{
+  border:none; border-radius:12px;
+  padding:8px 10px; font-weight:900;
+  cursor:pointer; background:#fff;
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+}
+#bgmShopV3 .preview.active{
+  background:#2b6cff; color:#fff; box-shadow:none;
+}
 `;
     document.head.appendChild(style);
   }
@@ -595,6 +695,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   </div>
   <div class="right">
     <div class="tag" id="bgmPrice_${key}">${price}🪙</div>
+    <button class="preview" id="bgmPrev_${key}" type="button">試聴</button>
     <button class="buy" id="bgmBuy_${key}" type="button">購入</button>
     <button class="select" id="bgmSelect_${key}" type="button">流す</button>
   </div>
@@ -602,7 +703,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function mountUI() {
-    // すでにあるならOK
     if (document.getElementById(UI.btn) && document.getElementById(UI.panel)) return;
 
     removeOldUI();
@@ -656,12 +756,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
 <div class="row" style="margin-top:6px;">
   <button class="btn ghost small" id="bgmAutoV3" type="button">🔁 自動に戻す</button>
-  <div class="fine" id="bgmSelTextV3"></div>
+  <button class="btn ghost small" id="bgmPrevStopV3" type="button">⏹ 試聴停止</button>
 </div>
 
+<div class="fine" id="bgmSelTextV3" style="margin-top:6px;"></div>
 <div class="fine" id="bgmInfoV3" style="margin:6px 0 0;"></div>
 
-<div id="bgmShopV3">
+<div id="bgmShopV3" style="margin-top:6px;">
   ${keys.map(k => renderItem(k)).join("")}
 </div>
 `;
@@ -680,13 +781,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     const close = $("#bgmCloseV3", panel);
     const coinTag = $("#bgmCoinTagV3", panel);
     const autoBtn = $("#bgmAutoV3", panel);
+    const prevStopBtn = $("#bgmPrevStopV3", panel);
 
     const buyBtns = {};
     const selectBtns = {};
+    const prevBtns = {};
     const priceTags = {};
     for (const k of keys) {
       buyBtns[k] = $(`#bgmBuy_${k}`, panel);
       selectBtns[k] = $(`#bgmSelect_${k}`, panel);
+      prevBtns[k] = $(`#bgmPrev_${k}`, panel);
       priceTags[k] = $(`#bgmPrice_${k}`, panel);
     }
 
@@ -706,19 +810,25 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       const c = getCoinsWB();
       coinTag.textContent = `🪙 ${c}`;
 
-      // selection text
+      // selection
       const sel = selected?.selectedKey ?? null;
-      selText.textContent = sel ? `選択中：${LABELS[sel]}` : "選択中：自動";
+      const selStr = sel ? `選択中：${LABELS[sel]}` : "選択中：自動";
 
-      const nowKey = decideKeyToPlay() || pickByTime();
-      info.textContent =
+      // info
+      const nowKey = pickByTime();
+      const baseStr =
+        previewKey ? `👂 試聴中：${LABELS[previewKey] || previewKey}` :
         (specialKey && specialKey !== "__custom__") ? `特別：${LABELS[specialKey] || specialKey}` :
         sel ? `選択：${LABELS[sel]}` :
         `通常：${LABELS[nowKey] || nowKey}`;
 
+      selText.textContent = `${selStr}`;
+      info.textContent = baseStr;
+
       // state
-      const playing = audio && !audio.paused && unlocked && bgmSettings.enabled && !bgmSettings.muted && audio.volume > 0;
-      stateText.textContent = playing ? "再生中" : "停止中（クリックで開始）";
+      const playingBgm = isBgmPlaying();
+      const playingPreview = !!(previewAudio && !previewAudio.paused && previewKey);
+      stateText.textContent = playingPreview ? "試聴再生中" : (playingBgm ? "再生中" : "停止中（クリックで開始）");
 
       // buttons
       for (const k of keys) {
@@ -731,24 +841,30 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
           buyBtns[k].disabled = own || (c < price);
           buyBtns[k].textContent = own ? "OK" : "購入";
         }
+
         if (selectBtns[k]) {
           selectBtns[k].disabled = !own;
           selectBtns[k].classList.toggle("active", sel === k);
           selectBtns[k].textContent = (sel === k) ? "選択中" : "流す";
         }
+
+        if (prevBtns[k]) {
+          const isNowPrev = (previewKey === k) && (previewAudio && !previewAudio.paused);
+          prevBtns[k].classList.toggle("active", isNowPrev);
+          prevBtns[k].textContent = isNowPrev ? "試聴中" : "試聴";
+        }
       }
     }
 
-    function openPanel() {
-      panel.style.display = "block";
-      refresh();
-    }
     function closePanel() {
       panel.style.display = "none";
+      // 閉じたら試聴は止めて通常BGMに戻す（邪魔になりがちなので）
+      stopPreview({ resumeBgm: true });
     }
 
     btn.addEventListener("click", () => {
       panel.style.display = (panel.style.display === "block") ? "none" : "block";
+      if (panel.style.display === "none") stopPreview({ resumeBgm: true });
       refresh();
     });
     close.addEventListener("click", closePanel);
@@ -756,10 +872,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     toggle.addEventListener("click", async () => {
       bgmSettings.enabled = !bgmSettings.enabled;
       saveBgmSettings(bgmSettings);
-      if (!bgmSettings.enabled) stopBgm();
-      else {
+      if (!bgmSettings.enabled) {
+        stopPreview({ resumeBgm: false });
+        stopBgm();
+      } else {
         await unlockBgmOnce();
-        startBgm(true);
+        // プレビュー中ならプレビュー継続、そうでなければ通常BGMへ
+        if (!previewKey) startBgm(true);
       }
       refresh();
     });
@@ -768,6 +887,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       bgmSettings.muted = !bgmSettings.muted;
       saveBgmSettings(bgmSettings);
       applyBgmVolume();
+      applyPreviewVolume();
       applyMuteToSE();
       refresh();
     });
@@ -776,9 +896,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       bgmSettings.volume = clamp(Number(bgmVol.value) / 100, 0, 1);
       saveBgmSettings(bgmSettings);
       applyBgmVolume();
+      applyPreviewVolume();
       if (bgmSettings.enabled) {
         await unlockBgmOnce();
-        startBgm(false);
+        if (!previewKey) startBgm(false);
       }
       refresh();
     });
@@ -795,7 +916,24 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       refresh();
     });
 
+    prevStopBtn.addEventListener("click", () => {
+      stopPreview({ resumeBgm: true });
+      refresh();
+    });
+
     for (const k of keys) {
+      prevBtns[k]?.addEventListener("click", async () => {
+        // 試聴トグル
+        await unlockBgmOnce();
+        if (previewKey === k) {
+          stopPreview({ resumeBgm: true });
+        } else {
+          stopPreview({ resumeBgm: false });
+          await startPreview(k);
+        }
+        refresh();
+      });
+
       buyBtns[k]?.addEventListener("click", async () => {
         await unlockBgmOnce();
         const r = buyBgm(k);
@@ -803,13 +941,16 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
           if (r.reason === "coins") toast(`🪙 足りない！ ${r.have} / ${r.need}`);
           else toast("購入できませんでした");
         } else {
-          selectBgm(k); // 購入したら即流す
+          // 購入したら試聴は止めて、そのまま選択して流す
+          stopPreview({ resumeBgm: false });
+          selectBgm(k);
         }
         refresh();
       });
 
       selectBtns[k]?.addEventListener("click", async () => {
         await unlockBgmOnce();
+        stopPreview({ resumeBgm: false });
         const r = selectBgm(k);
         if (!r.ok) toast("未購入です");
         refresh();
@@ -829,7 +970,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function openModal() {
-    // ✅ gameMenu.js から確実に開けるAPI
     try { mountUI(); } catch {}
     const panel = document.getElementById(UI.panel);
     if (panel) panel.style.display = "block";
@@ -842,10 +982,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   function patchWB(WB) {
     if (!WB || typeof WB !== "object") return;
-    if (lastWBRef === WB && WB.__bgmPatchedV32) return;
+    if (lastWBRef === WB && WB.__bgmPatchedV33) return;
     lastWBRef = WB;
 
-    // unlock 連結（app.js が WB.unlockAudioOnce を呼ぶのでここでBGMも unlock）
     const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
     WB.unlockAudioOnce = async () => {
       try { prevUnlock?.(); } catch {}
@@ -862,11 +1001,19 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
     WB.bgm = WB.bgm || {};
     WB.bgm.mountUI = mountUI;
-    WB.bgm.openModal = openModal; // ✅ これが無いと「メニューから開けない」
+    WB.bgm.openModal = openModal;
+
     WB.bgm.start = () => startBgm(true);
     WB.bgm.stop = () => stopBgm();
-    WB.bgm.playSpecial = playSpecial;
-    WB.bgm.clearSpecial = clearSpecial;
+
+    WB.bgm.playSpecial = (kOrSrc) => playSpecial(kOrSrc);
+    WB.bgm.clearSpecial = () => clearSpecial();
+
+    // ✅ プレビューAPIも公開（必要なら外部UIから呼べる）
+    WB.bgm.previewStart = (key) => startPreview(key);
+    WB.bgm.previewStop  = () => stopPreview({ resumeBgm: true });
+    WB.bgm.getPreview   = () => previewKey;
+
     WB.bgm.TRACKS = TRACKS;
     WB.bgm.PRICES = PRICES;
     WB.bgm.LABELS = LABELS;
@@ -876,13 +1023,11 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     WB.bgm.getSelected = () => selected?.selectedKey ?? null;
     WB.bgm.getCoins = () => getCoinsWB();
 
-    // registerSE 公開（app.js / unchi.js / tenki.js から使える）
     WB.bgm.registerSE = registerSE;
 
-    WB.__bgmPatchedV32 = true;
+    WB.__bgmPatchedV33 = true;
 
-    // もし unlock 済みで再生ONなら追従
-    if (unlocked && bgmSettings.enabled) startBgm(false);
+    if (unlocked && bgmSettings.enabled && !previewKey) startBgm(false);
   }
 
   function startWBWatcher() {
@@ -895,7 +1040,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   /* =========================
-   * SE登録キュー回収（app.jsより先/後どっちでもOKにする）
+   * SE登録キュー回収
    * ========================= */
   function drainRegisterQueue() {
     try {
@@ -909,7 +1054,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   /* =========================
-   * Autoplay unlock（ユーザー操作で一度だけ）
+   * Autoplay unlock
    * ========================= */
   function setupAutoplayUnlock() {
     const handler = async () => {
@@ -941,22 +1086,17 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
    * ========================= */
   (async function boot() {
     ensureBgmAudio();
-    // SE共有変数
     window.__milkpopSeVolume = getSEVolume();
 
     startWBWatcher();
     setupAutoplayUnlock();
     startTimeWatcher();
 
-    // body待ち→UI生成（確実）
     try { await waitForBody(); } catch {}
     mountUI();
 
-    // 最初は開かない（勝手に開くと邪魔なので）。必要なら gameMenu から openModal。
-    // ただし「BGMモーダルが出ない」対策で、WBがあるならAPIは必ず生える。
     patchWB(window.WB);
 
-    // 起動時もキューを拾う
     setInterval(drainRegisterQueue, 700);
 
     console.log("[BGM.js] ready (use WB.bgm.openModal())");
