@@ -35,12 +35,12 @@
     night:   "./assets/bgm_night.mp3",
 
     // 特別（日本語ファイル名OK：encodeURIで確実に再生）
-    depart:  "./assets/旅立ち.mp3",
+    depart:  "./assets/tabi.mp3",
 
     // 追加BGM
     cocktail: "./assets/bgm/Cocktail_Glass.mp3",
     stream:   "./assets/bgm/Stream.mp3",
-    dokkan:   "./assets/bgm/おもしろすぎてどっかん.mp3",
+    dokkan:   "./assets/bgm/dokkan.mp3",
   };
 
   const PRICES = {
@@ -57,10 +57,10 @@
     morning:  "朝BGM",
     day:      "昼BGM",
     night:    "夜BGM",
-    depart:   "旅立ちBGM",
+    depart:   "旅BGM",
     cocktail: "Cocktail Glass",
     stream:   "Stream",
-    dokkan:   "おもしろすぎてどっかん",
+    dokkan:   "どっかん",
   };
 
   const DESCS = {
