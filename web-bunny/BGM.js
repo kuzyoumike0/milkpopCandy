@@ -1,933 +1,966 @@
-// BGM.js（非module / ✅朝昼夜は自動 + ✅購入曲を好きな時に流す / ✅モーダル化）
-// ✅ 修正：404根絶（assets/BGM/ に合わせる / 大文字小文字一致）
-// ✅ 修正：日本語ファイル名を encodeURI して確実に読み込む
-// ✅ 通常BGM：朝/昼/夜 は時間帯で自動（★朝昼夜は無料で鳴る：購入不要）
-// ✅ いつでもBGM：Stream / おもしろすぎてどっかん / Cocktail_Glass を購入して任意に選択して流せる
-// ✅ 「いつでもBGM」を選択中は、時間帯切替より優先 / 自動に戻すあり
-// ✅ UIは“モーダル”のみ（ハンバーガーボタンは作らない）
-// ✅ WB差し替え耐性 / unlockAudioOnce 連結
-// ✅ 外部：WB.bgm.openModal() / closeModal() を提供（gameMenu.jsから呼ぶ）
-//
-// ★追加：SE音量スライダー（UFOなど含むSE全般）
-// - localStorage: milkpop_se_volume_v1（0..1）
-// - WB.getSEVolume()/setSEVolume() / WB.se.oneShot()/loop()/stop()/stopAll()
-
 (() => {
   "use strict";
-
-  const LS_KEY_SETTINGS = "milkpop_bgm_settings_v2";
-  const LS_KEY_OWNED    = "milkpop_bgm_owned_v2";
-  const LS_KEY_SELECT   = "milkpop_bgm_selected_v2";
-
-  // ★SE音量
-  const LS_KEY_SE_VOL   = "milkpop_se_volume_v1"; // number 0..1
+  console.log("[app.js] LOADED v16.5 (periodic unchi + click unchi.png plays unchi.mp3)", Date.now());
 
   /* =========================
-   * Tracks（✅ assets/BGM/ に統一）
+   * Assets / Defs
    * ========================= */
-  const BASE_TRACKS = {
-    morning: "./assets/BGM/bgm_morning.mp3",
-    day:     "./assets/BGM/bgm_day.mp3",
-    night:   "./assets/BGM/bgm_night.mp3",
+  const ASSETS = {
+    babyBunny: "./assets/babybunny.png",
+    hart: "./assets/hart.png",
+
+    coinSE: "./assets/coin.mp3",
+    poyoSE: "./assets/poyo.mp3",
+    babySE: "./assets/babybunny.mp3",
+    tabidatiSE: "./assets/tabidati.mp3",
+
+    // ✅ うんちSE（通常/黄金 共通で使う）
+    unchiSE: "./assets/unchi.mp3",
+
+    // ✅ 通常うんち（定期排出）
+    unchiImg: "./assets/unchi.png",
+
+    ougonUnchi: "./assets/ougonunchi.png",
+    coins: [
+      "./assets/coin1.png", // tier0
+      "./assets/coin2.png", // tier1
+      "./assets/coin3.png", // tier2
+      "./assets/coin4.png", // tier3
+    ],
   };
 
-  const SPECIAL_TRACKS = {
-    depart:  "./assets/BGM/bgm_depart.mp3",
+  const BUNNY_DEFS = {
+    bunny1:  { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
-  const ANYTIME_TRACKS = {
-    stream:   "./assets/BGM/Stream.mp3",
-    dokkan:   "./assets/BGM/おもしろすぎてどっかん.mp3",
-    cocktail: "./assets/BGM/Cocktail_Glass.mp3",
+  /* =========================
+   * Balance
+   * ========================= */
+  const BABY_DURATION_MS = 3 * 60 * 1000;
+  const BABY_SPEED_MUL   = 0.65;
+  const REA_EVOLVE_RATE  = 0.01;
+
+  const DEPART_COST = 10;
+
+  /* =========================
+   * Charge（個体ごと / UIなし）
+   * ========================= */
+  const CHARGE_MAX = 100;
+  const CHARGE_PER_SEC = 3.0; // 約34秒で満タン
+  const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
+
+  const COIN_VALUE_MULTIPLIER = 2;
+
+  const OUGON_RATE = 0.005;
+  const OUGON_VALUE = 120 * COIN_VALUE_MULTIPLIER;
+
+  /* =========================
+   * ✅ 通常うんち（定期排出）
+   * ========================= */
+  const UNCHI_INTERVAL_MS = 18_000;          // 何msごとに判定するか
+  const UNCHI_RATE_PER_TICK = 0.55;          // そのタイミングで出す確率（個体ごと）
+  const UNCHI_VALUE = 6 * COIN_VALUE_MULTIPLIER; // 拾った時のコイン
+  const UNCHI_SE_BASE = 1.0;                // ★「クリック時の unchi.mp3」基礎倍率（SEスライダーに掛かる）
+
+  /* =========================
+   * Storage
+   * ========================= */
+  const LS = {
+    coins:     "wb_coins_v6",
+    bunnies:   "wb_bunnies_v6",
+    dex:       "wb_dex_v1",
+    unchi:     "wb_unchi_v1",
+    title:     "wb_title_v1",
+    titleList: "wb_title_list_v1",
   };
 
-  const TRACKS = { ...BASE_TRACKS, ...SPECIAL_TRACKS, ...ANYTIME_TRACKS };
+  /* =========================
+   * DOM
+   * ========================= */
+  const field      = document.getElementById("field");
+  const bunnyLayer = document.getElementById("bunnyLayer");
+  const coinLayer  = document.getElementById("coinLayer");
+  const coinValueEl= document.getElementById("coinValue");
 
-  const PRICES = {
-    // ※朝昼夜は無料運用に変更（UI上FREE表示・購入不可にする）
-    morning: 3000,
-    day:     3000,
-    night:   3000,
+  const shopBtn    = document.getElementById("shopBtn");
+  const departBtn  = document.getElementById("departBtn");
+  const resetBtn   = document.getElementById("resetBtn");
+  const rankBtn    = document.getElementById("rankBtn");
+  const slotBtn    = document.getElementById("slotBtn");
 
-    depart:  8000,
-    stream:   12000,
-    dokkan:   15000,
-    cocktail: 10000,
-  };
+  if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
+    console.error("[app.js] 必要DOMが見つかりません");
+    return;
+  }
 
-  const LABELS = {
-    morning: "朝BGM",
-    day:     "昼BGM",
-    night:   "夜BGM",
-    depart:  "旅立ちBGM",
-    stream:   "Stream（いつでも）",
-    dokkan:   "おもしろすぎてどっかん（いつでも）",
-    cocktail: "Cocktail_Glass（いつでも）",
-  };
+  /* =========================
+   * Event bus（WB互換）
+   * ========================= */
+  const __events = new Map();
+  function on(ev, fn) {
+    if (!__events.has(ev)) __events.set(ev, new Set());
+    __events.get(ev).add(fn);
+  }
+  function off(ev, fn) { __events.get(ev)?.delete(fn); }
+  function emit(ev, payload) {
+    __events.get(ev)?.forEach((fn) => { try { fn(payload); } catch {} });
+  }
 
-  // ✅ 無料で使えるBGM（最初から鳴る）
-  const FREE_TRACKS = new Set(["morning", "day", "night"]);
+  /* =========================
+   * Utils / Field size cache
+   * ========================= */
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const rand  = (a, b) => a + Math.random() * (b - a);
 
-  const UI = {
-    style: "bgmStyleModalV1",
-    backdrop: "bgmBackdropModalV1",
-    modal: "bgmModalModalV1",
-    toast: "bgmToastModalV1",
-  };
+  let FIELD_W = 1, FIELD_H = 1;
+  function refreshFieldSize() {
+    FIELD_W = Math.max(1, field.clientWidth  || field.getBoundingClientRect().width  || 1);
+    FIELD_H = Math.max(1, field.clientHeight || field.getBoundingClientRect().height || 1);
+  }
+  refreshFieldSize();
+  window.addEventListener("resize", () => requestAnimationFrame(refreshFieldSize), { passive: true });
 
-  const $ = (q, p = document) => p.querySelector(q);
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function groundY() { return FIELD_H - 60; }
 
-  function loadSettings() {
+  /* =========================
+   * Audio (SEはBGM.jsに完全連動)
+   * ========================= */
+  const sePoyo     = new Audio(encodeURI(ASSETS.poyoSE));
+  const seBaby     = new Audio(encodeURI(ASSETS.babySE));
+  const seCoin     = new Audio(encodeURI(ASSETS.coinSE));
+  const seTabidati = new Audio(encodeURI(ASSETS.tabidatiSE));
+  const seUnchi    = new Audio(encodeURI(ASSETS.unchiSE));
+
+  [sePoyo, seBaby, seCoin, seTabidati, seUnchi].forEach(a => {
+    try { a.preload = "auto"; a.loop = false; } catch {}
+  });
+
+  const LS_KEY_BGM_SETTINGS = "milkpop_bgm_settings_v2"; // { muted: bool, ... }
+  const LS_KEY_SE_VOL       = "milkpop_se_volume_v1";   // 0..1
+
+  function loadBgmSettingsLike() {
     try {
-      const raw = localStorage.getItem(LS_KEY_SETTINGS);
-      if (!raw) return { volume: 0.5, muted: false, enabled: true };
+      const raw = localStorage.getItem(LS_KEY_BGM_SETTINGS);
+      if (!raw) return { muted: false };
       const j = JSON.parse(raw);
-      return {
-        volume: clamp(Number(j.volume ?? 0.5), 0, 1),
-        muted: !!j.muted,
-        enabled: j.enabled !== false,
-      };
+      return { muted: !!j.muted };
     } catch {
-      return { volume: 0.5, muted: false, enabled: true };
+      return { muted: false };
     }
   }
-  function saveSettings(s) { try { localStorage.setItem(LS_KEY_SETTINGS, JSON.stringify(s)); } catch {} }
 
-  function loadOwned() {
+  function getSEVolume() {
     try {
-      const raw = localStorage.getItem(LS_KEY_OWNED);
-      if (!raw) return {};
-      const j = JSON.parse(raw);
-      return (j && typeof j === "object") ? j : {};
-    } catch { return {}; }
-  }
-  function saveOwned(o) { try { localStorage.setItem(LS_KEY_OWNED, JSON.stringify(o)); } catch {} }
+      if (window.WB && typeof window.WB.getSEVolume === "function") {
+        const v = Number(window.WB.getSEVolume());
+        if (Number.isFinite(v)) return clamp(v, 0, 1);
+      }
+    } catch {}
 
-  function loadSelected() {
     try {
-      const raw = localStorage.getItem(LS_KEY_SELECT);
-      if (!raw) return { selectedKey: null };
-      const j = JSON.parse(raw);
-      const k = j?.selectedKey ?? null;
-      if (k && !TRACKS[k]) return { selectedKey: null };
-      return { selectedKey: k };
-    } catch { return { selectedKey: null }; }
-  }
-  function saveSelected(sel) { try { localStorage.setItem(LS_KEY_SELECT, JSON.stringify(sel)); } catch {} }
+      const v = Number(window.__milkpopSeVolume);
+      if (Number.isFinite(v)) return clamp(v, 0, 1);
+    } catch {}
 
-  function loadSEVolume() {
     try {
       const raw = localStorage.getItem(LS_KEY_SE_VOL);
-      if (raw == null) return 0.85; // デフォ（少し小さめ）
+      if (raw == null) return 0.85;
       const v = Number(raw);
       return clamp(Number.isFinite(v) ? v : 0.85, 0, 1);
     } catch {
       return 0.85;
     }
   }
-  function saveSEVolume(v) {
-    try { localStorage.setItem(LS_KEY_SE_VOL, String(clamp(Number(v) || 0, 0, 1))); } catch {}
+
+  function isSEMuted() {
+    const s = loadBgmSettingsLike();
+    return !!s.muted;
   }
 
-  let settings = loadSettings();
-  let owned = loadOwned();
-  let selected = loadSelected();
-  let seVolume = loadSEVolume();
+  let audioUnlocked = false;
 
-  // ★外部が直読みできるように（app.js側が参照）
-  window.__milkpopSeVolume = seVolume;
+  function unlockAudioOnce() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
 
-  let unlocked = false;
-  let currentKey = null;
-  let specialKey = null;
-
-  let audio = null;
-
-  function ensureAudio() {
-    if (audio) return audio;
-    audio = new Audio();
-    audio.loop = true;
-    audio.preload = "auto";
-    applyVolume();
-
-    audio.addEventListener("error", () => {
-      try {
-        const err = audio.error ? `${audio.error.code}` : "unknown";
-        console.warn("[BGM] audio error:", err, "src=", audio.src);
-      } catch {}
-    });
-
-    return audio;
-  }
-
-  function applyVolume() {
-    ensureAudio();
-    audio.volume = settings.muted ? 0 : settings.volume;
-  }
-
-  function normalizeSrc(src) {
-    if (!src) return src;
-    if (src.includes("%")) return src; // 既にencode済み
-    return encodeURI(src);
-  }
-
-  function pickByTime() {
-    const h = new Date().getHours();
-    if (h >= 5 && h < 10) return "morning";
-    if (h >= 10 && h < 17) return "day";
-    return "night";
-  }
-
-  function isOwned(key) {
-    if (FREE_TRACKS.has(key)) return true;
-    return !!owned?.[key];
-  }
-
-  function resolveKeyBySrc(src) {
-    for (const k of Object.keys(TRACKS)) if (TRACKS[k] === src) return k;
-    return null;
-  }
-
-  /* =========================
-   * WB coin compat
-   * ========================= */
-  function getCoinsWB() {
-    const WB = window.WB;
-    try {
-      if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0;
-      if (WB && typeof WB.getCoins === "function") return Number(WB.getCoins()) || 0;
-      if (WB && typeof WB.coins === "number") return Number(WB.coins) || 0;
-      const el = document.getElementById("coinValue");
-      if (el) return Number(el.textContent || "0") || 0;
-    } catch {}
-    return 0;
-  }
-
-  function setCoinsWB(next) {
-    const WB = window.WB;
-    const v = Math.max(0, Math.floor(Number(next) || 0));
-    try {
-      if (WB && typeof WB.setCoin === "function") { WB.setCoin(v); return true; }
-      if (WB && typeof WB.setCoins === "function") { WB.setCoins(v); return true; }
-      if (WB && typeof WB.coins === "number") WB.coins = v;
-      const el = document.getElementById("coinValue");
-      if (el) el.textContent = String(v);
-      return true;
-    } catch {}
-    return false;
-  }
-
-  function spendCoinsWB(amount) {
-    const WB = window.WB;
-    const a = Math.max(0, Math.floor(Number(amount) || 0));
-    if (!a) return true;
-
-    try {
-      if (WB && typeof WB.spendCoins === "function") return !!WB.spendCoins(a);
-      if (WB && typeof WB.spendCoin === "function") return !!WB.spendCoin(a);
-
-      if (WB && typeof WB.addCoin === "function") {
-        const cur = getCoinsWB();
-        if (cur < a) return false;
-        WB.addCoin(-a);
-        const after = getCoinsWB();
-        if (after === cur) setCoinsWB(cur - a);
-        return true;
-      }
-
-      const cur = getCoinsWB();
-      if (cur < a) return false;
-      setCoinsWB(cur - a);
-      return true;
-    } catch { return false; }
-  }
-
-  function toast(msg) {
-    try {
-      let el = document.getElementById(UI.toast);
-      if (!el) {
-        el = document.createElement("div");
-        el.id = UI.toast;
-        el.style.cssText = `
-position:fixed; left:50%; top:16px; transform:translateX(-50%);
-z-index:2147483646;
-background:rgba(0,0,0,.78); color:#fff;
-padding:10px 12px; border-radius:14px;
-font-weight:900; font-size:13px;
-box-shadow:0 14px 40px rgba(0,0,0,.25);
-pointer-events:none; opacity:0; transition:opacity .18s ease;
-`;
-        document.body.appendChild(el);
-      }
-      el.textContent = msg;
-      el.style.opacity = "1";
-      clearTimeout(el.__t);
-      el.__t = setTimeout(() => { el.style.opacity = "0"; }, 1200);
-    } catch {}
-  }
-
-  async function tryPlay(src, keyHint = null) {
-    ensureAudio();
-    if (!src) return false;
-
-    const key = keyHint || resolveKeyBySrc(src);
-    if (key && !isOwned(key)) { stop(); return false; }
-
-    const normalized = normalizeSrc(src);
-    const nextHref = new URL(normalized, location.href).href;
-
-    if (audio.src !== nextHref) {
-      try { audio.pause(); } catch {}
-      audio.src = normalized;
-      audio.currentTime = 0;
-    }
-
-    applyVolume();
-    if (!settings.enabled) return false;
-    if (!unlocked) return false;
-
-    try { await audio.play(); return true; } catch { return false; }
-  }
-
-  function stop() { if (audio) try { audio.pause(); } catch {} }
-
-  function decideKeyToPlay() {
-    if (specialKey && TRACKS[specialKey] && isOwned(specialKey)) return specialKey;
-
-    const sk = selected?.selectedKey ?? null;
-    if (sk && TRACKS[sk] && isOwned(sk)) return sk;
-
-    // ✅ 時間帯は無料で鳴る（owned不要）
-    return pickByTime();
-  }
-
-  function startBgm(force = false) {
-    const key = decideKeyToPlay();
-    if (!key) { currentKey = null; stop(); return; }
-    if (!force && key === currentKey) return;
-    currentKey = key;
-    tryPlay(TRACKS[key], key);
-  }
-
-  async function unlockBgmOnce() {
-    if (unlocked) return;
-    unlocked = true;
-    startBgm(true);
-    // ループSEも「解禁後」すぐ鳴らせる状態に
-    applyLoopSEVolumes();
-  }
-
-  function buyBgm(key) {
-    if (!TRACKS[key] || !PRICES[key]) return { ok: false, reason: "unknown" };
-
-    // ✅ 無料は購入不可（常にOK扱い）
-    if (FREE_TRACKS.has(key)) return { ok: true, reason: "free" };
-
-    if (isOwned(key)) return { ok: true, reason: "already" };
-
-    const price = PRICES[key];
-    const cur = getCoinsWB();
-    if (cur < price) return { ok: false, reason: "coins", need: price, have: cur };
-
-    const ok = spendCoinsWB(price);
-    if (!ok) return { ok: false, reason: "coins_api" };
-
-    owned[key] = true;
-    saveOwned(owned);
-    toast(`✅ ${LABELS[key]} 購入！ -${price}🪙`);
-    return { ok: true, reason: "bought" };
-  }
-
-  function selectBgm(keyOrNull) {
-    const k = keyOrNull || null;
-
-    if (k === null) {
-      selected.selectedKey = null;
-      saveSelected(selected);
-      toast("🔁 自動BGMに戻した");
-      startBgm(true);
-      return { ok: true };
-    }
-    if (!TRACKS[k]) return { ok: false, reason: "unknown" };
-    if (!isOwned(k)) return { ok: false, reason: "not_owned" };
-
-    selected.selectedKey = k;
-    saveSelected(selected);
-    toast(`🎵 ${LABELS[k]} を流す`);
-    startBgm(true);
-    return { ok: true };
-  }
-
-  function playSpecial(key) {
-    if (!TRACKS[key]) return;
-    if (!isOwned(key)) { toast("未購入です"); return; }
-    specialKey = key;
-    tryPlay(TRACKS[key], key);
-  }
-  function clearSpecial() {
-    specialKey = null;
-    startBgm(true);
-  }
-
-  /* =========================
-   * SE volume / helpers
-   * ========================= */
-  function getSEVolume() { return clamp(seVolume, 0, 1); }
-
-  function setSEVolume(v) {
-    seVolume = clamp(Number(v) || 0, 0, 1);
-    saveSEVolume(seVolume);
-    window.__milkpopSeVolume = seVolume;
-    applyLoopSEVolumes();
-    try { window.dispatchEvent(new CustomEvent("milkpop:seVolume", { detail: { seVolume } })); } catch {}
-  }
-
-  function effectiveSEVolume(base = 1.0) {
-    const b = clamp(Number(base) || 1, 0, 1);
-    if (settings.muted) return 0;
-    return clamp(seVolume * b, 0, 1);
-  }
-
-  // ループSE：key -> { audio, base }
-  const loopSEMap = new Map();
-
-  function applyLoopSEVolumes() {
-    loopSEMap.forEach((obj) => {
-      const a = obj?.audio;
-      const base = Number(obj?.base ?? 1);
-      if (!a) return;
-      try {
-        a.muted = !!settings.muted;
-        a.volume = effectiveSEVolume(base);
-      } catch {}
-    });
-  }
-
-  // ワンショットSE（効果音）
-  function oneShotSE(src, base = 1.0) {
-    if (!unlocked) return null;
-    try {
-      const a = new Audio();
-      a.preload = "auto";
-      a.loop = false;
-      a.src = normalizeSrc(src);
-      a.muted = !!settings.muted;
-      a.volume = effectiveSEVolume(base);
-      a.currentTime = 0;
-      a.play().catch(() => {});
-      return a;
-    } catch {
-      return null;
-    }
-  }
-
-  // ループSE（UFOなど：ずっと鳴らす）
-  function loopSE(key, src, base = 1.0) {
-    if (!unlocked) return null;
-    if (!key) key = "loop";
-
-    const normalized = normalizeSrc(src);
-
-    let obj = loopSEMap.get(key);
-    let a = obj?.audio || null;
-
-    try {
-      if (!a) {
-        a = new Audio();
-        a.preload = "auto";
-        a.loop = true;
-        obj = { audio: a, base: Number(base) || 1 };
-        loopSEMap.set(key, obj);
-      } else {
-        obj.base = Number(base) || 1; // ★更新
-      }
-
-      const nextHref = new URL(normalized, location.href).href;
-      if (a.src !== nextHref) {
-        try { a.pause(); } catch {}
-        a.src = normalized;
-        a.currentTime = 0;
-      }
-
-      a.muted = !!settings.muted;
-      a.volume = effectiveSEVolume(obj.base);
-
-      a.play().catch(() => {});
-      return a;
-    } catch {
-      return a || null;
-    }
-  }
-
-  function stopLoopSE(key) {
-    const obj = loopSEMap.get(key);
-    const a = obj?.audio;
-    if (!a) return;
-    try { a.pause(); } catch {}
-  }
-
-  function stopAllLoopSE() {
-    loopSEMap.forEach((obj) => {
-      const a = obj?.audio;
-      if (!a) return;
-      try { a.pause(); } catch {}
-    });
-  }
-
-  /* =========================
-   * WB patch (swap-safe)
-   * ========================= */
-  let lastWBRef = null;
-
-  function patchWB(WB) {
-    if (!WB || typeof WB !== "object") return;
-    if (lastWBRef === WB && WB.__bgmPatchedModalV1) return;
-    lastWBRef = WB;
-
-    if (!WB.__bgmPatchedModalV1) WB.__bgmPatchedModalV1 = { done: false };
-
-    const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
-    WB.unlockAudioOnce = async () => {
-      try { prevUnlock?.(); } catch {}
-      await unlockBgmOnce();
-    };
-
-    WB.bgm = WB.bgm || {};
-
-    WB.bgm.start = () => startBgm(true);
-    WB.bgm.stop = () => stop();
-
-    WB.bgm.playSpecial = playSpecial;
-    WB.bgm.clearSpecial = clearSpecial;
-
-    WB.bgm.TRACKS = TRACKS;
-    WB.bgm.PRICES = PRICES;
-    WB.bgm.LABELS = LABELS;
-
-    WB.bgm.isOwned = isOwned;
-    WB.bgm.buy = buyBgm;
-    WB.bgm.select = selectBgm;
-    WB.bgm.getSelected = () => selected?.selectedKey ?? null;
-    WB.bgm.getCoins = () => getCoinsWB();
-
-    // ✅ モーダル操作API
-    WB.bgm.openModal = openModal;
-    WB.bgm.closeModal = closeModal;
-
-    // ★SE API（app.js / tenki.js が使える）
-    WB.getSEVolume = () => getSEVolume();
-    WB.setSEVolume = (v) => setSEVolume(v);
-
-    WB.se = WB.se || {};
-    WB.se.volume = () => getSEVolume();
-    WB.se.setVolume = (v) => setSEVolume(v);
-    WB.se.oneShot = (src, base = 1.0) => oneShotSE(src, base);
-    WB.se.loop = (key, src, base = 1.0) => loopSE(key, src, base);
-    WB.se.stop = (key) => stopLoopSE(key);
-    WB.se.stopAll = () => stopAllLoopSE();
-
-    WB.__bgmPatchedModalV1.done = true;
-
-    if (unlocked && settings.enabled) startBgm(true);
-    applyLoopSEVolumes();
-  }
-
-  /* =========================
-   * Modal UI（ここが本体）
-   * ========================= */
-  function ensureStyles() {
-    if (document.getElementById(UI.style)) return;
-    const style = document.createElement("style");
-    style.id = UI.style;
-    style.textContent = `
-#${UI.backdrop}{
-  position:fixed; inset:0;
-  z-index:2147483001;
-  background:rgba(0,0,0,.35);
-  display:none;
-}
-#${UI.modal}{
-  position:absolute;
-  left:50%; top:50%;
-  transform:translate(-50%,-50%);
-  width:min(420px, 94vw);
-  max-height:min(84vh, 860px);
-  background:rgba(255,255,255,.98);
-  border-radius:16px;
-  box-shadow:0 18px 60px rgba(0,0,0,.25);
-  overflow:hidden;
-  display:flex;
-  flex-direction:column;
-}
-#${UI.modal} .head{
-  display:flex; align-items:center; justify-content:space-between;
-  padding:12px 14px;
-  border-bottom:1px solid rgba(0,0,0,.08);
-}
-#${UI.modal} .ttl{ font-weight:1000; letter-spacing:.02em; }
-#${UI.modal} .close{
-  width:34px; height:34px;
-  border:none; border-radius:999px;
-  background:rgba(0,0,0,.06);
-  font-weight:1000;
-  cursor:pointer;
-}
-#${UI.modal} .body{
-  padding:12px 14px 16px;
-  overflow:auto;
-}
-#${UI.modal} .row{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-#${UI.modal} .btn{
-  border:none; border-radius:12px;
-  padding:8px 10px;
-  font-weight:900;
-  background:#ffd6e7;
-  cursor:pointer;
-}
-#${UI.modal} .btn.ghost{
-  background:#fff;
-  box-shadow:0 10px 24px rgba(0,0,0,.08);
-}
-#${UI.modal} .slider{ width:100%; margin:10px 0 6px; }
-#${UI.modal} .fine{ font-size:12px; opacity:.75; }
-#${UI.modal} .sep{ height:1px; background:rgba(0,0,0,.08); margin:10px 0; }
-
-#${UI.modal} .item{
-  display:flex; align-items:center; justify-content:space-between;
-  gap:10px; padding:8px 8px;
-  border-radius:14px;
-  background:rgba(0,0,0,.03);
-  margin:8px 0;
-}
-#${UI.modal} .name{ font-weight:900; }
-#${UI.modal} .meta{ font-size:12px; opacity:.75; margin-top:2px; }
-#${UI.modal} .right{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-#${UI.modal} .tag{
-  font-size:12px; font-weight:900;
-  padding:4px 8px; border-radius:999px;
-  background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08);
-}
-#${UI.modal} .buy{
-  border:none; border-radius:12px;
-  padding:8px 10px; font-weight:900;
-  cursor:pointer; background:#ffd6e7;
-}
-#${UI.modal} .buy[disabled]{ opacity:.55; cursor:not-allowed; }
-#${UI.modal} .select{
-  border:none; border-radius:12px;
-  padding:8px 10px; font-weight:900;
-  cursor:pointer; background:#fff;
-  box-shadow:0 10px 24px rgba(0,0,0,.08);
-}
-#${UI.modal} .select[disabled]{ opacity:.55; cursor:not-allowed; }
-#${UI.modal} .select.active{ background:#333; color:#fff; box-shadow:none; }
-
-#${UI.modal} .sectionTitle{
-  margin-top:10px;
-  font-size:12px;
-  font-weight:900;
-  opacity:.75;
-  letter-spacing:.03em;
-}
-`;
-    document.head.appendChild(style);
-  }
-
-  function renderItem(key, label, desc) {
-    const price = PRICES[key] ?? 0;
-    return `
-<div class="item">
-  <div>
-    <div class="name">${label}</div>
-    <div class="meta">${desc}</div>
-  </div>
-  <div class="right">
-    <div class="tag" id="bgmPrice_${key}">${price}🪙</div>
-    <button class="buy" id="bgmBuy_${key}" type="button">購入</button>
-    <button class="select" id="bgmSelect_${key}" type="button">流す</button>
-  </div>
-</div>`;
-  }
-
-  let backdrop = null;
-  let modal = null;
-  let __uiTimer = 0;
-
-  function ensureModalUI() {
-    ensureStyles();
-
-    if (!backdrop) {
-      backdrop = document.createElement("div");
-      backdrop.id = UI.backdrop;
-      document.body.appendChild(backdrop);
-      backdrop.addEventListener("click", (e) => {
-        if (e.target === backdrop) closeModal();
-      });
-    }
-    if (!modal) {
-      modal = document.createElement("div");
-      modal.id = UI.modal;
-      backdrop.appendChild(modal);
-    }
-
-    return { backdrop, modal };
-  }
-
-  function refreshUI() {
-    if (!modal) return;
-
-    const stateText = $("#bgmStateTextModal", modal);
-    const info = $("#bgmInfoModal", modal);
-    const selText = $("#bgmSelTextModal", modal);
-    const toggle = $("#bgmToggleModal", modal);
-    const mute = $("#bgmMuteModal", modal);
-    const vol = $("#bgmVolModal", modal);
-
-    // ★SE
-    const seVol = $("#bgmSEVolModal", modal);
-    const seVolText = $("#bgmSEVolTextModal", modal);
-
-    const coinTag = $("#bgmCoinTagModal", modal);
-
-    if (!stateText || !info || !selText || !toggle || !mute || !vol || !coinTag || !seVol || !seVolText) return;
-
-    vol.value = String(Math.round(settings.volume * 100));
-    toggle.textContent = settings.enabled ? "ON" : "OFF";
-    toggle.style.opacity = settings.enabled ? "1" : "0.6";
-    mute.textContent = settings.muted ? "ミュート中" : "ミュート";
-    mute.style.opacity = settings.muted ? "0.75" : "1";
-
-    seVol.value = String(Math.round(getSEVolume() * 100));
-    seVolText.textContent = `SE音量：${Math.round(getSEVolume() * 100)}%`;
-
-    const c = getCoinsWB();
-    coinTag.textContent = `🪙 ${c}`;
-
-    const sel = selected?.selectedKey ?? null;
-    selText.textContent = sel ? `選択中：${LABELS[sel]}` : "選択中：自動";
-
-    const nowKey = decideKeyToPlay() || pickByTime();
-    info.textContent =
-      (specialKey && TRACKS[specialKey]) ? `特別：${LABELS[specialKey] || specialKey}` :
-      sel ? `選択：${LABELS[sel]}` :
-      `自動：${LABELS[nowKey] || nowKey}`;
-
-    const playing = audio && !audio.paused && unlocked && settings.enabled && !settings.muted && audio.volume > 0;
-    stateText.textContent = playing ? "再生中" : "停止中（クリックで開始）";
-
-    for (const k of Object.keys(PRICES)) {
-      const own = isOwned(k);
-      const price = PRICES[k];
-      const free = FREE_TRACKS.has(k);
-
-      const priceTag = $(`#bgmPrice_${k}`, modal);
-      const buyBtn = $(`#bgmBuy_${k}`, modal);
-      const selBtn = $(`#bgmSelect_${k}`, modal);
-
-      if (!priceTag || !buyBtn || !selBtn) continue;
-
-      priceTag.textContent = free ? "FREE" : (own ? "購入済み" : `${price}🪙`);
-
-      buyBtn.disabled = free || own || (c < price);
-      buyBtn.textContent = free ? "FREE" : (own ? "OK" : "購入");
-
-      selBtn.disabled = !own;
-      selBtn.classList.toggle("active", sel === k);
-      selBtn.textContent = (sel === k) ? "選択中" : "流す";
-    }
-  }
-
-  function buildUI() {
-    const { modal } = ensureModalUI();
-
-    modal.innerHTML = `
-<div class="head">
-  <div>
-    <div class="ttl">🎵 BGM</div>
-    <div class="fine" id="bgmStateTextModal">未再生（画面をクリックで開始）</div>
-  </div>
-  <button class="close" id="bgmCloseModal" type="button">×</button>
-</div>
-
-<div class="body">
-  <div class="row">
-    <button class="btn" id="bgmToggleModal" type="button">ON</button>
-    <button class="btn ghost" id="bgmMuteModal" type="button">ミュート</button>
-    <div class="tag" id="bgmCoinTagModal">🪙 0</div>
-  </div>
-
-  <div class="sectionTitle">▼ BGM音量</div>
-  <input class="slider" id="bgmVolModal" type="range" min="0" max="100" step="1" />
-
-  <div class="sectionTitle">▼ SE音量（UFOなど効果音）</div>
-  <input class="slider" id="bgmSEVolModal" type="range" min="0" max="100" step="1" />
-  <div class="fine" id="bgmSEVolTextModal"></div>
-
-  <div class="fine" id="bgmInfoModal"></div>
-
-  <div class="sep"></div>
-
-  <div class="row">
-    <button class="btn ghost" id="bgmAutoModal" type="button">🔁 自動に戻す</button>
-    <div class="fine" id="bgmSelTextModal"></div>
-  </div>
-
-  <div id="bgmShopModal">
-    <div class="sectionTitle">▼ 通常BGM（朝昼夜：自動 / FREE）</div>
-    ${renderItem("morning", LABELS.morning, "朝の時間帯（5-10時）")}
-    ${renderItem("day",     LABELS.day,     "昼の時間帯（10-17時）")}
-    ${renderItem("night",   LABELS.night,   "夜の時間帯（それ以外）")}
-
-    <div class="sectionTitle">▼ いつでもBGM（購入して好きな時に流す）</div>
-    ${renderItem("stream",   LABELS.stream,   "購入するといつでも選択して再生できる")}
-    ${renderItem("dokkan",   LABELS.dokkan,   "購入するといつでも選択して再生できる")}
-    ${renderItem("cocktail", LABELS.cocktail, "購入するといつでも選択して再生できる")}
-
-    <div class="sectionTitle">▼ 特別BGM（演出用）</div>
-    ${renderItem("depart", LABELS.depart, "旅立ち演出などで使う（手動でも可）")}
-  </div>
-</div>
-`;
-
-    $("#bgmCloseModal", modal)?.addEventListener("click", (e) => {
-      e.preventDefault(); closeModal();
-    });
-
-    $("#bgmToggleModal", modal)?.addEventListener("click", async () => {
-      settings.enabled = !settings.enabled;
-      saveSettings(settings);
-      if (!settings.enabled) stop();
-      else {
-        patchWB(window.WB);
-        try { await window.WB?.unlockAudioOnce?.(); } catch {}
-        startBgm(true);
-      }
-      applyLoopSEVolumes();
-      refreshUI();
-    });
-
-    $("#bgmMuteModal", modal)?.addEventListener("click", () => {
-      settings.muted = !settings.muted;
-      saveSettings(settings);
-      applyVolume();
-      applyLoopSEVolumes();
-      refreshUI();
-    });
-
-    $("#bgmVolModal", modal)?.addEventListener("input", async () => {
-      settings.volume = clamp(Number($("#bgmVolModal", modal).value) / 100, 0, 1);
-      saveSettings(settings);
-      applyVolume();
-      if (settings.enabled) {
-        patchWB(window.WB);
-        try { await window.WB?.unlockAudioOnce?.(); } catch {}
-        startBgm(false);
-      }
-      refreshUI();
-    });
-
-    // ★SE音量
-    $("#bgmSEVolModal", modal)?.addEventListener("input", () => {
-      const v = clamp(Number($("#bgmSEVolModal", modal).value) / 100, 0, 1);
-      setSEVolume(v);
-      refreshUI();
-    });
-
-    $("#bgmAutoModal", modal)?.addEventListener("click", async () => {
-      patchWB(window.WB);
-      try { await window.WB?.unlockAudioOnce?.(); } catch {}
-      selectBgm(null);
-      refreshUI();
-    });
-
-    for (const k of Object.keys(PRICES)) {
-      $(`#bgmBuy_${k}`, modal)?.addEventListener("click", async () => {
-        patchWB(window.WB);
-        try { await window.WB?.unlockAudioOnce?.(); } catch {}
-
-        if (FREE_TRACKS.has(k)) {
-          toast("✅ FREEです");
-          selectBgm(k);
-          refreshUI();
-          return;
-        }
-
-        const r = buyBgm(k);
-        if (!r.ok) {
-          if (r.reason === "coins") toast(`🪙 足りない！ ${r.have} / ${r.need}`);
-          else toast("購入できませんでした");
-        } else {
-          selectBgm(k);
-        }
-        refreshUI();
-      });
-
-      $(`#bgmSelect_${k}`, modal)?.addEventListener("click", async () => {
-        patchWB(window.WB);
-        try { await window.WB?.unlockAudioOnce?.(); } catch {}
-        const r = selectBgm(k);
-        if (!r.ok) toast("未購入です");
-        refreshUI();
-      });
-    }
-
-    // 定期更新（コイン表示など）
-    clearInterval(__uiTimer);
-    __uiTimer = setInterval(refreshUI, 500);
-    refreshUI();
-  }
-
-  function openModal() {
-    ensureAudio();
-    patchWB(window.WB);
-
-    const { backdrop } = ensureModalUI();
-    buildUI();
-    backdrop.style.display = "block";
-
-    // ✅ モーダルを開いたら一度アンロックを試す（1クリック後に確実に鳴る）
     try { window.WB?.unlockAudioOnce?.(); } catch {}
 
-    refreshUI();
+    try {
+      sePoyo.muted = true;
+      sePoyo.currentTime = 0;
+      sePoyo.play()
+        .then(() => { sePoyo.pause(); sePoyo.currentTime = 0; sePoyo.muted = false; })
+        .catch(() => (sePoyo.muted = false));
+    } catch {}
+  }
+  window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
+
+  function playSE(a, base = 1.0) {
+    try {
+      if (!a) return;
+      if (!audioUnlocked) return;
+
+      const muted = isSEMuted();
+      const vol = muted ? 0 : clamp(base * getSEVolume(), 0, 1);
+
+      a.muted = !!muted;
+      a.volume = vol;
+
+      a.currentTime = 0;
+      a.play().catch(() => {});
+    } catch {}
   }
 
-  function closeModal() {
-    if (!backdrop) return;
-    backdrop.style.display = "none";
+  window.addEventListener("milkpop:seVolume", () => {}, { passive: true });
+
+  /* =========================
+   * CSS injection
+   * ========================= */
+  (function injectCssOnce() {
+    if (document.getElementById("wbPerBunnyChargeCss")) return;
+    const st = document.createElement("style");
+    st.id = "wbPerBunnyChargeCss";
+    st.textContent = `
+      .coin{ width:22px !important; height:22px !important; }
+      .ougonunchi{ width:26px !important; height:26px !important; position:absolute; }
+      .unchiDrop{
+        width:24px !important;
+        height:24px !important;
+        position:absolute;
+        user-select:none;
+        -webkit-user-drag:none;
+      }
+      .wbChargeHart {
+        position:absolute; z-index:9999; pointer-events:none; user-select:none; -webkit-user-drag:none;
+        transform: translate(-50%, -50%);
+        animation: wbHartBob 1.05s ease-in-out infinite;
+        filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
+        width:26px; height:26px;
+      }
+      @keyframes wbHartBob {
+        0%   { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
+        50%  { transform: translate(-50%, -50%) translateY(-7px) rotate(3deg) scale(1.03); }
+        100% { transform: translate(-50%, -50%) translateY(0px) rotate(-3deg) scale(1); }
+      }
+    `;
+    document.head.appendChild(st);
+  })();
+
+  /* =========================
+   * State / Storage helpers
+   * ========================= */
+  let coins = (() => {
+    const n = parseInt(localStorage.getItem(LS.coins) || "0", 10);
+    return Number.isFinite(n) ? n : 0;
+  })();
+
+  function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
+
+  function updateHud() {
+    coinValueEl.textContent = String(coins);
+    emit("hudUpdated", { coins });
+  }
+
+  function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
+
+  function loadBunnyMeta() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(LS.bunnies) || "null");
+      if (!Array.isArray(arr)) return null;
+      return arr.map(x => ({
+        bornAt: Number(x?.bornAt) || Date.now(),
+        kind: safeKind(x?.kind),
+      }));
+    } catch { return null; }
+  }
+
+  function saveBunnyMeta() {
+    localStorage.setItem(
+      LS.bunnies,
+      JSON.stringify(bunnies.map(b => ({ bornAt: b.bornAt, kind: b.kind })))
+    );
   }
 
   /* =========================
-   * Autoplay unlock
+   * Drops
    * ========================= */
-  function startWBWatcher() {
-    patchWB(window.WB);
-    const start = Date.now();
-    const t = setInterval(() => {
-      patchWB(window.WB);
-      if (Date.now() - start > 15000) clearInterval(t);
-    }, 200);
+  const dropsOnField = [];
+  const dropByEl = new WeakMap();
+
+  class CoinDrop {
+    constructor(x, y, tierIndex = 0) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() * 2 - 1) * 110;
+      this.vy = -(420 + Math.random() * 240);
+      this.gravity = 2200;
+      this.bounce  = 0.22 + Math.random() * 0.12;
+      this.floor   = groundY();
+
+      const el = document.createElement("img");
+      el.className = "coin";
+      this.tier = clamp(Math.floor(tierIndex), 0, ASSETS.coins.length - 1);
+      el.src = ASSETS.coins[this.tier];
+      el.draggable = false;
+      this.el = el;
+
+      dropByEl.set(el, this);
+
+      el.addEventListener("pointerenter", () => this.collect());
+      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
+      el.addEventListener("click", () => this.collect());
+
+      coinLayer.appendChild(el);
+      this.render();
+    }
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+    update(dt) {
+      this.floor = groundY();
+      this.vy += this.gravity * dt;
+      this.x  += this.vx * dt;
+      this.y  += this.vy * dt;
+
+      if (this.y >= this.floor) {
+        this.y = this.floor;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+          this.vx *= 0.72;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
+      }
+      this.render();
+    }
+    collect() {
+      if (!this.el || !this.el.isConnected) return;
+
+      coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
+      saveCoins();
+      updateHud();
+      playSE(seCoin);
+
+      try { this.el.remove(); } catch {}
+      const idx = dropsOnField.indexOf(this);
+      if (idx >= 0) dropsOnField.splice(idx, 1);
+    }
   }
 
-  function setupAutoplayUnlock() {
-    const handler = async () => {
-      patchWB(window.WB);
-      try { await window.WB?.unlockAudioOnce?.(); } catch {}
-    };
-    window.addEventListener("pointerdown", handler, { passive: true });
-    window.addEventListener("keydown", handler, { passive: true });
-    window.addEventListener("touchstart", handler, { passive: true });
+  class OugonUnchiDrop {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() * 2 - 1) * 120;
+      this.vy = -(480 + Math.random() * 260);
+      this.gravity = 2200;
+      this.bounce  = 0.18 + Math.random() * 0.10;
+      this.floor   = groundY();
+
+      const el = document.createElement("img");
+      el.className = "ougonunchi";
+      el.src = ASSETS.ougonUnchi;
+      el.draggable = false;
+      this.el = el;
+
+      dropByEl.set(el, this);
+
+      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
+      el.addEventListener("click", () => this.collect());
+
+      coinLayer.appendChild(el);
+      this.render();
+    }
+
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+
+    update(dt) {
+      this.floor = groundY();
+      this.vy += this.gravity * dt;
+      this.x  += this.vx * dt;
+      this.y  += this.vy * dt;
+
+      if (this.y >= this.floor) {
+        this.y = this.floor;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+          this.vx *= 0.70;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
+      }
+      this.render();
+    }
+
+    collect() {
+      if (!this.el || !this.el.isConnected) return;
+
+      coins += OUGON_VALUE;
+      saveCoins();
+      updateHud();
+
+      // ✅ 黄金うんちクリックで unchi.mp3
+      playSE(seUnchi, 1.0);
+
+      try { this.el.remove(); } catch {}
+      const idx = dropsOnField.indexOf(this);
+      if (idx >= 0) dropsOnField.splice(idx, 1);
+    }
   }
 
-  function startTimeWatcher() {
-    setInterval(() => startBgm(false), 30_000);
+  // ✅ 通常うんち：クリック/タップで回収 → unchi.mp3 を流す
+  class UnchiDrop {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() * 2 - 1) * 105;
+      this.vy = -(380 + Math.random() * 240);
+      this.gravity = 2200;
+      this.bounce  = 0.20 + Math.random() * 0.10;
+      this.floor   = groundY();
+
+      const el = document.createElement("img");
+      el.className = "unchiDrop";
+      el.src = ASSETS.unchiImg;
+      el.draggable = false;
+      this.el = el;
+
+      dropByEl.set(el, this);
+
+      // ✅ クリック/タップのみ（hoverでは回収しない）
+      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
+      el.addEventListener("click", () => this.collect());
+
+      coinLayer.appendChild(el);
+      this.render();
+    }
+
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+
+    update(dt) {
+      this.floor = groundY();
+      this.vy += this.gravity * dt;
+      this.x  += this.vx * dt;
+      this.y  += this.vy * dt;
+
+      if (this.y >= this.floor) {
+        this.y = this.floor;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+          this.vx *= 0.72;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
+      }
+      this.render();
+    }
+
+    collect() {
+      if (!this.el || !this.el.isConnected) return;
+
+      unlockAudioOnce();
+
+      coins += UNCHI_VALUE;
+      saveCoins();
+      updateHud();
+
+      // ✅ ここが要望：unchi.pngクリック時に unchi.mp3 を鳴らす
+      playSE(seUnchi, UNCHI_SE_BASE);
+
+      try { this.el.remove(); } catch {}
+      const idx = dropsOnField.indexOf(this);
+      if (idx >= 0) dropsOnField.splice(idx, 1);
+    }
   }
 
-  (async function boot() {
-    ensureAudio();
-    startWBWatcher();
-    setupAutoplayUnlock();
-    startBgm(false);
-    startTimeWatcher();
+  function spawnClickCoins(bunny, count = 1, tierPicker = () => 0, opt = {}) {
+    const allowOugon = opt.allowOugon !== false;
+
+    const r  = bunny.wrap.getBoundingClientRect();
+    const fr = field.getBoundingClientRect();
+    const baseX  = (r.left - fr.left) + r.width  * 0.55;
+    const baseY  = (r.top  - fr.top)  + r.height * 0.82;
+
+    for (let i = 0; i < count; i++) {
+      const x = baseX + rand(-14, 14);
+      const y = baseY + rand(-6, 6);
+
+      if (allowOugon && Math.random() < OUGON_RATE) {
+        const u = new OugonUnchiDrop(x, y);
+        dropsOnField.push(u);
+        continue;
+      }
+
+      const tier = tierPicker();
+      const c = new CoinDrop(x, y, tier);
+      dropsOnField.push(c);
+    }
+  }
+
+  function spawnPeriodicUnchiFromBunny(bunny) {
+    try {
+      if (!bunny?.wrap) return;
+      const r  = bunny.wrap.getBoundingClientRect();
+      const fr = field.getBoundingClientRect();
+      const x = (r.left - fr.left) + r.width * 0.30 + rand(-8, 8);
+      const y = (r.top  - fr.top)  + r.height * 0.88 + rand(-5, 5);
+
+      const u = new UnchiDrop(x, y);
+      dropsOnField.push(u);
+    } catch {}
+  }
+
+  /* =========================
+   * Bunny
+   * ========================= */
+  const bunnies = [];
+
+  class Bunny {
+    constructor(bornAt, kind = "bunny1") {
+      this.bornAt = Number(bornAt) || Date.now();
+      this.kind   = safeKind(kind);
+      this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
+
+      this.wrap = document.createElement("div");
+      this.wrap.className = "bunnyWrap";
+      this.wrap.style.position = "absolute";
+      this.wrap.style.left = "0px";
+      this.wrap.style.top  = "0px";
+
+      this.el = document.createElement("img");
+      this.el.className = "bunny";
+      this.el.draggable = false;
+
+      this.wrap.appendChild(this.el);
+      bunnyLayer.appendChild(this.wrap);
+
+      this.charge = 0;
+      this.chargeReady = false;
+      this.hartEl = null;
+
+      refreshFieldSize();
+      this.x = rand(20, Math.max(21, FIELD_W - 140));
+      this.y = groundY() - 120;
+      this.dir = Math.random() < 0.5 ? -1 : 1;
+      this.baseSpeed = 55 + Math.random() * 60;
+
+      this.evolveIfNeeded(true);
+      this.syncSprite();
+
+      const tap = (e) => {
+        e?.preventDefault?.();
+        unlockAudioOnce();
+
+        playSE(this.isBaby ? seBaby : sePoyo);
+
+        if (this.isBaby) {
+          const plan = this.getDropPlanFromOwnCharge();
+          spawnClickCoins(this, plan.count, () => 0, { allowOugon: false });
+        } else {
+          const plan = this.getDropPlanFromOwnCharge();
+          spawnClickCoins(this, plan.count, plan.pickTier, { allowOugon: true });
+        }
+
+        this.consumeOwnCharge();
+        this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
+      };
+
+      this.wrap.addEventListener("pointerdown", tap);
+      this.wrap.addEventListener("click", tap);
+
+      this.el.addEventListener("load", () => {
+        this.clampInside();
+        this.applyPos();
+        this.positionHeart();
+      });
+
+      this.clampInside();
+      this.applyPos();
+    }
+
+    syncSprite() {
+      this.el.src = this.isBaby
+        ? ASSETS.babyBunny
+        : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
+    }
+
+    ensureHeartEl() {
+      if (this.hartEl && this.hartEl.isConnected) return this.hartEl;
+      const el = document.createElement("img");
+      el.className = "wbChargeHart";
+      el.src = ASSETS.hart;
+      el.draggable = false;
+      el.style.display = "none";
+      field.appendChild(el);
+      this.hartEl = el;
+      return el;
+    }
+
+    showHeart() {
+      const el = this.ensureHeartEl();
+      el.style.display = "block";
+      this.positionHeart();
+    }
+
+    hideHeart() {
+      if (!this.hartEl) return;
+      this.hartEl.style.display = "none";
+    }
+
+    positionHeart() {
+      if (!this.hartEl || this.hartEl.style.display === "none") return;
+      const r  = this.wrap.getBoundingClientRect();
+      const fr = field.getBoundingClientRect();
+      const x = (r.left - fr.left) + r.width * 0.5;
+      const y = (r.top  - fr.top)  + r.height * 0.08;
+      this.hartEl.style.left = `${x}px`;
+      this.hartEl.style.top  = `${y}px`;
+    }
+
+    addOwnCharge(delta) {
+      if (this.chargeReady) return;
+      delta = Number(delta) || 0;
+      if (delta <= 0) return;
+
+      this.charge = clamp(this.charge + delta, 0, CHARGE_MAX);
+      if (this.charge >= CHARGE_MAX) {
+        this.charge = CHARGE_MAX;
+        this.chargeReady = true;
+        this.showHeart();
+        emit("bunnyChargeReady", { bornAt: this.bornAt });
+      }
+    }
+
+    consumeOwnCharge() {
+      this.charge = 0;
+      this.chargeReady = false;
+      this.hideHeart();
+      emit("bunnyChargeConsumed", { bornAt: this.bornAt });
+    }
+
+    getChargeRatio() { return clamp(this.charge / CHARGE_MAX, 0, 1); }
+
+    getDropPlanFromOwnCharge() {
+      const r = this.getChargeRatio();
+      const count = 3 + Math.floor(r * 15);
+      const maxTier = Math.floor(r * 3 + 1e-9);
+
+      const pickTier = () => {
+        if (maxTier <= 0) return 0;
+        let sum = 0;
+        const w = [];
+        for (let t = 0; t <= maxTier; t++) {
+          const wt = (t + 1) * (t + 1);
+          w.push(wt);
+          sum += wt;
+        }
+        let x = Math.random() * sum;
+        for (let t = 0; t <= maxTier; t++) {
+          x -= w[t];
+          if (x <= 0) return t;
+        }
+        return maxTier;
+      };
+
+      return { count, pickTier };
+    }
+
+    getWrapWidth() {
+      const w1 = this.wrap.offsetWidth || 0;
+      if (w1 > 0) return w1;
+      const w2 = this.wrap.getBoundingClientRect().width || 0;
+      return Math.max(1, w2 || 140);
+    }
+
+    clampInside() {
+      refreshFieldSize();
+      const w = this.getWrapWidth();
+      const PAD = 6;
+      const minX = PAD;
+      const maxX = Math.max(minX, FIELD_W - w - PAD);
+      this.x = clamp(this.x, minX, maxX);
+      this.y = groundY() - 120;
+    }
+
+    evolveIfNeeded(isInit = false) {
+      if (!this.isBaby) return;
+      if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
+
+      this.isBaby = false;
+      if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) {
+        this.kind = "reabunny";
+      }
+
+      this.syncSprite();
+      this.clampInside();
+      if (isInit) saveBunnyMeta();
+    }
+
+    applyPos() {
+      this.wrap.classList.toggle("flip", this.dir < 0);
+      this.wrap.style.left = `${this.x}px`;
+      this.wrap.style.top  = `${this.y}px`;
+    }
+
+    update(dt) {
+      this.evolveIfNeeded(false);
+      this.addOwnCharge(CHARGE_PER_SEC * dt);
+
+      const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
+      this.x += this.dir * this.baseSpeed * speedMul * dt;
+
+      const w = this.getWrapWidth();
+      const PAD = 6;
+      const minX = PAD;
+      const maxX = Math.max(minX, FIELD_W - w - PAD);
+
+      if (this.x <= minX) { this.x = minX; this.dir = 1; }
+      else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
+
+      this.applyPos();
+      if (this.chargeReady) this.positionHeart();
+    }
+  }
+
+  function spawnBunny(kind = "bunny1", bornAt = Date.now()) {
+    const b = new Bunny(bornAt, kind);
+    bunnies.push(b);
+    saveBunnyMeta();
+    emit("bunnyCountChanged", { count: bunnies.length });
+    return b;
+  }
+
+  function removeBunnyInstance(b) {
+    const idx = bunnies.indexOf(b);
+    if (idx < 0) return false;
+    try { b.wrap.remove(); } catch {}
+    try { b.hartEl?.remove(); } catch {}
+    bunnies.splice(idx, 1);
+    saveBunnyMeta();
+    emit("bunnyCountChanged", { count: bunnies.length });
+    return true;
+  }
+
+  /* =========================
+   * Touch: スライド回収（コインだけ）
+   * - ✅ うんち（通常/黄金）はスライド回収しない（クリック/タップのみ）
+   * ========================= */
+  let touchCollectActive = false;
+  let touchPointerId = null;
+
+  function collectAtClientPoint(clientX, clientY) {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (!el) return;
+
+    const target = (el.classList?.contains("coin")) ? el : el.closest?.(".coin");
+    if (!target) return;
+
+    const drop = dropByEl.get(target);
+    if (drop && typeof drop.collect === "function") drop.collect();
+  }
+
+  field.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "touch") return;
+    touchCollectActive = true;
+    touchPointerId = e.pointerId;
+    collectAtClientPoint(e.clientX, e.clientY);
+  }, { passive: true });
+
+  field.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (!touchCollectActive) return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    collectAtClientPoint(e.clientX, e.clientY);
+  }, { passive: true });
+
+  window.addEventListener("pointerup", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    touchCollectActive = false;
+    touchPointerId = null;
+  }, { passive: true });
+
+  window.addEventListener("pointercancel", (e) => {
+    if (e.pointerType !== "touch") return;
+    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
+    touchCollectActive = false;
+    touchPointerId = null;
+  }, { passive: true });
+
+  /* =========================
+   * Buttons（emit only）
+   * ========================= */
+  shopBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:shop",  {}); });
+  departBtn?.addEventListener("click",() => { unlockAudioOnce(); emit("ui:depart",{}); });
+  rankBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:rank",  {}); });
+  slotBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:slot",  {}); });
+
+  if (resetBtn) {
+    resetBtn.addEventListener("click", () => {
+      unlockAudioOnce();
+      if (!confirm("リセットしますか？")) return;
+      localStorage.removeItem(LS.coins);
+      localStorage.removeItem(LS.bunnies);
+      localStorage.removeItem(LS.dex);
+      localStorage.removeItem(LS.unchi);
+      localStorage.removeItem(LS.title);
+      localStorage.removeItem(LS.titleList);
+      emit("resetRequested", {});
+      location.reload();
+    });
+  }
+
+  /* =========================
+   * ✅ 定期うんち排出ループ
+   * ========================= */
+  function startPeriodicUnchiLoop() {
+    setInterval(() => {
+      if (!bunnies.length) return;
+
+      for (const b of bunnies) {
+        // 成体だけにしたいなら：
+        // if (b.isBaby) continue;
+
+        if (Math.random() < UNCHI_RATE_PER_TICK) {
+          spawnPeriodicUnchiFromBunny(b);
+        }
+      }
+    }, UNCHI_INTERVAL_MS);
+  }
+
+  /* =========================
+   * WB Public API
+   * ========================= */
+  window.WB = {
+    on, off, emit,
+    ASSETS, BUNNY_DEFS, LS, DEPART_COST,
+    field, shopBtn, departBtn, rankBtn, resetBtn, slotBtn,
+
+    get coins() { return coins; },
+    set coins(v) {
+      coins = Math.max(0, Math.floor(Number(v) || 0));
+      saveCoins();
+      updateHud();
+    },
+
+    getCoin: () => coins,
+    spendCoin: (n) => {
+      n = Math.floor(Number(n) || 0);
+      if (n <= 0) return true;
+      if (coins < n) return false;
+      coins -= n;
+      saveCoins();
+      updateHud();
+      return true;
+    },
+
+    bunnies,
+    getBunnies: () => bunnies,
+    spawnBunny,
+    removeBunnyInstance,
+
+    saveCoins,
+    saveBunnyMeta,
+
+    unlockAudioOnce,
+
+    playSE,
+    getSEVolume,
+
+    seTabidati,
+    seUnchi,
+
+    updateHud,
+
+    getBunnyCharge: (bornAt) => {
+      const t = Number(bornAt);
+      const b = bunnies.find(x => x && x.bornAt === t);
+      return b ? { charge: b.charge, ready: b.chargeReady } : null;
+    },
+
+    spawnUnchiNearBunny: (bornAt) => {
+      const t = Number(bornAt);
+      const b = bunnies.find(x => x && x.bornAt === t);
+      if (b) spawnPeriodicUnchiFromBunny(b);
+    },
+  };
+
+  /* =========================
+   * Init / Loop
+   * ========================= */
+  function initBunnies() {
+    const meta = loadBunnyMeta();
+
+    if (meta && meta.length) {
+      meta.forEach(m => spawnBunny(m.kind, m.bornAt));
+      saveBunnyMeta();
+      return;
+    }
+
+    const t = Date.now();
+    spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
+    spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
+    saveBunnyMeta();
+  }
+
+  let lastFrame = performance.now();
+  function tick(ts) {
+    const dt = Math.min(0.033, (ts - lastFrame) / 1000);
+    lastFrame = ts;
+
+    for (const b of bunnies) b.update(dt);
+    for (const d of dropsOnField) d.update(dt);
+
+    requestAnimationFrame(tick);
+  }
+
+  function init() {
+    refreshFieldSize();
+    initBunnies();
+    updateHud();
+    emit("bunnyCountChanged", { count: bunnies.length });
+
+    startPeriodicUnchiLoop();
+
+    requestAnimationFrame(tick);
+
+    window.addEventListener("resize", () => {
+      refreshFieldSize();
+      for (const b of bunnies) { b.clampInside(); b.applyPos(); b.positionHeart?.(); }
+      emit("resize", {});
+    }, { passive: true });
+  }
+
+  init();
+
+  /* =========================
+   * WB差し替えガード
+   * ========================= */
+  (function wbRePatchGuard() {
+    let last = window.WB;
+    setInterval(() => {
+      if (!window.WB || typeof window.WB !== "object") return;
+      if (window.WB === last) return;
+      last = window.WB;
+
+      if (typeof window.WB.playSE !== "function") window.WB.playSE = playSE;
+      if (typeof window.WB.getSEVolume !== "function") window.WB.getSEVolume = getSEVolume;
+      if (typeof window.WB.unlockAudioOnce !== "function") window.WB.unlockAudioOnce = unlockAudioOnce;
+    }, 300);
   })();
+
 })();
