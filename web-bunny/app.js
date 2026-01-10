@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.3 (SE follows BGM.js volume/mute)", Date.now());
+  console.log("[app.js] LOADED v16.6 (unchi gauge per bunny: slower than charge, spawns unchi drop when full)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -14,10 +14,15 @@
     babySE: "./assets/babybunny.mp3",
     tabidatiSE: "./assets/tabidati.mp3",
 
-    // ✅ 黄金うんち専用SE
+    // ✅ うんちSE（通常/黄金 共通）
     unchiSE: "./assets/unchi.mp3",
 
+    // ✅ 通常うんち
+    unchiImg: "./assets/unchi.png",
+
+    // ✅ 黄金うんち
     ougonUnchi: "./assets/ougonunchi.png",
+
     coins: [
       "./assets/coin1.png", // tier0
       "./assets/coin2.png", // tier1
@@ -44,7 +49,7 @@
   const DEPART_COST = 10;
 
   /* =========================
-   * Charge（個体ごと / UIなし）
+   * Charge（個体ごと / UIはハートのみ）
    * ========================= */
   const CHARGE_MAX = 100;
   const CHARGE_PER_SEC = 3.0; // 約34秒で満タン
@@ -52,8 +57,30 @@
 
   const COIN_VALUE_MULTIPLIER = 2;
 
-  const OUGON_RATE = 0.005;
+  /* =========================
+   * ✅ 黄金うんち（クリックでのみ回収）
+   * ========================= */
+  const OUGON_RATE  = 0.005;
   const OUGON_VALUE = 120 * COIN_VALUE_MULTIPLIER;
+
+  /* =========================
+   * ✅ 通常うんち（ougonunchi と同じドロップ仕様）
+   * - ただし「うんちゲージ」が貯まったら出現
+   * - うさぎゲージより遅く貯まる
+   * ========================= */
+  const UNCHI_CHARGE_MAX = 100;
+
+  // ★ここが「うさぎゲージより遅く」：CHARGE_PER_SEC(=3.0) より小さく
+  const UNCHI_CHARGE_PER_SEC = 0.75; // 約133秒で満タン（必要なら調整）
+
+  // うんちの価値
+  const UNCHI_VALUE = 10 * COIN_VALUE_MULTIPLIER;
+
+  // クリック時SEの基礎倍率（SEスライダーに掛かる）
+  const UNCHI_SE_BASE = 1.0;
+
+  // うんちを出す対象（成体だけにしたい場合は true）
+  const UNCHI_ADULT_ONLY = true;
 
   /* =========================
    * Storage
@@ -117,10 +144,6 @@
 
   /* =========================
    * Audio (SEはBGM.jsに完全連動)
-   * - encodeURI
-   * - unlock連結
-   * - 音量: WB.getSEVolume() / window.__milkpopSeVolume / LS の順
-   * - ミュート: BGM.js settings.muted を参照
    * ========================= */
   const sePoyo     = new Audio(encodeURI(ASSETS.poyoSE));
   const seBaby     = new Audio(encodeURI(ASSETS.babySE));
@@ -147,7 +170,6 @@
   }
 
   function getSEVolume() {
-    // 1) WB.getSEVolume（BGM.jsが提供）
     try {
       if (window.WB && typeof window.WB.getSEVolume === "function") {
         const v = Number(window.WB.getSEVolume());
@@ -155,13 +177,11 @@
       }
     } catch {}
 
-    // 2) window.__milkpopSeVolume（BGM.jsが公開）
     try {
       const v = Number(window.__milkpopSeVolume);
       if (Number.isFinite(v)) return clamp(v, 0, 1);
     } catch {}
 
-    // 3) localStorage 直読み
     try {
       const raw = localStorage.getItem(LS_KEY_SE_VOL);
       if (raw == null) return 0.85;
@@ -173,7 +193,6 @@
   }
 
   function isSEMuted() {
-    // ✅ BGM.js のミュートは SE もミュート扱いに揃える
     const s = loadBgmSettingsLike();
     return !!s.muted;
   }
@@ -184,10 +203,8 @@
     if (audioUnlocked) return;
     audioUnlocked = true;
 
-    // ✅ BGM.js があるならそっちもアンロック（連結）
     try { window.WB?.unlockAudioOnce?.(); } catch {}
 
-    // ✅ 自前アンロック（最小の無音再生）
     try {
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
@@ -198,7 +215,6 @@
   }
   window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
 
-  // ✅ playSE（BGM.jsのSE音量を毎回読む）
   function playSE(a, base = 1.0) {
     try {
       if (!a) return;
@@ -215,7 +231,6 @@
     } catch {}
   }
 
-  // ✅ BGM.js側UIからの変更に追従（実際はplaySEが毎回読むので不要だが、即時系の拡張用）
   window.addEventListener("milkpop:seVolume", () => {}, { passive: true });
 
   /* =========================
@@ -228,6 +243,7 @@
     st.textContent = `
       .coin{ width:22px !important; height:22px !important; }
       .ougonunchi{ width:26px !important; height:26px !important; position:absolute; }
+      .unchiDrop{ width:24px !important; height:24px !important; position:absolute; user-select:none; -webkit-user-drag:none; }
       .wbChargeHart {
         position:absolute; z-index:9999; pointer-events:none; user-select:none; -webkit-user-drag:none;
         transform: translate(-50%, -50%);
@@ -347,6 +363,7 @@
     }
   }
 
+  // ✅ 黄金うんち（クリック/タップのみ回収 + unchi.mp3）
   class OugonUnchiDrop {
     constructor(x, y) {
       this.x = x;
@@ -399,15 +416,99 @@
     collect() {
       if (!this.el || !this.el.isConnected) return;
 
+      unlockAudioOnce();
+
       coins += OUGON_VALUE;
       saveCoins();
       updateHud();
-      playSE(seUnchi);
+
+      playSE(seUnchi, 1.0);
 
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
     }
+  }
+
+  // ✅ 通常うんち（黄金うんちと同じ仕様：クリック/タップのみ回収 + unchi.mp3）
+  class UnchiDrop {
+    constructor(x, y) {
+      this.x = x;
+      this.y = y;
+      this.vx = (Math.random() * 2 - 1) * 120;
+      this.vy = -(480 + Math.random() * 260);
+      this.gravity = 2200;
+      this.bounce  = 0.18 + Math.random() * 0.10;
+      this.floor   = groundY();
+
+      const el = document.createElement("img");
+      el.className = "unchiDrop";
+      el.src = ASSETS.unchiImg;
+      el.draggable = false;
+      this.el = el;
+
+      dropByEl.set(el, this);
+
+      // ✅ hover回収しない（黄金と同じ）
+      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
+      el.addEventListener("click", () => this.collect());
+
+      coinLayer.appendChild(el);
+      this.render();
+    }
+
+    render() {
+      this.el.style.left = `${this.x}px`;
+      this.el.style.top  = `${this.y}px`;
+    }
+
+    update(dt) {
+      this.floor = groundY();
+      this.vy += this.gravity * dt;
+      this.x  += this.vx * dt;
+      this.y  += this.vy * dt;
+
+      if (this.y >= this.floor) {
+        this.y = this.floor;
+        if (Math.abs(this.vy) > 260) {
+          this.vy = -this.vy * this.bounce;
+          this.vx *= 0.70;
+        } else {
+          this.vy = 0;
+          this.vx = 0;
+        }
+      }
+      this.render();
+    }
+
+    collect() {
+      if (!this.el || !this.el.isConnected) return;
+
+      unlockAudioOnce();
+
+      coins += UNCHI_VALUE;
+      saveCoins();
+      updateHud();
+
+      // ✅ 要望：unchi.pngクリック時に unchi.mp3
+      playSE(seUnchi, UNCHI_SE_BASE);
+
+      try { this.el.remove(); } catch {}
+      const idx = dropsOnField.indexOf(this);
+      if (idx >= 0) dropsOnField.splice(idx, 1);
+    }
+  }
+
+  function spawnUnchiNearBunny(bunny) {
+    try {
+      const r  = bunny.wrap.getBoundingClientRect();
+      const fr = field.getBoundingClientRect();
+      const x = (r.left - fr.left) + r.width  * 0.40 + rand(-10, 10);
+      const y = (r.top  - fr.top)  + r.height * 0.88 + rand(-6, 6);
+
+      const u = new UnchiDrop(x, y);
+      dropsOnField.push(u);
+    } catch {}
   }
 
   function spawnClickCoins(bunny, count = 1, tierPicker = () => 0, opt = {}) {
@@ -458,9 +559,13 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
+      // ===== 個体チャージ（ハート） =====
       this.charge = 0;
       this.chargeReady = false;
       this.hartEl = null;
+
+      // ===== ✅ 個体うんちゲージ（遅い） =====
+      this.unchiCharge = 0; // 0..UNCHI_CHARGE_MAX
 
       refreshFieldSize();
       this.x = rand(20, Math.max(21, FIELD_W - 140));
@@ -562,6 +667,25 @@
       emit("bunnyChargeConsumed", { bornAt: this.bornAt });
     }
 
+    // ✅ うんちゲージ：貯まったら「unchi.png をドロップとして表示」してリセット
+    addUnchiCharge(delta) {
+      delta = Number(delta) || 0;
+      if (delta <= 0) return;
+
+      // 対象制限
+      if (UNCHI_ADULT_ONLY && this.isBaby) return;
+
+      this.unchiCharge = clamp(this.unchiCharge + delta, 0, UNCHI_CHARGE_MAX);
+
+      if (this.unchiCharge >= UNCHI_CHARGE_MAX) {
+        this.unchiCharge = 0;
+
+        // ✅ 満タンで unchi.png を「黄金うんちと同じ仕様」で出す（= ドロップ表示）
+        spawnUnchiNearBunny(this);
+        emit("bunnyUnchiSpawned", { bornAt: this.bornAt });
+      }
+    }
+
     getChargeRatio() { return clamp(this.charge / CHARGE_MAX, 0, 1); }
 
     getDropPlanFromOwnCharge() {
@@ -628,7 +752,12 @@
 
     update(dt) {
       this.evolveIfNeeded(false);
+
+      // ★時間経過で個体チャージ（ハート）
       this.addOwnCharge(CHARGE_PER_SEC * dt);
+
+      // ✅ 時間経過で個体うんちゲージ（遅い）
+      this.addUnchiCharge(UNCHI_CHARGE_PER_SEC * dt);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
       this.x += this.dir * this.baseSpeed * speedMul * dt;
@@ -667,6 +796,7 @@
 
   /* =========================
    * Touch: スライド回収（コインだけ）
+   * - ✅ うんち（通常/黄金）はスライド回収しない（クリック/タップのみ）
    * ========================= */
   let touchCollectActive = false;
   let touchPointerId = null;
@@ -769,7 +899,6 @@
 
     unlockAudioOnce,
 
-    // ✅ SEはBGM.jsに追従する再生関数
     playSE,
     getSEVolume,
 
@@ -781,7 +910,14 @@
     getBunnyCharge: (bornAt) => {
       const t = Number(bornAt);
       const b = bunnies.find(x => x && x.bornAt === t);
-      return b ? { charge: b.charge, ready: b.chargeReady } : null;
+      return b ? { charge: b.charge, ready: b.chargeReady, unchi: b.unchiCharge } : null;
+    },
+
+    // デバッグ用：強制うんち
+    spawnUnchiNearBunny: (bornAt) => {
+      const t = Number(bornAt);
+      const b = bunnies.find(x => x && x.bornAt === t);
+      if (b) spawnUnchiNearBunny(b);
     },
   };
 
@@ -832,8 +968,7 @@
   init();
 
   /* =========================
-   * 重要：BGM.js が後からロードされて WB が差し替わっても
-   * app.js のSEが必ず追従するための「再注入」ガード
+   * WB差し替えガード
    * ========================= */
   (function wbRePatchGuard() {
     let last = window.WB;
@@ -842,7 +977,6 @@
       if (window.WB === last) return;
       last = window.WB;
 
-      // もしBGM.jsがWBを差し替えてきても、app側のplaySE/getSEVolumeを残す
       if (typeof window.WB.playSE !== "function") window.WB.playSE = playSE;
       if (typeof window.WB.getSEVolume !== "function") window.WB.getSEVolume = getSEVolume;
       if (typeof window.WB.unlockAudioOnce !== "function") window.WB.unlockAudioOnce = unlockAudioOnce;
