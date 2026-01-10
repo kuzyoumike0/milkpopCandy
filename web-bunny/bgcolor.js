@@ -1,34 +1,47 @@
-// bgcolor.js（V12：mirrorball を itemPlace の enabled+placed と同期し、虹スポットを “実物ミラーボールDOM” から出す）
+// bgcolor.js（V13：転生フラグ(牧場の星)で背景切替 + mirrorballスポットはV12継承）
 // ✅ 朝昼夜 背景をJSTで自動
+// ✅ 転生（牧場の星 >= 1）なら “転生テーマ” に切替（朝昼夜は転生版）
 // ✅ mirrorball：購入済み + enabled=true + placed=true のときだけ有効
 // ✅ スポットライト：幅広い虹2本 / 左右ゆらゆら / hue回転
-// ✅ 光源位置：LS座標ではなく itemPlace が置いた #itemPlace_mirrorball の位置から算出（ズレ根絶）
+// ✅ 光源位置：itemPlace が置いた #itemPlace_mirrorball の位置から算出（ズレ根絶）
 // ✅ 軽量：rAF1本 / 30秒ごと再同期 / OFF時は残骸ゼロ
 
 (() => {
   "use strict";
 
+  /* =========================
+   * Storage Keys
+   * ========================= */
   const LS_OWNED = "milkpop_shop_owned_v1";
   const LS_IP_EN = "milkpop_itemplace_enabled_v1";
   const LS_IP_ST = "milkpop_itemplace_v10"; // ✅ itemPlace.js V10 と一致
 
+  // ✅ 転生（牧場の星）
+  const LS_STARS = "wb_stars_v1"; // number
+
+  /* =========================
+   * DOM IDs
+   * ========================= */
   const BG_ID    = "bgLayer";
   const FIELD_ID = "field";
 
   const MIRROR_DOM_ID = "itemPlace_mirrorball"; // ✅ itemPlace が作る実物
   const MIRROR_IMG_FALLBACK = {
-    id: "bgMirrorballImgV12",
+    id: "bgMirrorballImgV13",
     src: "./assets/bg/mirrorball.png",
     top: 8,
     size: 140,
     z: 40,
   };
 
+  /* =========================
+   * Mirrorball FX
+   * ========================= */
   const FX = {
-    wrapId: "bgMirrorFXWrapV12",
-    leftId: "bgMirrorFXLeftV12",
-    rightId:"bgMirrorFXRightV12",
-    styleId:"bgMirrorFXStyleV12",
+    wrapId: "bgMirrorFXWrapV13",
+    leftId: "bgMirrorFXLeftV13",
+    rightId:"bgMirrorFXRightV13",
+    styleId:"bgMirrorFXStyleV13",
     z: 25,
 
     width: 520,
@@ -49,6 +62,9 @@
     anchorY: 0.62,
   };
 
+  /* =========================
+   * Time Phase
+   * ========================= */
   const MORNING = { start: 5, end: 10 };
   const DAY     = { start: 10, end: 17 };
 
@@ -58,7 +74,22 @@
     night:   "linear-gradient(180deg, #0b1026 0%, #141b3a 55%, #2b1b44 100%)",
   };
 
+  // ✅ 転生テーマ（“次元が上”）
+  const REINC_THEMES = {
+    morning: "linear-gradient(180deg, #fff0c9 0%, #ffd2f0 46%, #f7fbff 100%)",
+    day:     "linear-gradient(180deg, #bff4ff 0%, #d4fff1 46%, #ffffff 100%)",
+    night:   "linear-gradient(180deg, #090a21 0%, #141a4a 48%, #3a1a66 100%)",
+  };
+
   function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
+
+  function getStars() {
+    const n = Number(localStorage.getItem(LS_STARS) || "0");
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  }
+  function isReincarnated() {
+    return getStars() >= 1;
+  }
 
   function getJSTHour() {
     try {
@@ -88,6 +119,9 @@
     el.style.overflow = "hidden";
   }
 
+  /* =========================
+   * Mirrorball ON Conditions
+   * ========================= */
   function isOwnedMirrorball() {
     try { if (window.WB?.shop?.isOwned?.("mirrorball")) return true; } catch {}
     const j = safeParse(localStorage.getItem(LS_OWNED));
@@ -120,9 +154,11 @@
     try { document.getElementById(MIRROR_IMG_FALLBACK.id)?.remove(); } catch {}
   }
 
-  // （任意）ミラーボール実体が見えない環境用：bgLayerに表示（ただしスポット光源はDOM優先）
+  /* =========================
+   * Mirrorball fallback image
+   * ========================= */
   function ensureMirrorFallbackStyle() {
-    const id = "bgMirrorballStyleV12";
+    const id = "bgMirrorballStyleV13";
     if (document.getElementById(id)) return;
     const st = document.createElement("style");
     st.id = id;
@@ -148,7 +184,6 @@
     ensureLayerReady(bgLayer);
     ensureMirrorFallbackStyle();
 
-    // 実物が存在するなら fallback は出さない（ダブり防止）
     const real = document.getElementById(MIRROR_DOM_ID);
     if (real && real.isConnected) {
       cleanupMirrorFallbackImg();
@@ -170,6 +205,9 @@
     }
   }
 
+  /* =========================
+   * FX beams
+   * ========================= */
   function ensureFXStyle() {
     if (document.getElementById(FX.styleId)) return;
     const st = document.createElement("style");
@@ -224,7 +262,6 @@
     return wrap;
   }
 
-  // ✅ 光源位置を “実物ミラーボールDOM” から取る（これがズレ根絶）
   function getAnchorInBg(bgLayer) {
     const br = bgLayer.getBoundingClientRect();
     if (!br.width || !br.height) return null;
@@ -239,7 +276,6 @@
       }
     }
 
-    // フォールバック：itemPlace state + field基準（保険）
     const field = document.getElementById(FIELD_ID);
     if (!field) return null;
 
@@ -263,7 +299,6 @@
 
     const on = shouldOn();
 
-    // 見た目補助（任意）
     ensureMirrorFallbackImg(bgLayer, on);
 
     const fxWrap = ensureFX(bgLayer);
@@ -276,10 +311,7 @@
     }
 
     const a = getAnchorInBg(bgLayer);
-    if (!a) {
-      fxWrap.style.display = "none";
-      return;
-    }
+    if (!a) { fxWrap.style.display = "none"; return; }
 
     fxWrap.style.display = "block";
 
@@ -305,7 +337,12 @@
     R.style.transform = `translateX(-50%) rotate(${FX.baseAngleR}deg)`;
   }
 
+  /* =========================
+   * Apply background (phase + reincarnation)
+   * ========================= */
   let lastPhase = "";
+  let lastReinc = null;
+
   function applyBg(force = false) {
     const bgLayer = document.getElementById(BG_ID);
     const field   = document.getElementById(FIELD_ID);
@@ -316,18 +353,26 @@
 
     const h = getJSTHour();
     const phase = getPhaseByHour(h);
+    const reinc = isReincarnated();
 
-    if (force || phase !== lastPhase) {
+    if (force || phase !== lastPhase || reinc !== lastReinc) {
       lastPhase = phase;
-      const bg = THEMES[phase] || THEMES.day;
+      lastReinc = reinc;
+
+      const bg = (reinc ? (REINC_THEMES[phase] || REINC_THEMES.day) : (THEMES[phase] || THEMES.day));
       bgLayer.style.background = bg;
       if (field) field.style.background = bg;
+
+      bgLayer.dataset.reincarnated = reinc ? "1" : "0";
+      if (field) field.dataset.reincarnated = reinc ? "1" : "0";
     }
 
     syncFXLayout(phase);
   }
 
-  // ===== Animation loop =====
+  /* =========================
+   * Animation loop (mirrorball beams)
+   * ========================= */
   let __raf = 0;
   function startLoop() {
     cancelAnimationFrame(__raf);
@@ -362,12 +407,12 @@
       const _setItem = localStorage.setItem.bind(localStorage);
       localStorage.setItem = (k, v) => {
         _setItem(k, v);
-        if (k === LS_OWNED || k === LS_IP_EN || k === LS_IP_ST) applyBg(true);
+        if (k === LS_OWNED || k === LS_IP_EN || k === LS_IP_ST || k === LS_STARS) applyBg(true);
       };
     } catch {}
     window.addEventListener("storage", (e) => {
       if (!e) return;
-      if (e.key === LS_OWNED || e.key === LS_IP_EN || e.key === LS_IP_ST) applyBg(true);
+      if (e.key === LS_OWNED || e.key === LS_IP_EN || e.key === LS_IP_ST || e.key === LS_STARS) applyBg(true);
     });
   }
 
@@ -380,6 +425,8 @@
       "itemplace:state_changed",
       "core:ready",
       "core:reset_partial",
+      "reincarnated",
+      "starsChanged",
     ];
     evs.forEach(ev => {
       try { window.WB.on(ev, () => applyBg(true)); } catch {}
