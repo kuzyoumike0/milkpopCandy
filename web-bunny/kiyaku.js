@@ -1,12 +1,12 @@
-// kiyaku.js（非module）— 利用規約モーダル（中身ここで管理）
-// ✅ gameMenu.js から window.KIYAKU.open() / window.KIYAKU.close() を呼べる
-// ✅ どのUIよりも前面に出る（超高z-index）
+// kiyaku.js（非module）— 利用規約モーダル（予約キュー対応で必ず開く）
+// ✅ window.KIYAKU.open()/close()/setText()
+// ✅ gameMenu.js が先に呼んでも「予約」→ kiyaku.js 読込後に自動で開く
 // ✅ 背景クリック / × / Esc で閉じる
-// ✅ 日本語OK・スクロールOK
+// ✅ スクロールOK・超前面
 
 (() => {
   "use strict";
-  console.log("[kiyaku.js] LOADED v1.0.0", Date.now());
+  console.log("[kiyaku.js] LOADED v1.1.0 (queue+guaranteed)", Date.now());
 
   const UI = {
     modal: "milkpopKiyakuModalV1",
@@ -52,7 +52,6 @@
 ────────────────────────
 4. お問い合わせ
 ────────────────────────
-不具合報告・連絡先：
 X（旧Twitter） @Soni_complaint
 
 ※DMやリプライの返信は保証できません。
@@ -127,13 +126,6 @@ X（旧Twitter） @Soni_complaint
   text-decoration:none;
 }
 #${UI.modal} .link:hover{ text-decoration:underline; }
-
-#${UI.modal}::-webkit-scrollbar{ width:8px; }
-#${UI.modal}::-webkit-scrollbar-thumb{
-  background:rgba(0,0,0,.18);
-  border-radius:999px;
-}
-#${UI.modal}::-webkit-scrollbar-track{ background:transparent; }
 `;
     document.head.appendChild(s);
   }
@@ -162,11 +154,10 @@ X（旧Twitter） @Soni_complaint
     `;
     document.body.appendChild(m);
 
-    // 本文反映
     const pre = $(`#${UI.text}`, m);
     if (pre) pre.textContent = KIYAKU_TEXT;
 
-    // 閉じる（背景/×）
+    // 背景/× で閉じる
     m.addEventListener("click", (e) => {
       const c = e.target?.closest?.("[data-kiyaku-close]");
       if (c) close();
@@ -190,7 +181,7 @@ X（旧Twitter） @Soni_complaint
     if (m) m.style.display = "none";
   }
 
-  // 公開API
+  // ✅ 公開API
   window.KIYAKU = window.KIYAKU || {};
   window.KIYAKU.open = open;
   window.KIYAKU.close = close;
@@ -200,8 +191,39 @@ X（旧Twitter） @Soni_complaint
     if (pre) pre.textContent = String(text ?? "");
   };
 
-  // 先に生成しておく（初回遅延防止）
+  // ✅ 予約キュー（gameMenuが先に呼んでも後から開く）
+  // ルール：
+  // - gameMenu.js が window.__milkpopOpenModalQueue に {type:"kiyaku"} を積む
+  // - kiyaku.js 起動時に吸収して open
+  window.__milkpopOpenModalQueue = window.__milkpopOpenModalQueue || [];
+  function drainQueue() {
+    try {
+      const q = window.__milkpopOpenModalQueue;
+      if (!Array.isArray(q) || q.length === 0) return;
+
+      let needOpen = false;
+      const rest = [];
+      for (const item of q) {
+        if (item && item.type === "kiyaku") needOpen = true;
+        else rest.push(item);
+      }
+      q.length = 0;
+      rest.forEach(x => q.push(x));
+
+      if (needOpen) open();
+    } catch {}
+  }
+
+  // 初期化（初回遅延防止）
   try { ensureModal(); close(); } catch {}
+
+  // 起動直後に吸収 + 少しだけ監視（ロード順対策）
+  drainQueue();
+  const start = Date.now();
+  const t = setInterval(() => {
+    drainQueue();
+    if (Date.now() - start > 8000) clearInterval(t);
+  }, 100);
 
   console.log("[kiyaku.js] ready (use KIYAKU.open())");
 })();
