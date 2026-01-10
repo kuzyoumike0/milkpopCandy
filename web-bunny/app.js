@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.8.0 (reincarnation + clear bunnies/hearts + stars)", Date.now());
+  console.log("[app.js] LOADED v16.7.3 (bunny click fix + anti-overlay)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -64,9 +64,6 @@
     unchi:     "wb_unchi_v1",
     title:     "wb_title_v1",
     titleList: "wb_title_list_v1",
-
-    // ✅ 転生（牧場の星）
-    stars:     "wb_stars_v1",
   };
 
   /* =========================
@@ -92,22 +89,40 @@
 
   /* =========================
    * ✅ 座標系を強制（最重要）
+   * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1680")) return;
+    if (document.getElementById("wbAppCoreCssV1673")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1680";
+    st.id = "wbAppCoreCssV1673";
     st.textContent = `
       #field{
         position:fixed !important;
         inset:0 !important;
         overflow:hidden !important;
       }
-      #bunnyLayer, #coinLayer{
+
+      /* ✅ 背景/天気/FXは“クリックを奪わない” */
+      #bgLayer, #tenkiLayer, #bgMirrorFXWrapV13{
+        pointer-events:none !important;
+      }
+
+      /* ✅ レイヤーは貫通、実体だけクリック可 */
+      #bunnyLayer{
         position:absolute !important;
         inset:0 !important;
         overflow:hidden !important;
+        pointer-events:none !important;
+        z-index:100 !important;
       }
+      #coinLayer{
+        position:absolute !important;
+        inset:0 !important;
+        overflow:hidden !important;
+        pointer-events:none !important;
+        z-index:120 !important;
+      }
+
       .bunnyWrap{
         position:absolute !important;
         left:0 !important;
@@ -116,6 +131,7 @@
         height:${WRAP_H}px !important;
         will-change: transform;
         touch-action: manipulation;
+        pointer-events:auto !important; /* ✅ ここが超重要：wrapがイベント受ける */
       }
       .bunnyWrap .bunny{
         width:100% !important;
@@ -123,10 +139,10 @@
         object-fit:contain !important;
         user-select:none;
         -webkit-user-drag:none;
-        pointer-events:auto;
+        pointer-events:auto !important;
       }
 
-      /* ✅ コイン小さめ */
+      /* ✅ コイン小さめ（コイン自体だけクリック可） */
       .coin{
         position:absolute;
         width:34px !important;
@@ -135,6 +151,7 @@
         user-select:none;
         -webkit-user-drag:none;
         cursor:pointer;
+        pointer-events:auto !important;
       }
 
       .wbChargeHart{
@@ -265,6 +282,7 @@
     if (audioUnlocked) return;
     audioUnlocked = true;
 
+    // ✅ SE unlock
     try {
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
@@ -273,6 +291,7 @@
         .catch(() => (sePoyo.muted = false));
     } catch {}
 
+    // ✅ BGMもユーザー操作内で開始を試す（ブロック対策）
     try {
       window.WB?.bgm?.start?.();
       window.WB?.bgm?.play?.();
@@ -307,22 +326,6 @@
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
   function updateHud() { coinValueEl.textContent = String(coins); emit("hudUpdated", { coins }); }
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
-
-  // ✅ 星（転生）
-  function getStars() {
-    const n = Number(localStorage.getItem(LS.stars) || "0");
-    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-  }
-  function setStars(v) {
-    const n = Math.max(0, Math.floor(Number(v) || 0));
-    localStorage.setItem(LS.stars, String(n));
-    emit("starsChanged", { stars: n });
-    return n;
-  }
-  function addStars(d = 1) {
-    const cur = getStars();
-    return setStars(cur + Math.max(0, Math.floor(Number(d) || 0)));
-  }
 
   function loadBunnyMeta() {
     try {
@@ -422,7 +425,6 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
-      // ✅ baby はゲージを持たせない
       this.charge = 0;
       this.chargeReady = false;
       this.hartEl = null;
@@ -437,14 +439,13 @@
       this.evolveIfNeeded(true);
       this.syncSprite();
 
+      // ✅ クリックでコイン（“確実”版）
       const tap = (e) => {
-        e?.preventDefault?.();
-        playSE(this.isBaby ? seBaby : sePoyo);
+        // ここが passive だと preventDefault が効かないので、リスナー側で passive:false にしている
+        try { e?.preventDefault?.(); } catch {}
+        try { e?.stopPropagation?.(); } catch {}
 
-        if (this.isBaby) {
-          spawnClickCoins(this, 3, () => 0);
-          return;
-        }
+        playSE(this.isBaby ? seBaby : sePoyo);
 
         const plan = this.getDropPlanFromOwnCharge();
         spawnClickCoins(this, plan.count, plan.pickTier);
@@ -453,7 +454,8 @@
         this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
       };
 
-      this.wrap.addEventListener("pointerdown", tap);
+      // ✅ pointerdown + click 両対応（clickだけ死ぬ環境でもOK）
+      this.wrap.addEventListener("pointerdown", tap, { passive: false });
       this.wrap.addEventListener("click", tap);
 
       this.el.addEventListener("load", () => {
@@ -493,7 +495,6 @@
     }
 
     addOwnCharge(delta) {
-      if (this.isBaby) return;
       if (this.chargeReady) return;
       delta = Number(delta) || 0;
       if (delta <= 0) return;
@@ -508,7 +509,6 @@
     }
 
     consumeOwnCharge() {
-      if (this.isBaby) return;
       this.charge = 0;
       this.chargeReady = false;
       this.hideHeart();
@@ -540,10 +540,6 @@
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
       this.isBaby = false;
-      this.charge = 0;
-      this.chargeReady = false;
-      this.hideHeart();
-
       if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
 
       this.syncSprite();
@@ -571,8 +567,7 @@
 
     update(dt) {
       this.evolveIfNeeded(false);
-
-      if (!this.isBaby) this.addOwnCharge(CHARGE_PER_SEC * dt);
+      this.addOwnCharge(CHARGE_PER_SEC * dt);
 
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
       this.x += this.dir * this.baseSpeed * speedMul * dt;
@@ -606,26 +601,6 @@
     saveBunnyMeta();
     emit("bunnyCountChanged", { count: bunnies.length });
     return true;
-  }
-
-  // ✅ 転生用：うさぎ全消し（DOM残骸も全部消す）
-  function clearAllBunnies() {
-    // 1) 配列をなめて確実にDOM除去
-    for (const b of [...bunnies]) {
-      try { b.wrap?.remove?.(); } catch {}
-      try { b.hartEl?.remove?.(); } catch {}
-    }
-    bunnies.length = 0;
-
-    // 2) bunnyLayerの残骸を削る（保険）
-    try { bunnyLayer.querySelectorAll(".bunnyWrap,.bunny-wrap,img").forEach(n => n.remove()); } catch {}
-
-    // 3) field直下に残ったハート残骸（.wbChargeHart）を全削除（本命）
-    try { field.querySelectorAll(".wbChargeHart").forEach(n => n.remove()); } catch {}
-
-    // 4) 保存も消す
-    try { localStorage.removeItem(LS.bunnies); } catch {}
-    emit("bunnyCountChanged", { count: 0 });
   }
 
   /* =========================
@@ -696,28 +671,6 @@
   }
 
   /* =========================
-   * ✅ 転生API
-   * ========================= */
-  function reincarnate() {
-    // 星 +1
-    const stars = addStars(1);
-
-    // コイン・うさぎを消す（要望）
-    coins = 0;
-    saveCoins();
-    updateHud();
-
-    clearAllBunnies();
-
-    // 他モジュールへ
-    emit("reincarnated", { stars });
-
-    // bgcolor.js がLS監視してるので背景は勝手に変わる
-    // （reincarnation_pet.js も stars>=1 で出現）
-    console.log("[app.js] reincarnated => stars:", stars);
-  }
-
-  /* =========================
    * WB merge
    * ========================= */
   const api = {
@@ -729,22 +682,8 @@
     get coins() { return coins; },
     set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
 
-    getCoins: () => coins,
-    setCoin: (v) => { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); return coins; },
-    setCoins: (v) => { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); return coins; },
-    addCoin: (n) => { n = Math.floor(Number(n) || 0); coins = Math.max(0, coins + n); saveCoins(); updateHud(); return coins; },
-    addCoins:(n) => { n = Math.floor(Number(n) || 0); coins = Math.max(0, coins + n); saveCoins(); updateHud(); return coins; },
-
     getCoin: () => coins,
     spendCoin: (n) => {
-      n = Math.floor(Number(n) || 0);
-      if (n <= 0) return true;
-      if (coins < n) return false;
-      coins -= n;
-      saveCoins(); updateHud();
-      return true;
-    },
-    spendCoins: (n) => {
       n = Math.floor(Number(n) || 0);
       if (n <= 0) return true;
       if (coins < n) return false;
@@ -772,34 +711,10 @@
     getBunnyCharge: (bornAt) => {
       const t = Number(bornAt);
       const b = bunnies.find(x => x && x.bornAt === t);
-      return b ? { charge: b.isBaby ? 0 : b.charge, ready: b.isBaby ? false : b.chargeReady } : null;
+      return b ? { charge: b.charge, ready: b.chargeReady } : null;
     },
-
-    // ✅ 転生（星）
-    getStars,
-    setStars,
-    addStars,
-
-    // ✅ 転生：うさぎ全消し/転生実行
-    clearAllBunnies,
-    reincarnate,
   };
-
   window.WB = Object.assign({}, prevWB, api);
-
-  // coins getter/setter 復活
-  try {
-    Object.defineProperty(window.WB, "coins", {
-      configurable: true,
-      enumerable: true,
-      get() { return coins; },
-      set(v) {
-        coins = Math.max(0, Math.floor(Number(v) || 0));
-        saveCoins();
-        updateHud();
-      }
-    });
-  } catch {}
 
   /* =========================
    * Init / Loop
@@ -839,8 +754,6 @@
 
     updateHud();
     emit("bunnyCountChanged", { count: bunnies.length });
-
-    emit("core:ready", { stars: getStars(), coins });
 
     requestAnimationFrame(tick);
   }
