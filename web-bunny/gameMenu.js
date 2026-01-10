@@ -1,8 +1,9 @@
-// gameMenu.js（非module）V2.2
+// gameMenu.js（非module）V2.3
 // ✅ 右上にハンバーガーメニュー1個だけ作る
 // ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🧸アイテム配置 / 🎰スロット / 📖図鑑 / 🎵BGM
 // ✅ 追加：🐦 X（@Soni_complaint）へのリンク
 // ✅ 変更：📜 利用規約 → kiyaku.js のモーダルを開く（KIYAKU.open）
+// ✅ 利用規約は「予約キュー」対応：kiyaku.js が後から読まれても必ず開く
 // ✅ 呼び出し：
 //   - shop     : WB.shop.open()
 //   - isyou    : ISYOU.openModal()
@@ -26,6 +27,9 @@
 
   const X_HANDLE = "Soni_complaint";
   const X_URL = `https://x.com/${encodeURIComponent(X_HANDLE)}`;
+
+  // 共通予約キュー（BGM/規約など全部ここ）
+  window.__milkpopOpenModalQueue = window.__milkpopOpenModalQueue || [];
 
   /* =========================
    * Utils
@@ -134,7 +138,6 @@
           <button class="item" type="button" data-act="bgm">🎵 BGM</button>
         </div>
 
-        <!-- ✅ 追加：Xリンク / 利用規約 -->
         <div class="smallrow">
           <button class="pill" type="button" data-act="xlink">X（@${X_HANDLE}）</button>
           <button class="pill" type="button" data-act="kiyaku">利用規約</button>
@@ -185,13 +188,8 @@
   /* =========================
    * ✅ BGM open (WAIT + QUEUE)
    * ========================= */
-  // BGM.js がまだ読み込まれてない/patch前でも「開いて欲しい」を予約できる
-  window.__milkpopOpenModalQueue = window.__milkpopOpenModalQueue || [];
-
   function queueOpenBgmModal() {
-    try {
-      window.__milkpopOpenModalQueue.push({ type: "bgm", at: Date.now() });
-    } catch {}
+    try { window.__milkpopOpenModalQueue.push({ type: "bgm", at: Date.now() }); } catch {}
   }
 
   async function waitForBgmOpenModal(maxMs = 8000) {
@@ -204,18 +202,13 @@
   }
 
   async function openBgmModalGuaranteed() {
-    // まずは予約（BGM.js側が吸収できるように）
     queueOpenBgmModal();
-
-    // ユーザー操作中に unlock を踏む（SE/BGM両対応）
     try { window.WB?.unlockAudioOnce?.(); } catch {}
 
-    // すでにあるなら即開く
     try {
       if (window.WB?.bgm?.openModal) { window.WB.bgm.openModal(); return true; }
     } catch {}
 
-    // ないなら待つ（ロード順対策）
     const ok = await waitForBgmOpenModal(8000);
     if (ok) {
       try { window.WB.bgm.openModal(); return true; } catch {}
@@ -226,8 +219,12 @@
   }
 
   /* =========================
-   * ✅ 利用規約 open (WAIT + fallback)
+   * ✅ 利用規約 open (QUEUE + EVENT + WAIT)
    * ========================= */
+  function queueOpenKiyaku() {
+    try { window.__milkpopOpenModalQueue.push({ type: "kiyaku", at: Date.now() }); } catch {}
+  }
+
   async function waitForKiyaku(maxMs = 5000) {
     const t0 = Date.now();
     while (Date.now() - t0 < maxMs) {
@@ -238,16 +235,21 @@
   }
 
   async function openKiyakuGuaranteed() {
-    // 既にあるなら即
+    // ✅ 1) まず予約（kiyaku.js が後読みでも必ず開く）
+    queueOpenKiyaku();
+
+    // ✅ 2) すでにあれば即 open
     try { if (window.KIYAKU?.open) { window.KIYAKU.open(); return true; } } catch {}
 
-    // ないなら待つ（読み込み順対策）
+    // ✅ 3) イベント保険（kiyaku.js v1.2.1 以降）
+    try { window.dispatchEvent(new Event("milkpop:openKiyaku")); } catch {}
+
+    // ✅ 4) ないなら少し待つ
     const ok = await waitForKiyaku(5000);
     if (ok) {
       try { window.KIYAKU.open(); return true; } catch {}
     }
 
-    // それでも無理なら警告（黙殺しない）
     console.warn("[gameMenu] KIYAKU.open not ready: kiyaku.js not loaded");
     return false;
   }
@@ -256,49 +258,31 @@
    * Action handler
    * ========================= */
   function handleAction(act) {
-    if (act === "shop") {
-      safeCall(() => window.WB?.shop?.open?.());
-      return;
-    }
-    if (act === "isyou") {
-      safeCall(() => window.ISYOU?.openModal?.());
-      return;
-    }
+    if (act === "shop")   { safeCall(() => window.WB?.shop?.open?.()); return; }
+    if (act === "isyou")  { safeCall(() => window.ISYOU?.openModal?.()); return; }
+
     if (act === "itemplace") {
       safeCall(() => window.ITEMPLACE?.open?.());
-
       setTimeout(() => {
         if (window.ITEMPLACE?.open) return;
         try { window.ITEMPLACE?.openModal?.(); } catch {}
       }, 0);
-
       setTimeout(() => {
         try { window.WB?.itemplace?.open?.(); } catch {}
         try { window.WB?.itemplace?.openModal?.(); } catch {}
       }, 0);
       return;
     }
-    if (act === "slot") {
-      safeCall(() => openSlotBestEffort());
-      setTimeout(() => { openSlotBestEffort(); }, 120);
-      return;
-    }
-    if (act === "zukan") {
-      safeCall(() => window.WB?.zukan?.open?.("bunny"));
-      return;
-    }
-    if (act === "bgm") {
-      openBgmModalGuaranteed();
-      return;
-    }
 
-    // ✅ Xリンク
+    if (act === "slot")  { safeCall(() => openSlotBestEffort()); setTimeout(() => openSlotBestEffort(), 120); return; }
+    if (act === "zukan") { safeCall(() => window.WB?.zukan?.open?.("bunny")); return; }
+    if (act === "bgm")   { openBgmModalGuaranteed(); return; }
+
     if (act === "xlink") {
       try { window.open(X_URL, "_blank", "noopener,noreferrer"); } catch {}
       return;
     }
 
-    // ✅ 利用規約（kiyaku.js）
     if (act === "kiyaku") {
       openKiyakuGuaranteed();
       return;
@@ -333,6 +317,8 @@
       if (panel.contains(e.target) || btn.contains(e.target)) return;
       closePanel(panel);
     }, { passive: true });
+
+    console.log("[gameMenu] ready v2.3");
   }
 
   if (document.readyState === "loading") {
