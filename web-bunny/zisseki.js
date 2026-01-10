@@ -5,6 +5,8 @@
 // - sy:add が来たら payload を解析して自動で stats に加算
 // - 図鑑(zukan.js)の renderAchievements が参照するために WB.zisseki.ach を提供（互換）
 //
+// ✅ 追加: omukae.js / slot.js 由来のイベント名も幅広く拾う（slotResult/slot:win/omukaeDone 等）
+//
 // 使い方（他モジュールから加算したい場合）
 //   WB.emit("sy:add", { key:"unchi", delta:1 })
 //   WB.emit("sy:add", { type:"tabidachi" })
@@ -43,7 +45,6 @@
      * Storage（unlocked + stats）
      * ========================= */
     const LS_ZISSEKI = "wb_zisseki_v6"; // { ver:6, unlocked:{}, stats:{} }
-
     const UNLOCK_BUNNY4_NEED = 10;
 
     function loadState() {
@@ -97,7 +98,9 @@
       if (s === "tabidati") return "tabidachi";
       if (s === "slotwin") return "slot_win";
       if (s === "slot") return "slot_win";
+      if (s === "slot:win") return "slot_win";
       if (s === "fireworks") return "hanabi";
+      if (s === "fw") return "hanabi";
       return s;
     }
 
@@ -245,6 +248,23 @@
     /* =========================
      * sy:add / event 解析 → stats加算
      * ========================= */
+    function isSlotWinPayload(p) {
+      // slot.js が色々返しても勝ちなら true に寄せる
+      // 例: {win:true} / {result:"win"} / {isWin:true} / {hit:true}
+      try {
+        if (!p || typeof p !== "object") return true;
+        if (p.win === false || p.isWin === false || p.hit === false) return false;
+        if (typeof p.result === "string") {
+          const r = p.result.toLowerCase();
+          if (r.includes("lose") || r.includes("miss") || r.includes("fail")) return false;
+          if (r.includes("win") || r.includes("hit") || r.includes("jackpot")) return true;
+        }
+        if (p.win === true || p.isWin === true || p.hit === true || p.jackpot === true) return true;
+      } catch {}
+      // payload不明なら「勝ちイベントとして来た」前提
+      return true;
+    }
+
     function parseSyPayload(payload) {
       if (payload == null) return { key: "", delta: 0 };
 
@@ -259,10 +279,12 @@
           normKey(payload.type) ||
           normKey(payload.id) ||
           normKey(payload.name) ||
-          normKey(payload.event);
+          normKey(payload.event) ||
+          normKey(payload.kind);
 
+        // slot勝ち判定
         if (k === "slot_win") {
-          if (payload.win === false) return { key: "slot_win", delta: 0 };
+          if (!isSlotWinPayload(payload)) return { key: "slot_win", delta: 0 };
         }
 
         let d = 1;
@@ -298,14 +320,24 @@
       onSyAddLight();
     }
 
-    // WB.on("sy:add") が来たら解析
     try { WB.on?.("sy:add", onSyAdd); } catch {}
 
-    // よくあるイベント名を直接拾う（payload無でもOK）
-    function bindCountEvent(evtName, key) {
+    // イベント拾い（payload無でもOK）
+    function bindCountEvent(evtName, key, opt = {}) {
       try {
         WB.on?.(evtName, (payload) => {
           const p = parseSyPayload(payload);
+
+          // イベント名から key を強制する場合（slot勝ち等）
+          const forced = opt?.forceKey ? normKey(opt.forceKey) : "";
+          if (forced) {
+            if (forced === "slot_win") {
+              if (!isSlotWinPayload(payload)) { onSyAddLight(); return; }
+            }
+            addCount(forced, opt?.delta ?? 1);
+            return;
+          }
+
           if (p.key) {
             if (p.delta > 0) addCount(p.key, p.delta);
             else onSyAddLight();
@@ -316,6 +348,7 @@
       } catch {}
     }
 
+    // 基本
     bindCountEvent("unchi", "unchi");
     bindCountEvent("omukae", "omukae");
     bindCountEvent("tabidachi", "tabidachi");
@@ -323,11 +356,28 @@
     bindCountEvent("hanabiFired", "hanabi");
     bindCountEvent("hanabi", "hanabi");
     bindCountEvent("fireworks", "hanabi");
-    bindCountEvent("slotWin", "slot_win");
-    bindCountEvent("slotwin", "slot_win");
+
+    // ✅ omukae.js 追加拾い（想定別名）
+    bindCountEvent("omukaeDone", "omukae");
+    bindCountEvent("omukae:done", "omukae");
+    bindCountEvent("omukaeComplete", "omukae");
+    bindCountEvent("adopt", "omukae");
+    bindCountEvent("adopted", "omukae");
+    bindCountEvent("bunnyBought", "omukae");
+    bindCountEvent("buyBunny", "omukae");
+
+    // ✅ slot.js 追加拾い（勝ちだけ加算）
+    bindCountEvent("slotWin", "slot_win", { forceKey: "slot_win" });
+    bindCountEvent("slotwin", "slot_win", { forceKey: "slot_win" });
+    bindCountEvent("slot:win", "slot_win", { forceKey: "slot_win" });
+    bindCountEvent("slotResult", "slot_win", { forceKey: "slot_win" }); // payloadが win/lose を含む想定
+    bindCountEvent("slot:result", "slot_win", { forceKey: "slot_win" });
+    bindCountEvent("slotFinished", "slot_win", { forceKey: "slot_win" });
+    bindCountEvent("slot:finished", "slot_win", { forceKey: "slot_win" });
+    bindCountEvent("slotPayout", "slot_win", { forceKey: "slot_win" }); // 当たり時だけ出す想定
 
     /* =========================
-     * 最終保険：WB.emit フック
+     * 最終保険：WB.emit フック（omukae / slot 系の別名も拾う）
      * ========================= */
     function hookEmitOnce() {
       try {
@@ -338,15 +388,26 @@
         WB.emit = function (name, payload) {
           try {
             const ev = String(name ?? "");
+
             if (ev === "sy:add") onSyAdd(payload);
 
+            // unchi/tabi/hanabi
             if (ev === "unchi") addCount("unchi", 1);
-            if (ev === "omukae") addCount("omukae", 1);
             if (ev === "tabidachi" || ev === "tabidati") addCount("tabidachi", 1);
-            if (ev === "hanabiFired" || ev === "hanabi" || ev === "fireworks") addCount("hanabi", 1);
+            if (ev === "hanabiFired" || ev === "hanabi" || ev === "fireworks" || ev === "fw") addCount("hanabi", 1);
 
-            if (ev === "slotWin" || ev === "slotwin") {
-              if (!(payload && typeof payload === "object" && payload.win === false)) addCount("slot_win", 1);
+            // ✅ omukae別名
+            if (ev === "omukae" || ev === "omukaeDone" || ev === "omukae:done" || ev === "omukaeComplete"
+             || ev === "adopt" || ev === "adopted" || ev === "bunnyBought" || ev === "buyBunny") {
+              addCount("omukae", 1);
+            }
+
+            // ✅ slot別名（勝ちだけ）
+            if (ev === "slotWin" || ev === "slotwin" || ev === "slot:win"
+             || ev === "slotResult" || ev === "slot:result"
+             || ev === "slotFinished" || ev === "slot:finished"
+             || ev === "slotPayout") {
+              if (isSlotWinPayload(payload)) addCount("slot_win", 1);
             }
           } catch {}
           return orig(name, payload);
@@ -520,10 +581,6 @@
       }
     }
 
-    /* =========================
-     * zukan.js 互換：zisseki.ach を提供
-     * - zukan.js は z?.ach を見に行くのでここで返す
-     * ========================= */
     function buildAchCompatMap() {
       const o = {};
       for (const a of ACH_MASTER) {
@@ -536,35 +593,27 @@
      * Public API
      * ========================= */
     WB.zisseki = {
-      // storage
       LS_ZISSEKI,
       unlocked,
       stats,
-
-      // zukan互換（ここが重要）
-      // zukan.js: const ach = z?.ach ... を満たす
       get ach() { return buildAchCompatMap(); },
 
-      // core
       ACH_MASTER,
       UNLOCK_BUNNY4_NEED,
       isUnlocked,
       unlock,
       checkUnlocks,
 
-      // counts
       getCount,
       setCount,
       addCount,
 
-      // internal
       _parseSyPayload: parseSyPayload,
     };
 
     // 初回判定
     checkUnlocks();
 
-    // 定期判定（コイン/同時うさぎ数など）
     const TIMER_MS = 900;
     const timer = setInterval(() => {
       checkUnlocks();
@@ -572,7 +621,7 @@
 
     WB.zisseki.stop = () => { try { clearInterval(timer); } catch {} };
 
-    console.log("[zisseki] ready (for zukan tab)", {
+    console.log("[zisseki] ready (omukae/slot supported)", {
       unlocked: Object.keys(unlocked).length,
       stats: { ...stats },
     });
