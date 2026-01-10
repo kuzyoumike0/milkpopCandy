@@ -1,6 +1,8 @@
-// gameMenu.js（非module）V2
+// gameMenu.js（非module）V2.1
 // ✅ 右上にハンバーガーメニュー1個だけ作る
 // ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🧸アイテム配置 / 🎰スロット / 📖図鑑 / 🎵BGM
+// ✅ 追加：🐦 X（@Soni_complaint）へのリンク
+// ✅ 追加：📜 利用規約（クリックでモーダル表示）
 // ✅ 呼び出し：
 //   - shop     : WB.shop.open()
 //   - isyou    : ISYOU.openModal()
@@ -15,12 +17,39 @@
   "use strict";
 
   const UI = {
-    btn: "gameHamburgerV1",
+    btn:   "gameHamburgerV1",
     panel: "gameMenuPanelV1",
     style: "gameMenuStyleV1",
+
+    // ✅ 追加
+    tosModal: "milkpopTosModalV1",
+    tosStyle: "milkpopTosStyleV1",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
+
+  /* =========================
+   * 利用規約テキスト（ここを好きに編集）
+   * ========================= */
+  const TOS_TEXT = `
+■ 利用規約（Milkpop）
+本コンテンツは娯楽目的のミニゲームです。
+
+1. 禁止事項
+- 不正ツール・自動化・改変によるプレイ
+- サーバーや他ユーザーへ迷惑となる行為
+- 画像/音声/データの無断転載は禁止利用
+
+2. 免責
+- データ消失（localStorage削除/ブラウザ更新等）により進行状況が失われる場合があります。
+- 予告なく仕様変更・停止することがあります。
+
+3. お問い合わせ
+X（旧Twitter）: @Soni_complaint
+`.trim();
+
+  const X_HANDLE = "Soni_complaint";
+  const X_URL = `https://x.com/${encodeURIComponent(X_HANDLE)}`;
 
   /* =========================
    * Utils
@@ -82,8 +111,135 @@
   padding:6px 8px 2px;
   line-height:1.35;
 }
+#${UI.panel} .smallrow{
+  display:flex; gap:8px; margin-top:8px; padding:0 4px;
+}
+#${UI.panel} .pill{
+  flex:1;
+  border:none;
+  border-radius:999px;
+  padding:8px 10px;
+  font-weight:1000;
+  cursor:pointer;
+  background:#fff;
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+}
+#${UI.panel} .pill:hover{ transform:translateY(-1px); }
 `;
     document.head.appendChild(s);
+  }
+
+  function ensureTosStyle() {
+    if (document.getElementById(UI.tosStyle)) return;
+    const s = document.createElement("style");
+    s.id = UI.tosStyle;
+    s.textContent = `
+#${UI.tosModal}{
+  position:fixed; inset:0;
+  z-index:2147483200;
+  display:none;
+}
+#${UI.tosModal} .backdrop{
+  position:absolute; inset:0;
+  background:rgba(0,0,0,.45);
+}
+#${UI.tosModal} .card{
+  position:absolute;
+  left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  width:min(560px, 92vw);
+  max-height:min(70vh, 560px);
+  overflow:auto;
+  background:rgba(255,255,255,.98);
+  border-radius:18px;
+  box-shadow:0 22px 70px rgba(0,0,0,.28);
+  padding:14px 14px 12px;
+  -webkit-overflow-scrolling:touch;
+}
+#${UI.tosModal} .row{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+}
+#${UI.tosModal} .ttl{
+  font-weight:1000;
+}
+#${UI.tosModal} .close{
+  border:none; border-radius:12px;
+  width:40px; height:40px;
+  font-weight:1000;
+  cursor:pointer;
+  background:#fff;
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+}
+#${UI.tosModal} pre{
+  margin:10px 0 0;
+  white-space:pre-wrap;
+  word-break:break-word;
+  font-size:13px;
+  line-height:1.55;
+  background:rgba(0,0,0,.04);
+  border-radius:14px;
+  padding:12px;
+}
+#${UI.tosModal} .hint{
+  margin-top:10px;
+  font-size:12px;
+  opacity:.75;
+}
+#${UI.tosModal} .link{
+  font-weight:1000;
+  color:#2b6cff;
+  text-decoration:none;
+}
+`;
+    document.head.appendChild(s);
+  }
+
+  function ensureTosModal() {
+    ensureTosStyle();
+    let m = document.getElementById(UI.tosModal);
+    if (m) return m;
+
+    m = document.createElement("div");
+    m.id = UI.tosModal;
+    m.innerHTML = `
+      <div class="backdrop" data-close="1"></div>
+      <div class="card" role="dialog" aria-modal="true" aria-label="利用規約">
+        <div class="row">
+          <div class="ttl">📜 利用規約</div>
+          <button class="close" type="button" data-close="1">×</button>
+        </div>
+        <pre id="milkpopTosTextV1"></pre>
+        <div class="hint">
+          お問い合わせ：<a class="link" href="${X_URL}" target="_blank" rel="noopener noreferrer">@${X_HANDLE}</a>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(m);
+
+    const pre = m.querySelector("#milkpopTosTextV1");
+    if (pre) pre.textContent = TOS_TEXT;
+
+    // close handlers
+    m.addEventListener("click", (e) => {
+      const c = e.target?.closest?.("[data-close]");
+      if (c) hideTos();
+    });
+
+    // Escで閉じる
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") hideTos();
+    });
+
+    return m;
+  }
+
+  function showTos() {
+    const m = ensureTosModal();
+    m.style.display = "block";
+  }
+  function hideTos() {
+    const m = document.getElementById(UI.tosModal);
+    if (m) m.style.display = "none";
   }
 
   function ensureUI() {
@@ -114,6 +270,13 @@
           <button class="item" type="button" data-act="zukan">📖 図鑑</button>
           <button class="item" type="button" data-act="bgm">🎵 BGM</button>
         </div>
+
+        <!-- ✅ 追加：Xリンク / 利用規約 -->
+        <div class="smallrow">
+          <button class="pill" type="button" data-act="xlink">X（@${X_HANDLE}）</button>
+          <button class="pill" type="button" data-act="tos">利用規約</button>
+        </div>
+
         <div class="note">
           ※ BGMは一度クリックが必要です。<br>
           ※ アイテム配置：選んだアイテムが透明赤枠で出ます → 置きたい場所をクリックで確定。<br>
@@ -240,6 +403,18 @@
       openBgmModalGuaranteed();
       return;
     }
+
+    // ✅ 追加：Xリンク
+    if (act === "xlink") {
+      try { window.open(X_URL, "_blank", "noopener,noreferrer"); } catch {}
+      return;
+    }
+
+    // ✅ 追加：利用規約
+    if (act === "tos") {
+      showTos();
+      return;
+    }
   }
 
   /* =========================
@@ -259,8 +434,12 @@
       if (!b) return;
       e.preventDefault();
       e.stopPropagation();
+
+      const act = b.getAttribute("data-act");
+
+      // ✅ 利用規約はメニュー閉じてもOK（見やすい）
       closePanel(panel);
-      handleAction(b.getAttribute("data-act"));
+      handleAction(act);
     });
 
     document.addEventListener("pointerdown", (e) => {
@@ -268,6 +447,10 @@
       if (panel.contains(e.target) || btn.contains(e.target)) return;
       closePanel(panel);
     }, { passive: true });
+
+    // ✅ 利用規約モーダルを先に生成しておく（初回クリックで一瞬遅れるの防止）
+    ensureTosModal();
+    hideTos();
   }
 
   if (document.readyState === "loading") {
