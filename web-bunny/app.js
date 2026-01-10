@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.3 (baby no gauge + baby coin1 fixed)", Date.now());
+  console.log("[app.js] LOADED v16.7.5 (WB.coins defineProperty fix + compat)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -427,7 +427,6 @@
 
         // ✅ baby は coin1 固定（tier=0固定）＆ゲージ無しなので常に同じ
         if (this.isBaby) {
-          // 好みで count を変えたいならここだけ調整
           spawnClickCoins(this, 3, () => 0); // coin1 固定
           return;
         }
@@ -508,7 +507,6 @@
     getChargeRatio() { return clamp(this.charge / CHARGE_MAX, 0, 1); }
 
     getDropPlanFromOwnCharge() {
-      // ここに baby 分岐を置いても良いが、tap側で固定しているので不要
       const r = this.getChargeRatio();
       const count = 3 + Math.floor(r * 15);
       const maxTier = Math.floor(r * 3 + 1e-9);
@@ -679,11 +677,27 @@
     field, bunnyLayer, coinLayer,
     shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
+    // ⚠️ getter/setter は Object.assign で潰れるので後で defineProperty で復活させる
     get coins() { return coins; },
     set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
 
+    // ✅ 互換API（他モジュールが addCoin/addCoins 等で呼んでもOK）
+    getCoins: () => coins,
+    setCoin: (v) => { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); return coins; },
+    setCoins: (v) => { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); return coins; },
+    addCoin: (n) => { n = Math.floor(Number(n) || 0); coins = Math.max(0, coins + n); saveCoins(); updateHud(); return coins; },
+    addCoins:(n) => { n = Math.floor(Number(n) || 0); coins = Math.max(0, coins + n); saveCoins(); updateHud(); return coins; },
+
     getCoin: () => coins,
     spendCoin: (n) => {
+      n = Math.floor(Number(n) || 0);
+      if (n <= 0) return true;
+      if (coins < n) return false;
+      coins -= n;
+      saveCoins(); updateHud();
+      return true;
+    },
+    spendCoins: (n) => {
       n = Math.floor(Number(n) || 0);
       if (n <= 0) return true;
       if (coins < n) return false;
@@ -711,11 +725,28 @@
     getBunnyCharge: (bornAt) => {
       const t = Number(bornAt);
       const b = bunnies.find(x => x && x.bornAt === t);
-      // ✅ baby は常にゲージ無し（charge=0/ready=false）
       return b ? { charge: b.isBaby ? 0 : b.charge, ready: b.isBaby ? false : b.chargeReady } : null;
     },
   };
+
+  // まずは素直にマージ
   window.WB = Object.assign({}, prevWB, api);
+
+  // ✅ ここが今回の本命修正：
+  // Object.assign で coins の getter/setter が「数値としてコピー」されて潰れるため、
+  // defineProperty で WB.coins を “必ず coins変数と同期する” 形に復活させる
+  try {
+    Object.defineProperty(window.WB, "coins", {
+      configurable: true,
+      enumerable: true,
+      get() { return coins; },
+      set(v) {
+        coins = Math.max(0, Math.floor(Number(v) || 0));
+        saveCoins();
+        updateHud();
+      }
+    });
+  } catch {}
 
   /* =========================
    * Init / Loop
