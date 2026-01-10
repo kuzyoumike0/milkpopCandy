@@ -1,47 +1,44 @@
-// tenki.js（UFO強化：SEスライダー追従100% + ITEMより上）
-// ✅ UFO SEが小さすぎ問題：UFO_SE_BASEを 1.0 にして「SEスライダーにそのまま追従」
-// ✅ UFOは ITEM（ベッド/ミラーボール/oak）より上に表示：超高z-index（itemPlace系より確実に上）
-// ✅ UFO出現中はUFO.mp3をずっと鳴らし続ける（ループ）
-// ✅ BGM.jsのSE調整（WB.se.loop / WB.getSEVolume / milkpop_bgm_settings_v2 muted）に完全追従
-// ✅ BGM.jsが無い場合でもフォールバックで鳴る
+// tenki.js（UFO強化：✅UFO.mp3 を SEスライダーに紐づけ（WB.se.loop） + ITEMより上）
+// ✅ UFOは ITEM（ベッド/ミラーボール/oak）より上に表示：超高z-index
+// ✅ UFO出現中は UFO.mp3 をずっと鳴らし続ける（ループ）
+// ✅ BGM.js の SE API（WB.se.loop / WB.getSEVolume / milkpop_se_settings_v1 muted）に完全追従
+// ✅ BGM.js が無い場合はフォールバックで鳴る
 
 (() => {
   "use strict";
 
   const FIELD_ID = "tenkiLayer";
-  const HUD_ID = "hud";
+  const HUD_ID   = "hud";
 
   const SUNNY_SRC  = "./assets/tenki/Sunny.gif";
   const CLOUDY_SRC = "./assets/tenki/cloudy_1.gif";
 
-  // ★UFO
+  // 🛸 UFO
   const UFO_IMG_SRC = "./assets/tenki/UFO.png";
   const UFO_SE_SRC  = "./assets/UFO.mp3";
 
-  // ✅ 「SEスライダーに合わせる」= 基本係数1.0（小さくしない）
-  //   それでも爆音なら、BGM.js側のSEスライダーで下げて調整する
+  // ✅ SEスライダー通り（小さくしない）
   const UFO_SE_BASE = 1.0;
 
-  // ★レア度：1秒あたり（好みで調整）
-  const UFO_CHANCE_PER_SEC = 0.010; // 1.0%/sec くらい
+  // 出現率（1秒あたり）
+  const UFO_CHANCE_PER_SEC = 0.010; // 1.0%/sec
   const UFO_SPEED_PX_PER_SEC = 95;
   const UFO_SIZE_PX = 150;
 
   const UFO_TOP_RATIO_MIN = 0.08;
   const UFO_TOP_RATIO_MAX = 0.30;
 
-  // ✅ ITEM（bed/mirrorball/oak）より上にしたいので超高z-index
-  // itemPlace系が 9999 でも勝てるように、十万〜百万帯にする
+  // ✅ ITEMより上（itemPlaceが9999でも勝つ）
   const UFO_Z_INDEX = 350000;
 
   const CLOUD_COUNT = 6;
 
-  /* ===== 雲の透け ===== */
+  /* 雲の透け */
   const CLOUD_BASE_OPACITY = 0.85;
   const CLOUD_OVERLAP_OPACITY = 0.55;
   const CLOUD_FADE_SPEED = 0.06;
 
-  /* ===== 太陽 ===== */
+  /* 太陽 */
   const SUN_BASE_OPACITY = 1.0;
   const SUN_HIDE_OPACITY = 0.25;
   const SUN_FADE_SPEED = 0.06;
@@ -50,20 +47,18 @@
   if (!field) return;
 
   const hud = document.getElementById(HUD_ID);
-
   const st = getComputedStyle(field);
   if (st.position === "static") field.style.position = "relative";
 
   const fieldRect = () => field.getBoundingClientRect();
   const hudRect = () => (hud ? hud.getBoundingClientRect() : null);
 
-  // HUDがfieldに被っているなら、その分だけ下にずらす（被ってないなら最小だけ）
+  // HUDが被ってるなら下にずらす
   const computeTopOffset = () => {
     const fr = fieldRect();
     const hr = hudRect();
     if (!hr) return 8;
-
-    const overlap = hr.bottom - fr.top; // +なら被り
+    const overlap = hr.bottom - fr.top;
     return overlap > 1 ? Math.ceil(overlap) + 8 : 8;
   };
 
@@ -72,12 +67,11 @@
 
   const approach = (cur, target, speed) => cur + (target - cur) * speed;
 
-  // 雲のY位置を「ボタンの下〜上の方」に収める（px）
   const pickCloudYpx = () => {
     const fr = fieldRect();
     const top = computeTopOffset();
     const minY = top + 6;
-    const maxY = Math.max(minY + 10, top + fr.height * 0.35); // 上35%以内
+    const maxY = Math.max(minY + 10, top + fr.height * 0.35);
     return Math.floor(minY + Math.random() * (maxY - minY));
   };
 
@@ -136,6 +130,7 @@
     clouds.push(cloud);
   }
 
+  // たまに雲のzをシャッフル
   setInterval(() => {
     clouds.forEach(c => {
       const size = parseFloat(c.style.width);
@@ -165,7 +160,7 @@
       width: `${UFO_SIZE_PX}px`,
       height: "auto",
       pointerEvents: "none",
-      zIndex: String(UFO_Z_INDEX), // ✅ ITEMより上
+      zIndex: String(UFO_Z_INDEX),
       opacity: "0",
       transform: "translate3d(0,0,0)",
       filter: "drop-shadow(0 14px 22px rgba(0,0,0,.22))",
@@ -186,12 +181,11 @@
     return Math.floor(y);
   }
 
+  // ✅ ここが本命：UFO.mp3 を SEに紐づけ（WB.se.loop）
   function startUFOSound() {
-    // ✅ BGM.jsのSEスライダーに完全追従（ループSE）
     try {
       const WB = window.WB;
       if (WB?.se?.loop) {
-        // base=1.0でスライダー通りの音量
         WB.se.loop("ufo", UFO_SE_SRC, UFO_SE_BASE);
         return;
       }
@@ -203,17 +197,14 @@
       a.preload = "auto";
       a.loop = true;
       a.src = encodeURI(UFO_SE_SRC);
-      a.volume = 0.8; // フォールバックはそこそこ
+      a.volume = 0.8;
       a.play().catch(() => {});
       window.__ufoFallbackAudio = a;
     } catch {}
   }
 
   function stopUFOSound() {
-    try {
-      const WB = window.WB;
-      if (WB?.se?.stop) WB.se.stop("ufo");
-    } catch {}
+    try { window.WB?.se?.stop?.("ufo"); } catch {}
 
     try {
       if (window.__ufoFallbackAudio) {
@@ -226,11 +217,10 @@
   function startUFO() {
     if (ufoActive) return;
 
-    const fr = fieldRect();
     const el = ensureUFOEl();
-
     ufoActive = true;
-    ufoX = -UFO_SIZE_PX - 40; // 画面外左
+
+    ufoX = -UFO_SIZE_PX - 40;
     ufoY = pickUFOY();
 
     el.style.left = `${ufoX}px`;
@@ -242,7 +232,6 @@
 
   function stopUFO() {
     if (!ufoActive) return;
-
     ufoActive = false;
 
     if (ufoEl) {
@@ -252,7 +241,6 @@
         ufoEl = null;
       }, 350);
     }
-
     stopUFOSound();
   }
 
@@ -271,7 +259,6 @@
     // 雲移動
     clouds.forEach(c => {
       c._x += c._speed;
-
       if (c._x > fr.width + 150) {
         c._x = -200;
         c.style.top = `${pickCloudYpx()}px`;
@@ -297,7 +284,7 @@
       a.style.opacity = String(a._opacity);
     });
 
-    // 太陽が雲の後ろに隠れる
+    // 太陽が雲で隠れる
     let sunCovered = false;
     for (let i = 0; i < clouds.length; i++) {
       const c = clouds[i];
@@ -310,7 +297,7 @@
     sunny._opacity = approach(sunny._opacity, sunTarget, SUN_FADE_SPEED);
     sunny.style.opacity = String(sunny._opacity);
 
-    // 🛸 UFO抽選（非アクティブ時のみ）
+    // UFO抽選（非アクティブ時のみ）
     if (!ufoActive) {
       const p = 1 - Math.pow(1 - UFO_CHANCE_PER_SEC, dt);
       if (Math.random() < p) startUFO();
