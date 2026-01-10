@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.6 (coinsChanged emit + sy:add helper + compat)", Date.now());
+  console.log("[app.js] LOADED v16.8.0 (reincarnation + clear bunnies/hearts + stars)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -64,6 +64,9 @@
     unchi:     "wb_unchi_v1",
     title:     "wb_title_v1",
     titleList: "wb_title_list_v1",
+
+    // ✅ 転生（牧場の星）
+    stars:     "wb_stars_v1",
   };
 
   /* =========================
@@ -91,9 +94,9 @@
    * ✅ 座標系を強制（最重要）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1673")) return;
+    if (document.getElementById("wbAppCoreCssV1680")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1673";
+    st.id = "wbAppCoreCssV1680";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -262,7 +265,6 @@
     if (audioUnlocked) return;
     audioUnlocked = true;
 
-    // ✅ SE unlock
     try {
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
@@ -271,7 +273,6 @@
         .catch(() => (sePoyo.muted = false));
     } catch {}
 
-    // ✅ BGMもユーザー操作内で開始を試す（ブロック対策）
     try {
       window.WB?.bgm?.start?.();
       window.WB?.bgm?.play?.();
@@ -304,20 +305,24 @@
   })();
 
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
-
-  // ✅ coins 変更通知を強化（zisseki等の互換）
-  function emitCoinChanged() {
-    try { emit("coinsChanged", { coins }); } catch {}
-    try { emit("coinChanged",  { coins }); } catch {}
-    try { emit("hudUpdated",   { coins }); } catch {}
-  }
-
-  function updateHud() {
-    coinValueEl.textContent = String(coins);
-    emitCoinChanged();
-  }
-
+  function updateHud() { coinValueEl.textContent = String(coins); emit("hudUpdated", { coins }); }
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
+
+  // ✅ 星（転生）
+  function getStars() {
+    const n = Number(localStorage.getItem(LS.stars) || "0");
+    return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+  }
+  function setStars(v) {
+    const n = Math.max(0, Math.floor(Number(v) || 0));
+    localStorage.setItem(LS.stars, String(n));
+    emit("starsChanged", { stars: n });
+    return n;
+  }
+  function addStars(d = 1) {
+    const cur = getStars();
+    return setStars(cur + Math.max(0, Math.floor(Number(d) || 0)));
+  }
 
   function loadBunnyMeta() {
     try {
@@ -377,14 +382,7 @@
     collect(){
       if (!this.el || !this.el.isConnected) return;
       coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
-      saveCoins();
-      updateHud();
-      playSE(seCoin);
-
-      // ✅ コイン獲得の統一イベント（必要なら他モジュールで拾える）
-      try { emit("coinCollected", { tier: this.tier, add: (this.tier + 1) * COIN_VALUE_MULTIPLIER }); } catch {}
-      try { emit("sy:add", { key: "coin_collect", delta: 1, tier: this.tier }); } catch {} // 実績用の拡張キー（使わなくてもOK）
-
+      saveCoins(); updateHud(); playSE(seCoin);
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
@@ -443,7 +441,6 @@
         e?.preventDefault?.();
         playSE(this.isBaby ? seBaby : sePoyo);
 
-        // ✅ baby は coin1 固定＆ゲージ無し
         if (this.isBaby) {
           spawnClickCoins(this, 3, () => 0);
           return;
@@ -543,7 +540,6 @@
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
       this.isBaby = false;
-
       this.charge = 0;
       this.chargeReady = false;
       this.hideHeart();
@@ -598,9 +594,6 @@
     bunnies.push(b);
     saveBunnyMeta();
     emit("bunnyCountChanged", { count: bunnies.length });
-
-    // ✅ 図鑑側の発見トリガを安全に送る
-    try { emit("bunnySpawned", { kind: b.kind, bornAt: b.bornAt }); } catch {}
     return b;
   }
 
@@ -613,6 +606,26 @@
     saveBunnyMeta();
     emit("bunnyCountChanged", { count: bunnies.length });
     return true;
+  }
+
+  // ✅ 転生用：うさぎ全消し（DOM残骸も全部消す）
+  function clearAllBunnies() {
+    // 1) 配列をなめて確実にDOM除去
+    for (const b of [...bunnies]) {
+      try { b.wrap?.remove?.(); } catch {}
+      try { b.hartEl?.remove?.(); } catch {}
+    }
+    bunnies.length = 0;
+
+    // 2) bunnyLayerの残骸を削る（保険）
+    try { bunnyLayer.querySelectorAll(".bunnyWrap,.bunny-wrap,img").forEach(n => n.remove()); } catch {}
+
+    // 3) field直下に残ったハート残骸（.wbChargeHart）を全削除（本命）
+    try { field.querySelectorAll(".wbChargeHart").forEach(n => n.remove()); } catch {}
+
+    // 4) 保存も消す
+    try { localStorage.removeItem(LS.bunnies); } catch {}
+    emit("bunnyCountChanged", { count: 0 });
   }
 
   /* =========================
@@ -667,9 +680,6 @@
   rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
   slotBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:slot",   {}); });
 
-  // ✅ 花火ボタンもコアが軽く通知（実際の加算は hanabi.js 側で sy:add 推奨）
-  hanabiBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:hanabi", {}); });
-
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       unlockAudioOnce();
@@ -686,6 +696,28 @@
   }
 
   /* =========================
+   * ✅ 転生API
+   * ========================= */
+  function reincarnate() {
+    // 星 +1
+    const stars = addStars(1);
+
+    // コイン・うさぎを消す（要望）
+    coins = 0;
+    saveCoins();
+    updateHud();
+
+    clearAllBunnies();
+
+    // 他モジュールへ
+    emit("reincarnated", { stars });
+
+    // bgcolor.js がLS監視してるので背景は勝手に変わる
+    // （reincarnation_pet.js も stars>=1 で出現）
+    console.log("[app.js] reincarnated => stars:", stars);
+  }
+
+  /* =========================
    * WB merge
    * ========================= */
   const api = {
@@ -694,11 +726,9 @@
     field, bunnyLayer, coinLayer,
     shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
-    // ⚠️ getter/setter は Object.assign で潰れるので後で defineProperty で復活させる
     get coins() { return coins; },
     set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
 
-    // ✅ 互換API（他モジュールが addCoin/addCoins 等で呼んでもOK）
     getCoins: () => coins,
     setCoin: (v) => { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); return coins; },
     setCoins: (v) => { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); return coins; },
@@ -723,10 +753,6 @@
       return true;
     },
 
-    // ✅ 実績加算の共通入口（他モジュールがこれだけ呼べばOK）
-    // 例：WB.syAdd({ key:"unchi", delta:1 })
-    syAdd: (payload) => { try { emit("sy:add", payload); } catch {} },
-
     bunnies,
     getBunnies: () => bunnies,
     spawnBunny,
@@ -748,12 +774,20 @@
       const b = bunnies.find(x => x && x.bornAt === t);
       return b ? { charge: b.isBaby ? 0 : b.charge, ready: b.isBaby ? false : b.chargeReady } : null;
     },
+
+    // ✅ 転生（星）
+    getStars,
+    setStars,
+    addStars,
+
+    // ✅ 転生：うさぎ全消し/転生実行
+    clearAllBunnies,
+    reincarnate,
   };
 
-  // まずは素直にマージ
   window.WB = Object.assign({}, prevWB, api);
 
-  // ✅ coins getter/setter を “必ず coins変数と同期する” 形に復活
+  // coins getter/setter 復活
   try {
     Object.defineProperty(window.WB, "coins", {
       configurable: true,
@@ -805,6 +839,8 @@
 
     updateHud();
     emit("bunnyCountChanged", { count: bunnies.length });
+
+    emit("core:ready", { stars: getStars(), coins });
 
     requestAnimationFrame(tick);
   }
