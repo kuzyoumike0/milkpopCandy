@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.1 (NEVER outside + FIX typos)", Date.now());
+  console.log("[app.js] LOADED v16.7.2 (BGM kick + coin smaller)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -91,9 +91,9 @@
    * ✅ 座標系を強制（最重要）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1671")) return;
+    if (document.getElementById("wbAppCoreCssV1672")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1671";
+    st.id = "wbAppCoreCssV1672";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -122,6 +122,18 @@
         -webkit-user-drag:none;
         pointer-events:auto;
       }
+
+      /* ✅ コイン小さめ */
+      .coin{
+        position:absolute;
+        width:34px !important;
+        height:34px !important;
+        object-fit:contain !important;
+        user-select:none;
+        -webkit-user-drag:none;
+        cursor:pointer;
+      }
+
       .wbChargeHart{
         position:absolute;
         z-index:9999;
@@ -249,12 +261,22 @@
   function unlockAudioOnce() {
     if (audioUnlocked) return;
     audioUnlocked = true;
+
+    // ✅ SE unlock
     try {
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
       sePoyo.play()
         .then(() => { sePoyo.pause(); sePoyo.currentTime = 0; sePoyo.muted = false; })
         .catch(() => (sePoyo.muted = false));
+    } catch {}
+
+    // ✅ BGMもユーザー操作内で開始を試す（ブロック対策）
+    try {
+      window.WB?.bgm?.start?.();
+      window.WB?.bgm?.play?.();
+      // UI生成だけ先に（openModalはメニューから呼ぶ想定）
+      window.WB?.bgm?.mountUI?.({ position: "top-right", title: "BGM" });
     } catch {}
   }
   window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
