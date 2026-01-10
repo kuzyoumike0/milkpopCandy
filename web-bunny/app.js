@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.6 (HARD clamp: never outside)", Date.now());
+  console.log("[app.js] LOADED v16.7 (NEVER outside: absolute layers + stable bounds)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -74,7 +74,7 @@
   const coinLayer   = document.getElementById("coinLayer");
   const coinValueEl = document.getElementById("coinValue");
 
-  const shopBtn     = document.getElementById("shopBtn");
+  const shoplshopBtn   = document.getElementById("shopBtn");
   const omukaeBtn   = document.getElementById("omukaeBtn");
   const hanabiBtn   = document.getElementById("hanabiBtn");
   const departBtn   = document.getElementById("departBtn");
@@ -87,11 +87,70 @@
     return;
   }
 
-  // field が static だと絶対配置の基準がズレるので保険（あなたのCSSはfixedなので通常ここは触らない）
-  try {
-    const cs = getComputedStyle(field);
-    if (cs.position === "static") field.style.position = "relative";
-  } catch {}
+  /* =========================
+   * ✅ 座標系を強制（これが最重要）
+   * - field: 位置基準の親
+   * - bunnyLayer/coinLayer: field内で絶対配置
+   * - bunnyWrap: 0,0 を基準に translate3d で動かすため absolute 必須
+   * ========================= */
+  (function injectCssOnce() {
+    if (document.getElementById("wbAppCoreCssV167")) return;
+    const st = document.createElement("style");
+    st.id = "wbAppCoreCssV167";
+    st.textContent = `
+      /* fieldは必ず基準点になる（fixedでもOK。staticは絶対NG） */
+      #field{
+        position:fixed !important;
+        inset:0 !important;
+        overflow:hidden !important;
+      }
+
+      /* レイヤーはfield内で絶対配置、座標系(0,0)を確定 */
+      #bunnyLayer, #coinLayer{
+        position:absolute !important;
+        inset:0 !important;
+        overflow:hidden !important;
+      }
+
+      /* wrapは "translate3d(x,y)" を使うので absolute + left/top 0 が必須 */
+      .bunnyWrap{
+        position:absolute !important;
+        left:0 !important;
+        top:0 !important;
+        width:${WRAP_W}px !important;
+        height:${WRAP_H}px !important;
+        will-change: transform;
+        touch-action: manipulation;
+      }
+
+      /* 念のため：画像がはみ出す事故を潰す */
+      .bunnyWrap .bunny{
+        width:100% !important;
+        height:100% !important;
+        object-fit:contain !important;
+        user-select:none;
+        -webkit-user-drag:none;
+        pointer-events:auto;
+      }
+
+      .wbChargeHart{
+        position:absolute;
+        z-index:9999;
+        pointer-events:none;
+        transform:translate(-50%,-50%);
+        animation:wbHartBob 1.05s ease-in-out infinite;
+        width:40px;
+        height:40px;
+        filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));
+      }
+      @keyframes wbHartBob{
+        0%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}
+        50%{transform:translate(-50%,-50%) translateY(-7px) rotate(3deg) scale(1.03);}
+        100%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}
+      }
+    `;
+    document.head.appendChild(st);
+  })();
 
   /* =========================
    * WB bus (merge-safe)
@@ -108,32 +167,28 @@
   const emit = (typeof prevWB.emit === "function") ? prevWB.emit.bind(prevWB) : localEmit;
 
   /* =========================
-   * Utils / Field size (超堅牢)
+   * Utils / Field size（安定版）
    * ========================= */
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const rand  = (a, b) => a + Math.random() * (b - a);
 
   let FIELD_W = 1, FIELD_H = 1;
 
-  function readFieldRect() {
+  // ✅ getBoundingClientRect が変な値になる環境があるので「clientWidth/Height」を主にする
+  function readFieldSize() {
+    const cw = Math.round(field.clientWidth || 0);
+    const ch = Math.round(field.clientHeight || 0);
+
+    if (cw >= 50 && ch >= 50) return { w: cw, h: ch };
+
     const r = field.getBoundingClientRect();
-    // visualViewport がある端末は「見えてる範囲」がこれに寄るので、極端に小さい方を採用して暴走防止
-    let vw = r.width;
-    let vh = r.height;
-    try {
-      if (window.visualViewport) {
-        vw = Math.min(vw, window.visualViewport.width || vw);
-        vh = Math.min(vh, window.visualViewport.height || vh);
-      }
-    } catch {}
-    return {
-      w: Math.max(1, Math.round(vw || field.clientWidth || 1)),
-      h: Math.max(1, Math.round(vh || field.clientHeight || 1)),
-    };
+    const w = Math.round(r.width || window.innerWidth || 1);
+    const h = Math.round(r.height || window.innerHeight || 1);
+    return { w: Math.max(1, w), h: Math.max(1, h) };
   }
 
   function refreshFieldSize() {
-    const v = readFieldRect();
+    const v = readFieldSize();
     FIELD_W = v.w;
     FIELD_H = v.h;
   }
@@ -166,6 +221,7 @@
   }
 
   // ✅ 画面状態変化（URLバー/回転/ズーム）で必ず救出
+  const bunnies = []; // 先に宣言（scheduleRescueAllで参照）
   function scheduleRescueAll() {
     requestAnimationFrame(() => {
       const { minX, maxX, minY, maxY } = worldBounds();
@@ -236,24 +292,6 @@
   }
 
   /* =========================
-   * CSS (位置ブレ抑止：translate3dで確実に描画)
-   * ========================= */
-  (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV166")) return;
-    const st = document.createElement("style");
-    st.id = "wbAppCoreCssV166";
-    st.textContent = `
-      /* wrapは固定サイズで運用（CSS側と一致） */
-      .bunnyWrap{ width:${WRAP_W}px !important; height:${WRAP_H}px !important; }
-      /* left/top を使わず transform に寄せる（レイアウト揺れに強い） */
-      .bunnyWrap{ will-change: transform; }
-      .wbChargeHart{ position:absolute; z-index:9999; pointer-events:none; transform:translate(-50%,-50%); animation:wbHartBob 1.05s ease-in-out infinite; width:40px; height:40px; filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));}
-      @keyframes wbHartBob{0%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}50%{transform:translate(-50%,-50%) translateY(-7px) rotate(3deg) scale(1.03);}100%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}}
-    `;
-    document.head.appendChild(st);
-  })();
-
-  /* =========================
    * State
    * ========================= */
   let coins = (() => {
@@ -265,7 +303,6 @@
   function updateHud() { coinValueEl.textContent = String(coins); emit("hudUpdated", { coins }); }
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
-  const bunnies = [];
   function loadBunnyMeta() {
     try {
       const arr = JSON.parse(localStorage.getItem(LS.bunnies) || "null");
@@ -338,7 +375,6 @@
   }
 
   function spawnClickCoins(bunny, count = 1, tierPicker = () => 0) {
-    // ✅ rect依存を捨てる：bunny.x/y は field内座標
     const baseX = bunny.x + WRAP_W * 0.55;
     const baseY = bunny.y + WRAP_H * 0.82;
     for (let i = 0; i < count; i++) {
@@ -372,7 +408,6 @@
       // ✅ 初期位置：必ず bounds 内で生成
       const { minX, maxX, minY, maxY, gy } = worldBounds();
       this.x = rand(minX, maxX);
-      // 地面に寄せる（外に行くよりマシ）
       this.y = clamp(gy - WRAP_H, minY, maxY);
 
       this.dir = Math.random() < 0.5 ? -1 : 1;
@@ -426,7 +461,6 @@
 
     positionHeart() {
       if (!this.hartEl || this.hartEl.style.display === "none") return;
-      // ✅ rect依存を捨てる：field内座標で置く
       const x = this.x + WRAP_W * 0.5;
       const y = this.y + WRAP_H * 0.08;
       this.hartEl.style.left = `${x}px`;
@@ -490,20 +524,21 @@
     hardClamp(force = false) {
       const { minX, maxX, minY, maxY, gy } = worldBounds();
 
-      // y は基本 地面に寄せる（でも範囲外は救出）
+      // y は常に地面へ吸着（ただし範囲外は救出）
       const targetY = clamp(gy - WRAP_H, minY, maxY);
       if (force) this.y = targetY;
       else this.y += (targetY - this.y) * 0.35;
 
-      // x/y が外に出たら即救出
       this.x = clamp(this.x, minX, maxX);
       this.y = clamp(this.y, minY, maxY);
     }
 
     applyPos() {
-      // ✅ left/top ではなく transform translate3d（ズレに強い）
       this.wrap.classList.toggle("flip", this.dir < 0);
-      this.wrap.style.transform = `translate3d(${Math.round(this.x)}px, ${Math.round(this.y)}px, 0)`;
+      // ✅ 小数が溜まると境界で“にじみ”が出るので丸めて固定
+      const x = Math.round(this.x);
+      const y = Math.round(this.y);
+      this.wrap.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     }
 
     update(dt) {
@@ -515,11 +550,11 @@
 
       const { minX, maxX } = worldBounds();
 
-      // 反射（先に反射してから clamp）
+      // 反射
       if (this.x <= minX) { this.x = minX; this.dir = 1; }
       else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
 
-      // ✅ 最終的に絶対救出
+      // ✅ 最終救出
       this.hardClamp(false);
 
       this.applyPos();
@@ -592,7 +627,7 @@
   /* =========================
    * Buttons (emit)
    * ========================= */
-  shopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
+  RlshopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
   omukaeBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:omukae", {}); });
   departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
   rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
@@ -620,7 +655,7 @@
     on, off, emit,
     ASSETS, BUNNY_DEFS, LS, DEPART_COST,
     field, bunnyLayer, coinLayer,
-    shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
+    shopBtn: RlshopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
     get coins() { return coins; },
     set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
@@ -680,7 +715,7 @@
     const dt = Math.min(0.033, (ts - lastFrame) / 1000);
     lastFrame = ts;
 
-    // ✅ 毎フレーム「サイズ再評価」→外に出たら救出（これで絶対外に行かない）
+    // ✅ 毎フレーム救出（絶対外に出さない）
     refreshFieldSize();
 
     for (const b of bunnies) b.update(dt);
@@ -694,7 +729,6 @@
     refreshFieldSize();
 
     await initBunnies();
-    // 初期救出
     scheduleRescueAll();
 
     updateHud();
