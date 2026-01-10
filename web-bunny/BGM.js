@@ -15,10 +15,11 @@
 //        → Audio.src へは必ず encodeURI した「絶対URL」を入れる
 // ✅ FIX：購入したBGMが流れないことがある → src差し替え後に audio.load() / play失敗理由をtoast / canplay追い再生 / 再試行
 // ✅ FIX：tryPlayBgm 内の toast 例外でUIが死ぬのを根絶（safeToast）
+// ✅ FIX：assets/BGM（大文字フォルダ）に統一 + 旧assets/bgm指定でも自動補正
 
 (() => {
   "use strict";
-  console.log("[BGM.js] LOADED v3.3.3 (modal-safe + canplay retry + safeToast)", Date.now());
+  console.log("[BGM.js] LOADED v3.3.4 (assets/BGM fix + path normalize)", Date.now());
 
   /* =========================
    * Storage
@@ -30,16 +31,17 @@
 
   /* =========================
    * Tracks（ここを書き換えるだけで増やせる）
+   * ✅ あなたのリポジトリ構成：assets/BGM/（大文字）に合わせて統一
    * ========================= */
   const TRACKS = {
-    morning: "./assets/bgm_morning.mp3",
-    day:     "./assets/bgm_day.mp3",
-    night:   "./assets/bgm_night.mp3",
-    depart:  "./assets/tabi.mp3",
+    morning:  "./assets/BGM/bgm_morning.mp3",
+    day:      "./assets/BGM/bgm_day.mp3",
+    night:    "./assets/BGM/bgm_night.mp3",
+    depart:   "./assets/BGM/tabi.mp3",
 
-    cocktail: "./assets/bgm/Cocktail_Glass.mp3",
-    stream:   "./assets/bgm/Stream.mp3",
-    dokkan:   "./assets/bgm/dokkan.mp3",
+    cocktail: "./assets/BGM/Cocktail_Glass.mp3",
+    stream:   "./assets/BGM/Stream.mp3",
+    dokkan:   "./assets/BGM/dokkan.mp3",
   };
 
   const PRICES = {
@@ -86,10 +88,26 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   /* =========================
-   * Path helpers（日本語ファイル名対策）
+   * Path helpers（日本語ファイル名 / フォルダ大文字小文字事故対策）
    * ========================= */
+  function normalizeAssetPath(src) {
+    // 旧コードや別モジュールが ./assets/bgm/ を渡してきても ./assets/BGM/ に補正
+    try {
+      let s = String(src || "");
+      // よくある事故：assets/bgm と assets/BGM
+      s = s.replace(/\/assets\/bgm\//g, "/assets/BGM/");
+      s = s.replace(/\.\/assets\/bgm\//g, "./assets/BGM/");
+      // たまに BGM フォルダに置いたのにルート ./assets/ を参照してしまう事故の保険
+      // （morning/day/night/tabi だけは既に正しいので触らない）
+      return s;
+    } catch {
+      return src;
+    }
+  }
+
   function toAbsUrlEncoded(src) {
-    try { return new URL(encodeURI(src), location.href).href; } catch { return src; }
+    const fixed = normalizeAssetPath(src);
+    try { return new URL(encodeURI(fixed), location.href).href; } catch { return fixed; }
   }
 
   /* =========================
@@ -274,7 +292,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function resolveKeyBySrc(src) {
-    for (const k of Object.keys(TRACKS)) if (TRACKS[k] === src) return k;
+    const s = normalizeAssetPath(src);
+    for (const k of Object.keys(TRACKS)) {
+      if (normalizeAssetPath(TRACKS[k]) === s) return k;
+    }
     return null;
   }
 
@@ -1019,7 +1040,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   function patchWB(WB) {
     if (!WB || typeof WB !== "object") return;
-    if (lastWBRef === WB && WB.__bgmPatchedV333) return;
+    if (lastWBRef === WB && WB.__bgmPatchedV334) return;
     lastWBRef = WB;
 
     const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
@@ -1062,10 +1083,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     WB.bgm.getLastPlayError = () => __lastPlayErr;
     WB.bgm.registerSE = registerSE;
 
-    // ✅ 便利：外部が安全にトーストしたい時
     WB.toast = WB.toast || ((m) => safeToast(m));
 
-    WB.__bgmPatchedV333 = true;
+    WB.__bgmPatchedV334 = true;
 
     if (unlocked && bgmSettings.enabled && !previewKey) startBgm(false);
   }
