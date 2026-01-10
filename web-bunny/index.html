@@ -9,7 +9,7 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <meta name="theme-color" content="#ffd6e7" />
 
-  <link rel="stylesheet" href="./style.css?v=20260109_3" />
+  <link rel="stylesheet" href="./style.css?v=20260110_1" />
 
   <meta http-equiv="Content-Security-Policy"
         content="
@@ -33,8 +33,12 @@
       <button id="omukaeBtn" type="button">お迎え</button>
       <button id="hanabiBtn" type="button">🎆 花火</button>
 
-      <!-- ✅ 互換用：DOMとしては置いてOK（見せない/押さない）。gameMenu.js が click() で呼ぶ -->
-      <button id="shopBtn" type="button" style="display:none;">ショップ</button>
+      <!-- ✅ 互換用：DOMとしては置いてOK（見せない/押さない）。他JSが click() で呼ぶ -->
+      <button id="shopBtn"   type="button" style="display:none;">ショップ</button>
+      <button id="slotBtn"   type="button" style="display:none;">スロット</button>
+      <button id="departBtn" type="button" style="display:none;">旅立ち</button>
+      <button id="rankBtn"   type="button" style="display:none;">ランキング</button>
+      <button id="resetBtn"  type="button" style="display:none;">リセット</button>
     </div>
 
     <div id="title" aria-label="current-title"></div>
@@ -42,58 +46,61 @@
 
   <!-- ===== メインフィールド ===== -->
   <main id="field">
-    <!-- ✅ bgLayer は「背景専用」：ここにミラーボール/ディスコFXが乗る -->
+    <!-- ✅ bgLayer は「背景専用」：ここにミラーボール/スポットライト等が乗る -->
     <div id="bgLayer"></div>
 
     <div id="tenkiLayer"></div>
     <div id="bunnyLayer"></div>
     <div id="coinLayer"></div>
+    <!-- ✅ unchiLayer は unchi.js 側で自動生成（ここには書かない） -->
   </main>
 
   <!-- ✅ WBを先に用意（WB not found を根絶） -->
-  <script src="./wb_boot.js?v=20260109_3"></script>
+  <script src="./wb_boot.js?v=20260110_1"></script>
 
-  <!-- ✅ 背景（朝昼夜 + ミラーボール/ディスコ） -->
-  <script src="./bgcolor.js?v=20260109_3"></script>
+  <!-- ✅ 背景（朝昼夜 + ミラーボール） -->
+  <script src="./bgcolor.js?v=20260110_1"></script>
 
   <!-- 天気 -->
-  <script src="./tenki.js?v=20260109_3"></script>
+  <script src="./tenki.js?v=20260110_1"></script>
 
   <!-- 花火（ボタンはHUDに残す） -->
-  <script src="./hanabi.js?v=20260109_3"></script>
+  <script src="./hanabi.js?v=20260110_1"></script>
 
   <!-- ===== コア（WBを作る） ===== -->
-  <script src="./app.js?v=20260109_3"></script>
+  <script src="./app.js?v=20260110_1"></script>
 
   <!-- ✅ BGM（モーダル版：WB.bgm.openModal() 提供） -->
-  <script src="./BGM.js?v=20260109_3"></script>
+  <script src="./BGM.js?v=20260110_1"></script>
+
+  <!-- ✅ うんち（app.js から分離した unchi）※BGMの後・他モジュールの前が安全 -->
+  <script src="./unchi.js?v=20260110_1"></script>
 
   <!-- ✅ ショップ（ミラーボール購入＋設置ON/OFF） -->
-  <script src="./shop.js?v=20260109_3"></script>
+  <script src="./shop.js?v=20260110_1"></script>
 
   <!-- ✅ アイテム配置（shop購入アイテムを赤枠で配置） -->
-  <script src="./itemPlace.js?v=20260109_3"></script>
+  <script src="./itemPlace.js?v=20260110_1"></script>
 
   <!-- ===== 拡張（WB依存） ===== -->
-  <script src="./zisseki.js?v=20260109_3"></script>
-  <script src="./syougou.js?v=20260109_3"></script>
+  <script src="./zisseki.js?v=20260110_1"></script>
+  <script src="./syougou.js?v=20260110_1"></script>
 
   <!-- ✅ omukae は「お迎えボタン」で開く -->
-  <script src="./omukae.js?v=20260109_3"></script>
+  <script src="./omukae.js?v=20260110_1"></script>
 
-  <!-- お洒落（※HUDボタンは出さず ISYOU.openModal() だけ使う想定） -->
-  <script src="./isyou.js?v=20260109_3"></script>
+  <!-- お洒落 -->
+  <script src="./isyou.js?v=20260110_1"></script>
 
-  <!-- 図鑑（※HUDボタンは出さず WB.zukan.open() だけ使う想定） -->
-  <script src="./zukan.js?v=20260109_3"></script>
+  <!-- 図鑑 -->
+  <script src="./zukan.js?v=20260110_1"></script>
 
-  <script src="./farewell_messages.js?v=20260109_3"></script>
-  <script src="./tabidati.js?v=20260109_3"></script>
-  <script src="./slot.js?v=20260109_3"></script>
-  <script src="./itemPlace.js?v=20260109_3"></script>
+  <script src="./farewell_messages.js?v=20260110_1"></script>
+  <script src="./tabidati.js?v=20260110_1"></script>
+  <script src="./slot.js?v=20260110_1"></script>
 
-  <!-- ✅ 右上ハンバーガーメニュー（最後に読み込む：起動先APIが揃ってから） -->
-  <script src="./gameMenu.js?v=20260109_3"></script>
+  <!-- ✅ 右上ハンバーガーメニュー（最後に読み込む） -->
+  <script src="./gameMenu.js?v=20260110_1"></script>
 
   <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
   <script>
