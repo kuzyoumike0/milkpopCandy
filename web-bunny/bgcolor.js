@@ -1,10 +1,10 @@
-// bgcolor.js（V13：mirrorballスポットを #field に描画して“必ず見える”ようにする）
+// bgcolor.js（V13.1：mirrorballの“後ろ”にスポットライトを固定）
 // ✅ 朝昼夜 背景をJSTで自動
 // ✅ mirrorball：購入済み + enabled=true + placed=true のときだけ有効
 // ✅ スポットライト：幅広い虹2本 / 左右ゆらゆら / hue回転
-// ✅ 光源位置：itemPlaceが置いた #itemPlace_mirrorball のDOM位置から算出（ズレ根絶）
-// ✅ スポットは #field に重ねる（bunny/coin より上にもできる）
-// ✅ 軽量：rAF1本 / 30秒ごと再同期 / OFF時は非表示（必要なら削除も可）
+// ✅ 光源位置：itemPlaceが置いた #itemPlace_mirrorball のDOM位置から算出
+// ✅ スポットは #field に重ねるが、mirrorball の “背面” に入れる（DOM順で確実）
+// ✅ 軽量：rAF1本 / 30秒ごと再同期 / OFF時は非表示
 
 (() => {
   "use strict";
@@ -24,8 +24,8 @@
     rightId: "bgMirrorFXRightV13",
     styleId: "bgMirrorFXStyleV13",
 
-    // ✅ ここが重要：#field の中で見えるように高め
-    z: 60,
+    // ✅ “後ろに置く”ので低め（DOM順でも効くが保険）
+    z: 20,
 
     width: 520,
     height: 860,
@@ -145,8 +145,8 @@
     document.head.appendChild(st);
   }
 
-  // ✅ 重要：wrap を #field に入れる（スポットが必ず見える）
-  function ensureFXInField() {
+  // ✅ 重要：wrap を #field に入れるが、mirrorball の “直前” に差し込む
+  function ensureFXBehindMirrorball() {
     const field = document.getElementById(FIELD_ID);
     if (!field) return null;
 
@@ -158,10 +158,20 @@
       wrap = document.createElement("div");
       wrap.id = FX.wrapId;
       wrap.innerHTML = `<div class="beam" id="${FX.leftId}"></div><div class="beam" id="${FX.rightId}"></div>`;
-      field.appendChild(wrap);
-    } else {
-      if (wrap.parentElement !== field) field.appendChild(wrap);
     }
+
+    // 置き場所：mirrorball の “直前” が最優先（同じ親なら背面になる）
+    const mirror = document.getElementById(MIRROR_DOM_ID);
+    if (mirror && mirror.isConnected && mirror.parentElement === field) {
+      if (wrap.parentElement !== field || wrap.nextSibling !== mirror) {
+        try { field.insertBefore(wrap, mirror); } catch { field.appendChild(wrap); }
+      }
+    } else {
+      // mirrorball が見つからない/親が違う時は field の先頭へ（できるだけ後ろ）
+      if (wrap.parentElement !== field) field.insertBefore(wrap, field.firstChild);
+      else if (field.firstChild !== wrap) field.insertBefore(wrap, field.firstChild);
+    }
+
     return wrap;
   }
 
@@ -187,7 +197,6 @@
     const s = st?.mirrorball;
     if (!s || !s.placed) return null;
 
-    // itemPlaceは field基準で x,y 保存してる想定
     const x = Number(s.x || 0) + 140 * FX.anchorX;
     const y = Number(s.y || 0) + 140 * FX.anchorY;
     return { x, y };
@@ -200,7 +209,7 @@
     ensureLayerReady(field);
 
     const on = shouldOn();
-    const fxWrap = ensureFXInField();
+    const fxWrap = ensureFXBehindMirrorball();
     if (!fxWrap) return;
 
     if (!on) {
