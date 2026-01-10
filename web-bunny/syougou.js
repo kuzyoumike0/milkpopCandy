@@ -1,511 +1,61 @@
-// isyou.js — お洒落（ショップ＋着せ替え＋赤枠選択＋決定式で外す＋flipズレ対策＋fitToBunny）完全版
-// ✅ #hud待機して「お洒落ボタン」が必ず出る
-// ✅ 購入→所持保存
-// ✅ 装着は「装着モード」→ うさぎクリックで赤枠選択 → 決定で反映（外すも同じ）
-// ✅ モーダル内クリックは装着判定しない（選択ボタンが押せる）
-// ✅ 装着モード中は backdrop がクリックを通す（うさぎをクリックできる）
-// ✅ 赤枠は選択中だけz-indexを上げる
-// ✅ FIX：アンカーはoffset系（transform/flipでもズレにくい）
-// ✅ NEW：fitToBunny（うさぎ画像と同じrectに重ね、autoズレ対策）
-// ✅ 重要：hat は「置き換え」（同時に1つだけ）
-// ✅ 称号カウント：購入時に SYOUGOU.add("omukae",1) を安全に叩く（無ければリトライ）
+// syougou.js（称号システム：✅付け替え + ✅HUD横表示 + ✅zukan.js互換API + ✅zisseki同期）
+// - window.SYOUGOU を提供
+// - カウント（unchi/tabidachi/hanabi/slot_win/omukae 等）で称号解放
+// - HUDに「称号」表示（クリックで付け替えパネル）
+// - zukan.js の renderTitles() が使うAPIを全提供
+//
+// 推奨ロード順： app.js(WB) → zisseki.js → syougou.js → zukan.js
+// ※ zukan.js が先でも動くように wait + 後追い反映あり
 
 (() => {
   "use strict";
-window.WB?.on?.("sy:add", ({ key, n }) => {
-  try { window.SYOUGOU?.add?.(key, n); } catch {}
-});
 
-  /* =========================
-   * Wait for HUD / WB
-   * ========================= */
   const WAIT_MS = 12000;
   const TICK_MS = 50;
 
-  function waitFor(getter, timeoutMs = WAIT_MS) {
+  function waitForWB() {
     const start = Date.now();
     return new Promise((resolve, reject) => {
       const t = setInterval(() => {
-        let v = null;
-        try { v = getter(); } catch {}
-        if (v) { clearInterval(t); resolve(v); return; }
-        if (Date.now() - start > timeoutMs) { clearInterval(t); reject(new Error("waitFor timeout")); }
+        if (window.WB && typeof window.WB === "object") {
+          clearInterval(t);
+          resolve(window.WB);
+          return;
+        }
+        if (Date.now() - start > WAIT_MS) {
+          clearInterval(t);
+          reject(new Error("WB not found"));
+        }
       }, TICK_MS);
     });
   }
 
   /* =========================
-   * Safe SYOUGOU.add (retry)
-   * ========================= */
-  /* =========================
- * Safe SYOUGOU.add (retry 強化版)
- * ========================= */
-const __syQueue = [];
-let __syRetryTimer = null;
-
-function __syCallAdd(k, n) {
-  const S = window.SYOUGOU;
-  if (!S) return false;
-
-  // add系の関数名ゆらぎ吸収
-  const fn =
-    (typeof S.add === "function" && S.add) ||
-    (typeof S.inc === "function" && S.inc) ||
-    (typeof S.plus === "function" && S.plus);
-
-  if (!fn) return false;
-
-  // キー一覧がある実装なら、存在しないキーを弾いて原因を見える化
-  try {
-    const keys =
-      (Array.isArray(S.keys) && S.keys) ||
-      (Array.isArray(S.KEYS) && S.KEYS) ||
-      (S.map && typeof S.map === "object" ? Object.keys(S.map) : null) ||
-      (S.defs && typeof S.defs === "object" ? Object.keys(S.defs) : null);
-
-    if (keys && !keys.includes(k)) {
-      console.warn("[isyou][syougou] unknown key:", k, "available:", keys.slice(0, 50));
-      // ここで return false にすると加算しない（=キー違いが確定）
-      return false;
-    }
-  } catch {}
-
-  try {
-    fn.call(S, k, n);
-  } catch (e) {
-    console.warn("[isyou][syougou] add failed:", e);
-    return false;
-  }
-
-  // 保存/再描画が必要な実装を吸収
-  try { S.save?.(); } catch {}
-  try { S.render?.(); } catch {}
-  try { S.update?.(); } catch {}
-  try { S.updateHud?.(); } catch {}
-
-  return true;
-}
-
-function syAdd(key, n = 1) {
-  // 即時に行けるなら行く
-  if (__syCallAdd(key, n)) return true;
-
-  // まだ無い / キー違いなどはキュー
-  __syQueue.push([key, n]);
-
-  if (!__syRetryTimer) {
-    let tries = 0;
-    __syRetryTimer = setInterval(() => {
-      tries++;
-
-      // キューを順に流す（成功したものだけ消える）
-      for (let i = 0; i < __syQueue.length; i++) {
-        const [k, a] = __syQueue[i];
-        if (__syCallAdd(k, a)) {
-          __syQueue.splice(i, 1);
-          i--;
-        }
-      }
-
-      // 全部流せたら終了
-      if (__syQueue.length === 0) {
-        clearInterval(__syRetryTimer);
-        __syRetryTimer = null;
-        return;
-      }
-
-      // ✅ 諦めを延長（60秒くらい待つ）
-      if (tries >= 300) { // 200ms * 300 = 60s
-        console.warn("[isyou][syougou] retry timeout. remaining queue:", __syQueue);
-        clearInterval(__syRetryTimer);
-        __syRetryTimer = null;
-      }
-    }, 200);
-  }
-
-  return false;
-}
-
-
-  /* =========================
-   * Config
-   * ========================= */
-  const LS = {
-    owned: "wb_isyou_owned_v3",       // { itemKey:number }
-    equipped: "wb_isyou_equipped_v3", // { bornAt: { slotKey: itemKey } }
-  };
-
-  // slot: "hat" は置き換え
-  const ITEMS = {
-    partyhat: { slot: "hat", label: "パーティーハット", img: "./assets/partyhat.png", price: 500 },
-    crown:    { slot: "hat", label: "クラウン",         img: "./assets/crown.png",    price: 900 },
-    ribbon:   { slot: "hat", label: "リボン",           img: "./assets/ribbon.png",   price: 700 },
-  };
-
-  // 帽子位置（うさぎ画像に対する割合）
-  // ※画像ごとに微調整したい場合はここだけ触ればOK
-  const ANCHOR = {
-    hat: {
-      x: 0.50,   // 横：中央
-      y: 0.06,   // 縦：上寄り（耳と耳の間の少し下〜上に合わせる）
-      w: 0.58,   // 幅：うさぎ画像幅に対する割合
-    },
-  };
-
-  /* =========================
-   * State
-   * ========================= */
-  const state = {
-    owned: {},          // itemKey -> count
-    equipped: {},       // bornAt -> { hat: itemKey }
-    mode: "browse",     // "browse" | "equip"
-    selectedItem: null, // itemKey
-    pendingAction: "equip", // "equip" | "remove"
-    selectedWrap: null, // .bunnyWrap
-    selectedBornAt: null,
-  };
-
-  let WB = null;
-
-  /* =========================
    * Storage
    * ========================= */
+  const LS_STATE = "wb_syougou_state_v2"; // {ver, counts:{}, owned:{id:true}, current:"title"}
+  const VER = 2;
+
   function loadJson(key, def) {
-    try { const v = JSON.parse(localStorage.getItem(key) || "null"); return v ?? def; }
-    catch { return def; }
-  }
-  function saveJson(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
-
-  function loadAll() {
-    state.owned = loadJson(LS.owned, {});
-    if (!state.owned || typeof state.owned !== "object") state.owned = {};
-    state.equipped = loadJson(LS.equipped, {});
-    if (!state.equipped || typeof state.equipped !== "object") state.equipped = {};
-  }
-  function saveAll() {
-    saveJson(LS.owned, state.owned);
-    saveJson(LS.equipped, state.equipped);
-  }
-
-  /* =========================
-   * WB helpers
-   * ========================= */
-  function getCoins() {
     try {
-      if (WB?.getCoin) return WB.getCoin();
-      if (typeof WB?.coins === "number") return WB.coins;
-    } catch {}
-    const el = document.getElementById("coinValue");
-    return el ? (Number(el.textContent) || 0) : 0;
-  }
-
-  function setCoins(v) {
-    const nv = Math.max(0, Math.floor(v));
-    try {
-      if (WB) {
-        if (typeof WB.coins === "number") WB.coins = nv;
-        WB.saveCoins?.();
-        WB.updateHud?.();
-      }
-    } catch {}
-    const el = document.getElementById("coinValue");
-    if (el) el.textContent = String(nv);
-  }
-
-  function spendCoins(amount) {
-    const have = getCoins();
-    if (have < amount) return false;
-    setCoins(have - amount);
-    return true;
-  }
-
-  function getBunnies() {
-    try {
-      if (WB?.getBunnies) return WB.getBunnies();
-      if (Array.isArray(WB?.bunnies)) return WB.bunnies;
-    } catch {}
-    return [];
-  }
-
-  function getBornAtFromWrap(wrap) {
-    // bunny object: { bornAt, wrap } を想定
-    const list = getBunnies();
-    const b = list.find((x) => x?.wrap === wrap);
-    return b?.bornAt ?? null;
-  }
-
-  /* =========================
-   * Styles
-   * ========================= */
-  function injectStyles() {
-    if (document.getElementById("isyouStyleV8")) return;
-    const s = document.createElement("style");
-    s.id = "isyouStyleV8";
-    s.textContent = `
-/* === modal === */
-#isyouBackdrop{
-  position: fixed; inset:0;
-  background: rgba(0,0,0,.36);
-  z-index: 2147483000;
-  display:none;
-}
-#isyouModal{
-  position:absolute; left:50%; top:50%;
-  transform: translate(-50%, -50%);
-  width: min(860px, 94vw);
-  max-height: min(84vh, 820px);
-  overflow:hidden;
-  border-radius: 18px;
-  background: rgba(255,255,255,.97);
-  box-shadow: 0 24px 70px rgba(0,0,0,.28);
-  display:flex; flex-direction: column;
-}
-#isyouModal .head{
-  display:flex; align-items:center; justify-content: space-between;
-  padding: 12px 14px;
-  border-bottom: 1px solid rgba(0,0,0,.08);
-}
-#isyouModal .ttl{ font-weight: 1000; letter-spacing: .02em; }
-#isyouModal .close{
-  border:none; background: rgba(0,0,0,.06);
-  border-radius: 12px; padding: 8px 12px;
-  font-weight: 900; cursor:pointer;
-}
-#isyouModal .body{ padding: 12px 14px; overflow:auto; }
-#isyouModal .row{ display:flex; gap:10px; flex-wrap: wrap; align-items:center; justify-content: space-between; }
-#isyouModal .pill{
-  display:inline-flex; align-items:center; gap:8px;
-  background: rgba(255,255,255,.92);
-  border-radius: 999px; padding: 8px 10px;
-  box-shadow: 0 10px 22px rgba(0,0,0,.08);
-  font-weight: 900;
-}
-#isyouModal .mini{ font-size: 12px; opacity: .78; font-weight: 900; }
-#isyouModal .grid{
-  margin-top: 12px;
-  display:grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 10px;
-}
-#isyouModal .card{
-  display:flex; gap:10px; align-items:flex-start;
-  padding: 10px;
-  border-radius: 14px;
-  background: rgba(0,0,0,.03);
-  border: 1px solid rgba(0,0,0,.06);
-}
-#isyouModal .thumb{
-  width:64px; height:64px; object-fit:contain;
-  background: rgba(255,255,255,.85);
-  border: 1px solid rgba(0,0,0,.08);
-  border-radius: 12px;
-  padding: 6px;
-  flex: 0 0 64px;
-}
-#isyouModal .info{ flex:1; min-width:0; display:flex; flex-direction: column; gap:4px; }
-#isyouModal .name{ font-weight:1000; line-height:1.2; }
-#isyouModal .price{ font-weight:1000; }
-#isyouModal .price.bad{ color: #b00020; }
-#isyouModal .btn{
-  border:none; border-radius: 12px;
-  padding: 9px 12px; font-weight: 1000; cursor:pointer;
-  background:#fff; box-shadow: 0 10px 22px rgba(0,0,0,.10);
-}
-#isyouModal .btn.primary{ background:#ffd6e7; }
-#isyouModal .btn.danger{ background: rgba(255,80,80,.12); }
-#isyouModal .btn[disabled]{ opacity:.55; cursor:not-allowed; box-shadow:none; }
-#isyouModal .badge{
-  display:inline-flex; align-items:center; gap:6px;
-  border-radius:999px; padding: 6px 10px;
-  background: rgba(0,0,0,.06);
-  font-weight: 1000; font-size:12px;
-}
-#isyouModal .badge.on{ background: rgba(120,210,255,.22); }
-#isyouModal .badge.lock{ background: rgba(255,120,120,.18); }
-
-/* === equip confirm bar === */
-#isyouConfirmBar{
-  position: fixed;
-  left: 50%;
-  top: 12%;
-  transform: translate(-50%, -50%);
-  z-index: 2147483600;
-  display:none;
-  background: rgba(255,255,255,.96);
-  border-radius: 16px;
-  padding: 10px 12px;
-  box-shadow: 0 18px 55px rgba(0,0,0,.22);
-  font-weight: 1000;
-}
-#isyouConfirmBar .row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; }
-#isyouConfirmBar .t{ opacity:.82; font-weight: 1000; }
-#isyouConfirmBar button{
-  border:none; border-radius: 12px;
-  padding: 8px 12px;
-  font-weight: 1000;
-  cursor:pointer;
-  background:#fff;
-  box-shadow: 0 10px 22px rgba(0,0,0,.10);
-}
-#isyouConfirmBar button.primary{ background:#ffd6e7; }
-#isyouConfirmBar button.danger{ background: rgba(255,80,80,.12); }
-
-/* === selection red outline (only in equip mode) === */
-body.isyouEquipMode .bunnyWrap{ outline: none; }
-body.isyouEquipMode .bunnyWrap.isyouSelected{
-  outline: 4px solid rgba(255, 64, 64, .88);
-  outline-offset: 3px;
-  border-radius: 18px;
-  z-index: 2147482000; /* 赤枠が埋もれない */
-}
-
-/* === accessory layer === */
-.bunnyWrap{ position: relative; } /* 念のため */
-.bunnyWrap .isyouAcc{
-  position:absolute;
-  left:0; top:0;
-  pointer-events:none;
-  z-index: 5;
-  will-change: transform;
-}
-.bunnyWrap .isyouAcc img{
-  display:block;
-  width:100%;
-  height:100%;
-  object-fit: contain;
-  pointer-events:none;
-}
-`;
-    document.head.appendChild(s);
-  }
-
-  /* =========================
-   * Toast (simple)
-   * ========================= */
-  function toast(text) {
-    const t = String(text ?? "").trim();
-    if (!t) return;
-    const el = document.createElement("div");
-    el.style.cssText = `
-      position:fixed; left:50%; top:14%;
-      transform:translate(-50%,-50%);
-      z-index:2147483647;
-      background: rgba(255,255,255,.96);
-      border-radius: 16px;
-      padding: 12px 16px;
-      font-weight: 1000;
-      box-shadow: 0 16px 40px rgba(0,0,0,.18);
-      opacity: 0;
-      animation: isyouIn .22s ease-out forwards, isyouOut .36s ease-in forwards;
-      animation-delay: 0ms, 2.3s;
-      white-space: nowrap;
-    `;
-    const stId = "isyouToastKeyframes";
-    if (!document.getElementById(stId)) {
-      const s = document.createElement("style");
-      s.id = stId;
-      s.textContent = `
-@keyframes isyouIn{ from{opacity:0; transform:translate(-50%,-70%);} to{opacity:1; transform:translate(-50%,-50%);} }
-@keyframes isyouOut{ from{opacity:1; transform:translate(-50%,-50%);} to{opacity:0; transform:translate(-50%,-35%);} }
-`;
-      document.head.appendChild(s);
+      const v = JSON.parse(localStorage.getItem(key) || "null");
+      return (v ?? def);
+    } catch {
+      return def;
     }
-    el.textContent = t;
-    document.body.appendChild(el);
-    setTimeout(() => { try { el.remove(); } catch {} }, 3200);
+  }
+  function saveJson(key, v) {
+    localStorage.setItem(key, JSON.stringify(v));
   }
 
-  /* =========================
-   * Modal
-   * ========================= */
-  let backdrop = null;
-  let modal = null;
-
-  function ensureModal() {
-    injectStyles();
-
-    if (!backdrop) {
-      backdrop = document.createElement("div");
-      backdrop.id = "isyouBackdrop";
-      document.body.appendChild(backdrop);
-    }
-    if (!modal) {
-      modal = document.createElement("div");
-      modal.id = "isyouModal";
-      backdrop.appendChild(modal);
-    }
-
-    // backdropクリック：browseなら閉じる / equip中はクリック透過したい
-    backdrop.onclick = (e) => {
-      if (state.mode === "equip") {
-        // 装着モード中は field クリックを邪魔しないため「閉じない」
-        e.stopPropagation();
-        return;
-      }
-      if (e.target === backdrop) closeModal();
-    };
-  }
-
-  function openModal() {
-    ensureModal();
-    renderModal();
-    backdrop.style.display = "block";
-  }
-
-  function closeModal() {
-    if (!backdrop) return;
-    backdrop.style.display = "none";
-  }
-
-  function ownedCount(itemKey) {
-    return Number(state.owned?.[itemKey] || 0);
-  }
-
-  function canBuy(itemKey) {
-    const it = ITEMS[itemKey];
-    if (!it) return false;
-    return getCoins() >= it.price;
-  }
-
-  function buy(itemKey) {
-    const it = ITEMS[itemKey];
-    if (!it) return false;
-    if (!spendCoins(it.price)) {
-      toast("コインが足りない…！");
-      return false;
-    }
-
-    state.owned[itemKey] = ownedCount(itemKey) + 1;
-    saveAll();
-
-    // ✅ 購入を「お迎え」カテゴリとして称号カウント（必要なら後でキーを変えてOK）
-    syAdd("omukae", 1);
-
-    toast(`🛍️ 購入：${it.label}`);
-    renderModal();
-    return true;
-  }
-
-  function setEquipItem(itemKey) {
-    state.selectedItem = itemKey;
-    state.pendingAction = "equip";
-    state.mode = "equip";
-    document.body.classList.add("isyouEquipMode");
-    // 装着モード中はモーダルを閉じてうさぎを触れるようにする
-    closeModal();
-    showConfirmBar();
-    toast("🐰 うさぎをクリックして選択 → 「決定」");
-  }
-
-  function setRemoveMode(slot = "hat") {
-    state.selectedItem = null;
-    state.pendingAction = "remove";
-    state.removeSlot = slot;
-    state.mode = "equip";
-    document.body.classList.add("isyouEquipMode");
-    closeModal();
-    showConfirmBar();
-    toast("🐰 外したいうさぎをクリックして選択 → 「外す決定」");
+  function normKey(k) {
+    const s = String(k ?? "").trim().toLowerCase();
+    if (!s) return "";
+    if (s === "tabidati") return "tabidachi";
+    if (s === "slotwin") return "slot_win";
+    if (s === "slot") return "slot_win";
+    if (s === "fireworks") return "hanabi";
+    return s;
   }
 
   function escapeHtml(s) {
@@ -517,445 +67,603 @@ body.isyouEquipMode .bunnyWrap.isyouSelected{
       .replaceAll("'", "&#039;");
   }
 
-  function renderModal() {
-    ensureModal();
-    const have = getCoins();
+  /* =========================
+   * Titles Master（ここに称号を追加していく）
+   * - id: 内部ID（固定）
+   * - title: 表示名（装備する文字列）
+   * - key: 解除条件のカテゴリキー
+   * - at: 必要回数
+   * - emoji/label: zukan表示用
+   * - desc: フレーバー（任意）
+   * ========================= */
+  const TITLE_MASTER = [
+    // 💩 ウンチ道
+    { id: "unchi_10",  key: "unchi",     at: 10,  emoji: "💩", label: "ウンチ",   title: "💩 ウンチ道・初段",   desc: "誇り高き第一歩。" },
+    { id: "unchi_20",  key: "unchi",     at: 20,  emoji: "💩", label: "ウンチ",   title: "💩 ウンチ道・二段",   desc: "積み重ねが形になる。" },
+    { id: "unchi_50",  key: "unchi",     at: 50,  emoji: "💩", label: "ウンチ",   title: "💩 ウンチ道・五段",   desc: "香りすら“歴史”になる。" },
+    { id: "unchi_100", key: "unchi",     at: 100, emoji: "💩", label: "ウンチ",   title: "💩 ウンチ道・皆伝",   desc: "もはや様式美。" },
 
-    const cards = Object.keys(ITEMS).map((k) => {
-      const it = ITEMS[k];
-      const owned = ownedCount(k);
-      const can = have >= it.price;
+    // ✈️ 旅立ち
+    { id: "tabi_10",   key: "tabidachi", at: 10,  emoji: "✈️", label: "旅立ち",   title: "✈️ 見送り見習い",     desc: "手を振る回数だけ、優しくなる。" },
+    { id: "tabi_20",   key: "tabidachi", at: 20,  emoji: "✈️", label: "旅立ち",   title: "✈️ 見送り係",         desc: "言葉が、少し上手になる。" },
+    { id: "tabi_50",   key: "tabidachi", at: 50,  emoji: "✈️", label: "旅立ち",   title: "✈️ 見送り職人",       desc: "別れを抱えられる人になる。" },
+    { id: "tabi_100",  key: "tabidachi", at: 100, emoji: "✈️", label: "旅立ち",   title: "✈️ 見送り神",         desc: "行ってらっしゃいに、祈りが混ざる。" },
 
-      const badge = owned > 0
-        ? `<span class="badge">所持：${owned}</span>`
-        : `<span class="badge lock">未所持</span>`;
+    // 🎆 花火
+    { id: "hanabi_10",  key: "hanabi",   at: 10,  emoji: "🎆", label: "花火",     title: "🎆 一発屋",           desc: "まずは一発、夜に爪痕。" },
+    { id: "hanabi_50",  key: "hanabi",   at: 50,  emoji: "🎆", label: "花火",     title: "🎆 夜空の演出家",     desc: "静けさの上に光を置く。" },
+    { id: "hanabi_100", key: "hanabi",   at: 100, emoji: "🎆", label: "花火",     title: "🎆 天上の花火師",     desc: "星が嫉妬する腕前。" },
 
-      const buyBtn = `<button class="btn ${can ? "primary" : ""}" data-buy="${escapeHtml(k)}" ${can ? "" : "disabled"}>購入</button>`;
+    // 🎰 スロット当たり
+    { id: "slot_10",  key: "slot_win",   at: 10,  emoji: "🎰", label: "スロット", title: "🎰 当たり癖",         desc: "たまたまが続くと運命に見える。" },
+    { id: "slot_50",  key: "slot_win",   at: 50,  emoji: "🎰", label: "スロット", title: "🎰 勝ち筋が見える",   desc: "気配が分かるようになる。" },
+    { id: "slot_100", key: "slot_win",   at: 100, emoji: "🎰", label: "スロット", title: "🎰 スロットの申し子", desc: "確率が味方をする。" },
 
-      const equipBtn = owned > 0
-        ? `<button class="btn" data-equip="${escapeHtml(k)}">装着モード</button>`
-        : `<button class="btn" disabled>装着</button>`;
+    // 🐰 お迎え
+    { id: "omukae_10",  key: "omukae",   at: 10,  emoji: "🐰", label: "お迎え",   title: "🐰 お迎え係",         desc: "扉の向こうは、いつだって新しい物語。" },
+    { id: "omukae_50",  key: "omukae",   at: 50,  emoji: "🐰", label: "お迎え",   title: "🐰 案内人",           desc: "迷子にならないように灯りを持つ。" },
+    { id: "omukae_100", key: "omukae",   at: 100, emoji: "🐰", label: "お迎え",   title: "🐰 冥府の執事",       desc: "“ようこそ”は何度言っても温かい。" },
+  ];
+
+  /* =========================
+   * UI
+   * ========================= */
+  const HUD_BADGE_ID = "wbTitleBadgeV1";
+  const PANEL_ID = "wbTitlePanelV1";
+
+  function ensureStyle() {
+    if (document.getElementById("wbSyougouStyleV1")) return;
+    const s = document.createElement("style");
+    s.id = "wbSyougouStyleV1";
+    s.textContent = `
+#${HUD_BADGE_ID}{
+  display:inline-flex; align-items:center; gap:8px;
+  padding:6px 10px;
+  border-radius:12px;
+  background:#fff;
+  box-shadow:0 4px 12px rgba(0,0,0,.15);
+  font-weight:1000;
+  cursor:pointer;
+  user-select:none;
+  max-width: 42vw;
+}
+#${HUD_BADGE_ID} .t{
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width: 34vw;
+}
+#${PANEL_ID}{position:fixed; inset:0; z-index:2147483647; display:none; user-select:none;}
+#${PANEL_ID} .bg{position:absolute; inset:0; background:rgba(0,0,0,.35);}
+#${PANEL_ID} .card{
+  position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  width:min(780px, 94vw);
+  max-height:min(82vh, 840px);
+  background:rgba(255,255,255,.97);
+  border-radius:16px;
+  box-shadow:0 18px 60px rgba(0,0,0,.25);
+  overflow:hidden;
+  display:flex; flex-direction:column;
+}
+#${PANEL_ID} .head{display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid rgba(0,0,0,.08);}
+#${PANEL_ID} .head .title{font-weight:1000; letter-spacing:.02em; display:flex; align-items:center; gap:10px;}
+#${PANEL_ID} .close{width:34px; height:34px; border:none; border-radius:999px; background:rgba(0,0,0,.06); font-weight:1000; cursor:pointer;}
+#${PANEL_ID} .body{padding:12px 14px 16px; overflow:auto;}
+#${PANEL_ID} .row{display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:12px;}
+#${PANEL_ID} .pill{display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:6px 10px; background:rgba(0,0,0,.06); font-weight:1000; font-size:12px;}
+#${PANEL_ID} .grid{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px;}
+@media (max-width:760px){ #${PANEL_ID} .grid{grid-template-columns:1fr;} }
+#${PANEL_ID} .item{
+  background:rgba(255,255,255,.94);
+  border-radius:14px;
+  padding:12px;
+  box-shadow:0 10px 24px rgba(0,0,0,.10);
+  display:flex; flex-direction:column; gap:8px;
+}
+#${PANEL_ID} .item.locked{opacity:.62;}
+#${PANEL_ID} .name{font-weight:1000;}
+#${PANEL_ID} .desc{font-weight:900; font-size:12px; opacity:.82; white-space:pre-line;}
+#${PANEL_ID} .meta{display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-top:auto;}
+#${PANEL_ID} .btn{border:none; border-radius:12px; padding:10px 12px; font-weight:1000; cursor:pointer; background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.10);}
+#${PANEL_ID} .btn.primary{background:#ffd6e7;}
+#${PANEL_ID} .btn[disabled]{opacity:.55; cursor:not-allowed; box-shadow:none;}
+`;
+    document.head.appendChild(s);
+  }
+
+  function $(q, p = document) { return p.querySelector(q); }
+
+  function buildPanel() {
+    ensureStyle();
+
+    let p = document.getElementById(PANEL_ID);
+    if (!p) {
+      p = document.createElement("div");
+      p.id = PANEL_ID;
+      document.body.appendChild(p);
+    }
+    if (p.querySelector(".card")) return p;
+
+    p.innerHTML = `
+      <div class="bg"></div>
+      <div class="card" role="dialog" aria-modal="true">
+        <div class="head">
+          <div class="title">🏷️ 称号</div>
+          <button class="close" type="button">×</button>
+        </div>
+        <div class="body"></div>
+      </div>
+    `;
+
+    $(".bg", p).addEventListener("click", (e) => { e.preventDefault(); closePanel(); });
+    $(".close", p).addEventListener("click", (e) => { e.preventDefault(); closePanel(); });
+    $(".card", p).addEventListener("click", (e) => e.stopPropagation());
+    return p;
+  }
+
+  function injectHudBadge(getCurrentTitle) {
+    ensureStyle();
+    const hud = document.getElementById("hud");
+    if (!hud) return;
+
+    // 右寄せ気味にしたい場合は hudButtons の外に置く方が安定
+    const mount = document.getElementById("hud") || hud;
+
+    let badge = document.getElementById(HUD_BADGE_ID);
+    if (!badge) {
+      badge = document.createElement("div");
+      badge.id = HUD_BADGE_ID;
+      badge.innerHTML = `<span>🏷️</span><span class="t">（称号なし）</span>`;
+      badge.addEventListener("click", (e) => {
+        e.preventDefault();
+        openPanel();
+      });
+
+      // hud内の末尾に追加（コイン等の横に並ぶ）
+      mount.appendChild(badge);
+    }
+
+    const t = getCurrentTitle();
+    badge.querySelector(".t").textContent = t ? t : "（称号なし）";
+  }
+
+  /* =========================
+   * Core state
+   * ========================= */
+  const st = loadJson(LS_STATE, { ver: VER, counts: {}, owned: {}, current: "" });
+  if (!st || typeof st !== "object") {
+    // 破損時の救済
+    st.ver = VER; st.counts = {}; st.owned = {}; st.current = "";
+  }
+  st.ver = VER;
+  st.counts = (st.counts && typeof st.counts === "object") ? st.counts : {};
+  st.owned = (st.owned && typeof st.owned === "object") ? st.owned : {};
+  st.current = String(st.current || "");
+
+  function saveState() {
+    saveJson(LS_STATE, st);
+  }
+
+  function getCount(key) {
+    const k = normKey(key);
+    const v = Number(st.counts[k] ?? 0);
+    return Number.isFinite(v) ? v : 0;
+  }
+
+  function setCount(key, v) {
+    const k = normKey(key);
+    if (!k) return;
+    const n = Number(v);
+    st.counts[k] = Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
+    saveState();
+  }
+
+  function addCount(key, delta = 1) {
+    const k = normKey(key);
+    if (!k) return 0;
+    const d = Number(delta);
+    const inc = Number.isFinite(d) ? d : 1;
+    const next = Math.max(0, Math.floor(getCount(k) + inc));
+    st.counts[k] = next;
+    saveState();
+    tryUnlockFromCounts();
+    return next;
+  }
+
+  function getTitlesMaster() {
+    // zukan.js が master を使うので “この形” で返す
+    // {id,title,emoji,label,at}
+    return TITLE_MASTER.map(m => ({
+      id: m.id,
+      title: m.title,
+      emoji: m.emoji,
+      label: m.label,
+      at: m.at,
+      key: m.key,
+      desc: m.desc || "",
+    }));
+  }
+
+  function getOwnedTitleIds() {
+    return Object.keys(st.owned || {}).filter(id => !!st.owned[id]);
+  }
+
+  function getCurrentTitle() {
+    return String(st.current || "");
+  }
+
+  function equipTitle(titleStr) {
+    const t = String(titleStr || "").trim();
+    if (!t) return false;
+
+    // 所有チェック（title文字列→id検索→owned）
+    const found = TITLE_MASTER.find(x => x.title === t);
+    if (found && !st.owned[found.id]) return false;
+
+    st.current = t;
+    saveState();
+    refreshHud();
+    return true;
+  }
+
+  function unequipTitle() {
+    st.current = "";
+    saveState();
+    refreshHud();
+    return true;
+  }
+
+  function getAllCounts() {
+    // zukan.js の進捗表示用
+    const out = {};
+    for (const m of TITLE_MASTER) {
+      const k = normKey(m.key);
+      out[k] = getCount(k);
+    }
+    return out;
+  }
+
+  function getNextMilestone(key) {
+    const k = normKey(key);
+    const now = getCount(k);
+    const rows = TITLE_MASTER
+      .filter(m => normKey(m.key) === k)
+      .map(m => m.at)
+      .sort((a, b) => a - b);
+
+    for (const at of rows) {
+      if (now < at) {
+        return { at, remain: (at - now) };
+      }
+    }
+    return null; // 全達成
+  }
+
+  function tryUnlockFromCounts() {
+    let unlockedAny = false;
+
+    for (const m of TITLE_MASTER) {
+      const k = normKey(m.key);
+      const now = getCount(k);
+      if (now >= m.at && !st.owned[m.id]) {
+        st.owned[m.id] = true;
+        unlockedAny = true;
+
+        // 解除トースト
+        try { window.WB?.emit?.("sy:titleUnlocked", { id: m.id, title: m.title }); } catch {}
+        // 軽い通知（zissekiのトーストとは別）
+        try {
+          // 同居してても邪魔しないシンプルtoast
+          const msg = document.createElement("div");
+          msg.style.position = "fixed";
+          msg.style.left = "50%";
+          msg.style.top = "20%";
+          msg.style.transform = "translate(-50%,-50%)";
+          msg.style.zIndex = "2147483647";
+          msg.style.background = "rgba(255,255,255,.97)";
+          msg.style.borderRadius = "16px";
+          msg.style.padding = "10px 14px";
+          msg.style.boxShadow = "0 18px 55px rgba(0,0,0,.22)";
+          msg.style.fontWeight = "1000";
+          msg.textContent = `🏷️ 称号解放：${m.title}`;
+          document.body.appendChild(msg);
+          setTimeout(() => { try { msg.remove(); } catch {} }, 2200);
+        } catch {}
+      }
+    }
+
+    if (unlockedAny) {
+      saveState();
+      refreshPanelIfOpen();
+      refreshHud();
+    }
+  }
+
+  /* =========================
+   * sy:add / events / emit hook
+   * ========================= */
+  function parseSyPayload(payload) {
+    if (payload == null) return { key: "", delta: 0 };
+
+    if (typeof payload === "string") {
+      const k = normKey(payload);
+      return { key: k, delta: k ? 1 : 0 };
+    }
+
+    if (typeof payload === "object") {
+      const k =
+        normKey(payload.key) ||
+        normKey(payload.type) ||
+        normKey(payload.id) ||
+        normKey(payload.name) ||
+        normKey(payload.event);
+
+      // slot_win win:false は加算しない
+      if (k === "slot_win" && payload.win === false) return { key: "slot_win", delta: 0 };
+
+      let d = 1;
+      if ("delta" in payload) {
+        const dd = Number(payload.delta);
+        d = Number.isFinite(dd) ? dd : 1;
+      } else if ("count" in payload) {
+        const cc = Number(payload.count);
+        d = Number.isFinite(cc) ? cc : 1;
+      }
+      d = Math.max(0, Math.floor(d));
+      return { key: k, delta: k ? d : 0 };
+    }
+
+    return { key: "", delta: 0 };
+  }
+
+  function bindCountEvent(WB, evtName, key) {
+    try {
+      WB.on?.(evtName, (payload) => {
+        const p = parseSyPayload(payload);
+        if (p.key) {
+          if (p.delta > 0) addCount(p.key, p.delta);
+        } else {
+          addCount(key, 1);
+        }
+      });
+    } catch {}
+  }
+
+  function hookEmitOnce(WB) {
+    try {
+      if (WB.__syougouEmitHooked) return;
+      if (typeof WB.emit !== "function") return;
+
+      const orig = WB.emit.bind(WB);
+      WB.emit = function (name, payload) {
+        try {
+          const ev = String(name ?? "");
+
+          if (ev === "sy:add") {
+            const p = parseSyPayload(payload);
+            if (p.key && p.delta > 0) addCount(p.key, p.delta);
+          }
+
+          // 直接イベントも拾う
+          if (ev === "unchi") addCount("unchi", 1);
+          if (ev === "omukae") addCount("omukae", 1);
+          if (ev === "tabidachi" || ev === "tabidati") addCount("tabidachi", 1);
+          if (ev === "hanabiFired" || ev === "hanabi" || ev === "fireworks") addCount("hanabi", 1);
+          if (ev === "slotWin" || ev === "slotwin") {
+            if (!(payload && typeof payload === "object" && payload.win === false)) addCount("slot_win", 1);
+          }
+        } catch {}
+        return orig(name, payload);
+      };
+
+      WB.__syougouEmitHooked = true;
+    } catch {}
+  }
+
+  /* =========================
+   * zisseki同期（あれば取り込む：ズレ防止）
+   * ========================= */
+  function syncFromZisseki(WB) {
+    try {
+      const z = WB.zisseki;
+      if (!z || typeof z.getCount !== "function") return;
+
+      let changed = false;
+      for (const k of ["unchi", "tabidachi", "hanabi", "slot_win", "omukae"]) {
+        const zv = Number(z.getCount(k) || 0) || 0;
+        const cur = getCount(k);
+        if (zv > cur) {
+          st.counts[normKey(k)] = zv;
+          changed = true;
+        }
+      }
+      if (changed) {
+        saveState();
+        tryUnlockFromCounts();
+      }
+    } catch {}
+  }
+
+  /* =========================
+   * Panel render
+   * ========================= */
+  function isOwned(id) { return !!st.owned?.[id]; }
+
+  function renderPanel() {
+    const p = buildPanel();
+    const body = $(".body", p);
+    if (!body) return;
+
+    const current = getCurrentTitle();
+    const ownedIds = new Set(getOwnedTitleIds());
+
+    const counts = getAllCounts();
+    const progressPills = [
+      `💩 ウンチ：${counts.unchi || 0}`,
+      `✈️ 旅立ち：${counts.tabidachi || 0}`,
+      `🎆 花火：${counts.hanabi || 0}`,
+      `🎰 スロット：${counts.slot_win || 0}`,
+      `🐰 お迎え：${counts.omukae || 0}`,
+    ].map(t => `<span class="pill">${escapeHtml(t)}</span>`).join(" ");
+
+    const items = TITLE_MASTER.map((m) => {
+      const owned = ownedIds.has(m.id) || isOwned(m.id);
+      const isOn = current && current === m.title;
+      const now = getCount(m.key);
+      const need = m.at;
+      const remain = Math.max(0, need - now);
+
+      const title = owned ? m.title : "？？？";
+      const desc = owned
+        ? `${m.emoji} ${m.label}：${need}回で解放\n${m.desc || ""}`.trim()
+        : `${m.emoji} ${m.label}：${need}回で解放（あと ${remain}）`;
 
       return `
-        <div class="card">
-          <img class="thumb" src="${escapeHtml(it.img)}" alt="${escapeHtml(it.label)}">
-          <div class="info">
-            <div class="name">${escapeHtml(it.label)}</div>
-            <div class="mini">スロット：${escapeHtml(it.slot)}</div>
-            <div class="row" style="justify-content:flex-start; gap:8px;">
-              ${badge}
-              <span class="price ${can ? "" : "bad"}">${it.price}🪙</span>
-            </div>
-            <div class="row" style="justify-content:flex-start; gap:8px;">
-              ${buyBtn}
-              ${equipBtn}
-            </div>
+        <div class="item ${owned ? "" : "locked"}">
+          <div class="name">${escapeHtml(title)}</div>
+          <div class="desc">${escapeHtml(desc)}</div>
+          <div class="meta">
+            <span class="pill">${owned ? (isOn ? "装備中" : "解放済") : "未解放"}</span>
+            ${
+              owned
+                ? `<button class="btn primary" type="button" data-equip="${escapeHtml(m.title)}">${isOn ? "装備中" : "装備"}</button>`
+                : `<button class="btn" type="button" disabled>未解放</button>`
+            }
           </div>
         </div>
       `;
     }).join("");
 
-    modal.innerHTML = `
-      <div class="head">
-        <div class="ttl">🎀 お洒落</div>
-        <button class="close" type="button" id="isyouCloseBtn">閉じる</button>
-      </div>
-      <div class="body">
-        <div class="row">
-          <div class="pill">所持コイン：<b>${have}</b> 🪙</div>
-          <div class="row" style="gap:8px;">
-            <button class="btn danger" type="button" id="isyouRemoveHat">帽子を外す</button>
-            <button class="btn" type="button" id="isyouRefresh">更新</button>
-          </div>
-        </div>
-
-        <div class="grid">${cards}</div>
-
-        <div style="height:8px"></div>
-        <div class="mini">
-          ※「装着モード」を押したらモーダルが閉じます。うさぎをクリックして赤枠選択→上のバーで「決定」してください。<br>
-          ※「外す」も同じく、赤枠選択→「外す決定」。
-        </div>
-      </div>
-    `;
-
-    modal.querySelector("#isyouCloseBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      closeModal();
-    });
-    modal.querySelector("#isyouRefresh")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      renderModal();
-    });
-    modal.querySelector("#isyouRemoveHat")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      setRemoveMode("hat");
-    });
-
-    modal.querySelectorAll("[data-buy]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault(); e.stopPropagation();
-        const k = btn.getAttribute("data-buy");
-        buy(k);
-      });
-    });
-
-    modal.querySelectorAll("[data-equip]").forEach((btn) => {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault(); e.stopPropagation();
-        const k = btn.getAttribute("data-equip");
-        setEquipItem(k);
-      });
-    });
-  }
-
-  /* =========================
-   * Confirm bar (決定式)
-   * ========================= */
-  let confirmBar = null;
-
-  function ensureConfirmBar() {
-    if (confirmBar && confirmBar.isConnected) return confirmBar;
-    confirmBar = document.createElement("div");
-    confirmBar.id = "isyouConfirmBar";
-    confirmBar.innerHTML = `
+    body.innerHTML = `
       <div class="row">
-        <span class="t" id="isyouSelText">未選択</span>
-        <button class="primary" id="isyouDoBtn" type="button">決定</button>
-        <button class="danger" id="isyouRemoveBtn" type="button">外す決定</button>
-        <button id="isyouCancelBtn" type="button">キャンセル</button>
-        <button id="isyouOpenShopBtn" type="button">お洒落を開く</button>
+        <span class="pill">現在：${current ? escapeHtml(current) : "（なし）"}</span>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="btn" type="button" data-unequip="1">解除</button>
+          <button class="btn" type="button" data-refresh="1">更新</button>
+        </div>
       </div>
+      <div class="row">${progressPills}</div>
+      <div style="height:10px"></div>
+      <div class="grid">${items}</div>
     `;
-    document.body.appendChild(confirmBar);
 
-    confirmBar.querySelector("#isyouCancelBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      cancelEquipMode();
+    body.querySelectorAll("[data-equip]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const t = btn.getAttribute("data-equip") || "";
+        equipTitle(t);
+        renderPanel();
+      });
     });
 
-    confirmBar.querySelector("#isyouOpenShopBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      // 装着モードは残したままでも良いが、誤爆防止で一旦解除
-      cancelEquipMode(false);
-      openModal();
+    body.querySelector("[data-unequip]")?.addEventListener("click", () => {
+      unequipTitle();
+      renderPanel();
     });
 
-    confirmBar.querySelector("#isyouDoBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      confirmEquip();
-    });
-
-    confirmBar.querySelector("#isyouRemoveBtn")?.addEventListener("click", (e) => {
-      e.preventDefault(); e.stopPropagation();
-      confirmRemove();
-    });
-
-    return confirmBar;
-  }
-
-  function showConfirmBar() {
-    ensureConfirmBar();
-    updateConfirmBar();
-    confirmBar.style.display = "block";
-  }
-
-  function hideConfirmBar() {
-    if (!confirmBar) return;
-    confirmBar.style.display = "none";
-  }
-
-  function updateConfirmBar() {
-    ensureConfirmBar();
-    const t = confirmBar.querySelector("#isyouSelText");
-    const doBtn = confirmBar.querySelector("#isyouDoBtn");
-    const rmBtn = confirmBar.querySelector("#isyouRemoveBtn");
-
-    const it = state.selectedItem ? ITEMS[state.selectedItem] : null;
-    const sel = state.selectedBornAt ? `選択：${state.selectedBornAt}` : "未選択";
-
-    const modeText =
-      state.pendingAction === "equip"
-        ? `装着：${it ? it.label : "（未選択）"} / ${sel}`
-        : `外す：${state.removeSlot || "hat"} / ${sel}`;
-
-    if (t) t.textContent = modeText;
-
-    const hasTarget = !!state.selectedBornAt;
-    if (doBtn) doBtn.disabled = !(hasTarget && state.pendingAction === "equip" && !!it);
-    if (rmBtn) rmBtn.disabled = !(hasTarget && state.pendingAction === "remove");
-  }
-
-  function clearSelection() {
-    try {
-      document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected"));
-    } catch {}
-    state.selectedWrap = null;
-    state.selectedBornAt = null;
-    updateConfirmBar();
-  }
-
-  function cancelEquipMode(showToast = true) {
-    state.mode = "browse";
-    state.selectedItem = null;
-    state.pendingAction = "equip";
-    state.removeSlot = null;
-    document.body.classList.remove("isyouEquipMode");
-    hideConfirmBar();
-    clearSelection();
-    if (showToast) toast("🛑 装着モードを終了");
-  }
-
-  /* =========================
-   * Accessory render (fitToBunny)
-   * ========================= */
-  function getBunnyImg(wrap) {
-    if (!wrap) return null;
-    // うさぎ画像が img である想定（クラス名は色々あるので保険）
-    return wrap.querySelector("img.bunny, img.bunnyImg, img, .bunny img") || null;
-  }
-
-  function ensureAccContainer(wrap) {
-    if (!wrap) return null;
-    let box = wrap.querySelector(":scope > .isyouAcc");
-    if (box) return box;
-    box = document.createElement("div");
-    box.className = "isyouAcc";
-    wrap.appendChild(box);
-    return box;
-  }
-
-  function removeAccSlot(wrap, slot) {
-    if (!wrap) return;
-    const box = ensureAccContainer(wrap);
-    if (!box) return;
-    box.querySelectorAll(`[data-slot="${slot}"]`).forEach((n) => {
-      try { n.remove(); } catch {}
+    body.querySelector("[data-refresh]")?.addEventListener("click", () => {
+      // 同期→解除判定→再描画
+      try { syncFromZisseki(window.WB); } catch {}
+      tryUnlockFromCounts();
+      renderPanel();
     });
   }
 
-  function placeAcc(wrap, slot, imgSrc) {
-    if (!wrap) return;
-
-    const bunnyImg = getBunnyImg(wrap);
-    const box = ensureAccContainer(wrap);
-    if (!box || !bunnyImg) return;
-
-    // まず同スロットは置き換え
-    removeAccSlot(wrap, slot);
-
-    const node = document.createElement("div");
-    node.dataset.slot = slot;
-    node.style.position = "absolute";
-
-    const img = document.createElement("img");
-    img.src = imgSrc;
-    img.alt = slot;
-    node.appendChild(img);
-
-    box.appendChild(node);
-
-    // fitToBunny：うさぎ画像の「wrap内オフセット座標」で配置
-    // （transform/flipの影響を最小化）
-    const fit = () => {
-      const br = bunnyImg.getBoundingClientRect();
-      const wr = wrap.getBoundingClientRect();
-      const w = br.width;
-      const h = br.height;
-
-      // wrap内座標
-      const left = (br.left - wr.left);
-      const top = (br.top - wr.top);
-
-      const a = ANCHOR[slot] || ANCHOR.hat;
-
-      const pw = w * (a.w || 0.58);
-      const px = left + w * (a.x || 0.5) - pw / 2;
-      const py = top + h * (a.y || 0.06) - pw * 0.40; // 少し上に乗せる（耳の間に乗る感じ）
-
-      node.style.left = `${px}px`;
-      node.style.top = `${py}px`;
-      node.style.width = `${pw}px`;
-      node.style.height = `${pw}px`;
-    };
-
-    // 2回かける（画像ロード/レイアウト確定用）
-    requestAnimationFrame(() => requestAnimationFrame(fit));
-    img.onload = () => requestAnimationFrame(() => requestAnimationFrame(fit));
+  function openPanel() {
+    const p = buildPanel();
+    p.style.display = "block";
+    renderPanel();
   }
 
-  function applyEquipsForWrap(wrap) {
-    const bornAt = getBornAtFromWrap(wrap);
-    if (!bornAt) return;
-
-    const eq = state.equipped[String(bornAt)] || {};
-    // hat slot
-    if (eq.hat && ITEMS[eq.hat]) {
-      placeAcc(wrap, "hat", ITEMS[eq.hat].img);
-    } else {
-      removeAccSlot(wrap, "hat");
-    }
+  function closePanel() {
+    const p = document.getElementById(PANEL_ID);
+    if (!p) return;
+    p.style.display = "none";
   }
 
-  function applyEquipsAll() {
-    document.querySelectorAll(".bunnyWrap").forEach((wrap) => applyEquipsForWrap(wrap));
+  function refreshPanelIfOpen() {
+    const p = document.getElementById(PANEL_ID);
+    if (p && p.style.display !== "none") renderPanel();
   }
 
-  /* =========================
-   * Confirm actions
-   * ========================= */
-  function confirmEquip() {
-    const wrap = state.selectedWrap;
-    const bornAt = state.selectedBornAt;
-    const itemKey = state.selectedItem;
-    if (!wrap || !bornAt || !itemKey) return;
-
-    const it = ITEMS[itemKey];
-    if (!it) return;
-
-    if (ownedCount(itemKey) <= 0) {
-      toast("未所持だよ…！");
-      return;
-    }
-
-    const id = String(bornAt);
-    state.equipped[id] = state.equipped[id] || {};
-    // slot 置き換え
-    state.equipped[id][it.slot] = itemKey;
-
-    saveAll();
-    applyEquipsForWrap(wrap);
-
-    toast(`✨ 装着：${it.label}`);
-    cancelEquipMode(false);
-  }
-
-  function confirmRemove() {
-    const wrap = state.selectedWrap;
-    const bornAt = state.selectedBornAt;
-    if (!wrap || !bornAt) return;
-
-    const slot = state.removeSlot || "hat";
-    const id = String(bornAt);
-
-    state.equipped[id] = state.equipped[id] || {};
-    delete state.equipped[id][slot];
-
-    // 空なら掃除
-    if (!Object.keys(state.equipped[id]).length) delete state.equipped[id];
-
-    saveAll();
-    removeAccSlot(wrap, slot);
-
-    toast("🧺 外したよ！");
-    cancelEquipMode(false);
-  }
-
-  /* =========================
-   * Selection (red outline)
-   * ========================= */
-  function selectWrap(wrap) {
-    if (!wrap) return;
-    document.querySelectorAll(".bunnyWrap.isyouSelected").forEach((w) => w.classList.remove("isyouSelected"));
-    wrap.classList.add("isyouSelected");
-    state.selectedWrap = wrap;
-    state.selectedBornAt = getBornAtFromWrap(wrap);
-    updateConfirmBar();
-  }
-
-  // 装着モード中だけ、うさぎクリックで選択
-  function onPointerDownCapture(e) {
-    if (state.mode !== "equip") return;
-    if (e.button != null && e.button !== 0) return;
-
-    // モーダル上のクリックは無視（装着判定しない）
-    if (backdrop && backdrop.style.display !== "none") {
-      // ただし装着モードでは backdrop を閉じない＆通す仕様のため、
-      // modal要素内なら無視
-      const inModal = e.target?.closest?.("#isyouModal");
-      if (inModal) return;
-    }
-
-    const wrap = e.target?.closest?.(".bunnyWrap");
-    if (!wrap) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-    e.stopImmediatePropagation();
-
-    selectWrap(wrap);
-  }
-
-  /* =========================
-   * HUD button
-   * ========================= */
-  function injectHudButton() {
-    const hud = document.getElementById("hud");
-    if (!hud) return;
-
-    const mount = document.getElementById("hudButtons") || hud;
-    if (document.getElementById("isyouBtn")) return;
-
-    const btn = document.createElement("button");
-    btn.id = "isyouBtn";
-    btn.type = "button";
-    btn.textContent = "お洒落";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      // 装着モード中なら「一旦解除して開く」
-      if (state.mode === "equip") cancelEquipMode(false);
-      openModal();
-    });
-
-    mount.appendChild(btn);
+  function refreshHud() {
+    injectHudBadge(getCurrentTitle);
   }
 
   /* =========================
    * Boot
    * ========================= */
-  function attach(wb) {
-    WB = wb || null;
-    loadAll();
+  waitForWB().then((WB) => {
+    // 初期同期（zissekiがあれば取り込む）
+    syncFromZisseki(WB);
 
-    injectHudButton();
-    ensureModal();
-    ensureConfirmBar();
-
-    // クリック選択（キャプチャ）
-    document.addEventListener("pointerdown", onPointerDownCapture, true);
-
-    // うさぎが増えたりDOMが変わる可能性があるので、少し遅延して再適用
-    setTimeout(applyEquipsAll, 400);
-    setTimeout(applyEquipsAll, 1400);
-
-    // WBイベントで再描画できるなら拾う
+    // イベント拾い
     try {
-      WB?.on?.("bunnyCountChanged", () => setTimeout(applyEquipsAll, 50));
-      WB?.on?.("bunnySpawned", () => setTimeout(applyEquipsAll, 50));
+      WB.on?.("sy:add", (payload) => {
+        const p = parseSyPayload(payload);
+        if (p.key && p.delta > 0) addCount(p.key, p.delta);
+      });
     } catch {}
-  }
 
-  // Start
-  window.addEventListener("load", () => {
-    injectStyles();
-    loadAll();
-    injectHudButton();
+    bindCountEvent(WB, "unchi", "unchi");
+    bindCountEvent(WB, "tabidachi", "tabidachi");
+    bindCountEvent(WB, "tabidati", "tabidachi");
+    bindCountEvent(WB, "hanabiFired", "hanabi");
+    bindCountEvent(WB, "hanabi", "hanabi");
+    bindCountEvent(WB, "fireworks", "hanabi");
+    bindCountEvent(WB, "slotWin", "slot_win");
+    bindCountEvent(WB, "slotwin", "slot_win");
+    bindCountEvent(WB, "omukae", "omukae");
 
-    if (window.WB) attach(window.WB);
-    else {
-      waitFor(() => window.WB).then((wb) => attach(wb)).catch(() => attach(null));
-    }
+    // 最終保険
+    hookEmitOnce(WB);
+
+    // 定期で zisseki 取り込み（ズレ防止）
+    const syncTimer = setInterval(() => {
+      syncFromZisseki(WB);
+    }, 1200);
+
+    // 初回解除判定
+    tryUnlockFromCounts();
+
+    // HUDバッジ（UI横表示）
+    window.addEventListener("load", () => {
+      refreshHud();
+      setTimeout(refreshHud, 300);
+      setTimeout(refreshHud, 900);
+    });
+
+    // 外部公開（zukan.js互換）
+    window.SYOUGOU = {
+      // master / owned / current
+      getTitlesMaster,
+      getOwnedTitleIds,
+      getCurrentTitle,
+      equipTitle,
+      unequipTitle,
+
+      // counts
+      getCount,
+      setCount,
+      addCount,
+      getAllCounts,
+      getNextMilestone,
+
+      // ui
+      open: openPanel,
+      close: closePanel,
+
+      // debug
+      _state: st,
+      stop: () => { try { clearInterval(syncTimer); } catch {} },
+    };
+
+    console.log("[syougou] ready", {
+      current: getCurrentTitle(),
+      owned: getOwnedTitleIds().length,
+      counts: { ...st.counts },
+    });
+  }).catch((e) => {
+    console.warn("[syougou] WB wait failed:", e?.message || e);
   });
-
-  /* =========================
-   * Debug / public
-   * ========================= */
-  window.ISYOU = {
-    openModal,
-    closeModal,
-    enterEquip: setEquipItem,
-    enterRemoveHat: () => setRemoveMode("hat"),
-    applyEquipsAll,
-    _state: state,
-  };
 })();
