@@ -1,15 +1,16 @@
-// mirrorball_dance.js (V2 - spotlight hit only)
+// mirrorball_dance.js (V2.1 - spotlight hit only / DOM-safe)
 // ✅ スポットライト（bgcolor.js V12 の beam DOM）に当たってる時だけうさぎが踊る
+// ✅ bed_rest_bonus が img をラップしていても壊れない（DOMを組み替えない）
 // ✅ 範囲内に1匹でも居る間だけ SE をループ（WB.se.loop があればそれ優先）
 // ✅ ビーム検出：#bgMirrorFXLeftV12 / #bgMirrorFXRightV12（bgcolor.js V12）
 // ✅ うさぎ検出：.bunnyWrap or #bunnyLayer 下の親要素をwrap扱い
 //
-// 読み込み順：bgcolor.js / app.js / BGM.js(あれば) の後（最後の方）推奨
+// 読み込み順：bgcolor.js / app.js / bed_rest_bonus.js 等の後（最後の方）推奨
 
 (() => {
   "use strict";
-  if (window.__MIRRORBALL_DANCE_V2__) return;
-  window.__MIRRORBALL_DANCE_V2__ = true;
+  if (window.__MIRRORBALL_DANCE_V21__) return;
+  window.__MIRRORBALL_DANCE_V21__ = true;
 
   const CFG = {
     tickMs: 140,
@@ -19,12 +20,12 @@
     leftBeamId: "bgMirrorFXLeftV12",
     rightBeamId: "bgMirrorFXRightV12",
 
-    // ✅ うさぎ中心判定を少し甘くする（ビーム境界のチラつき防止）
-    rectPadPx: 10,
+    // ✅ うさぎ中心判定を少し甘く（境界チラつき防止）
+    rectPadPx: 16,
 
-    // ✅ SE（任意：無ければ好きなパスへ）
+    // ✅ SE（任意）
     seSrc: "./assets/mirrorball.mp3",
-    seLoopId: "mirrorball_dance_loop_v2",
+    seLoopId: "mirrorball_dance_loop_v21",
     seStartDelayMs: 120,
     stopFadeMs: 180,
   };
@@ -49,38 +50,23 @@
   }
 
   function ensureStyle() {
-    if (document.getElementById("wbMirrorballDanceStyleV2")) return;
+    if (document.getElementById("wbMirrorballDanceStyleV21")) return;
     const s = document.createElement("style");
-    s.id = "wbMirrorballDanceStyleV2";
+    s.id = "wbMirrorballDanceStyleV21";
     s.textContent = `
 /* 踊ってる状態（wrapに付く） */
 .wbDancing{
   filter: saturate(1.04) brightness(1.06);
 }
 
-/* 画像を揺らす（transform競合回避のため inner で揺らす） */
-.wbDanceInner{ width:100%; height:100%; }
-
-.wbDancing .wbDanceInner{
-  animation: wbDanceHopV2 .42s ease-in-out infinite;
-}
-.wbDancing .wbDanceInner img{
+/* ✅ DOMをいじらない：imgだけ揺らす（wrapのtranslate3dと競合しない） */
+.wbDancing img{
   transform-origin: 50% 85%;
-  animation: wbDanceWiggleV2 .42s ease-in-out infinite;
+  animation: wbDanceWiggleV21 .42s ease-in-out infinite;
+  will-change: transform;
 }
 
-@keyframes wbDanceWiggleV2{
-  0%   { transform: rotate(-4deg) translateY(0px) scale(1.00); }
-  50%  { transform: rotate(4deg)  translateY(-1px) scale(1.02); }
-  100% { transform: rotate(-4deg) translateY(0px) scale(1.00); }
-}
-@keyframes wbDanceHopV2{
-  0%   { transform: translateY(0px); }
-  50%  { transform: translateY(-2px); }
-  100% { transform: translateY(0px); }
-}
-
-/* キラキラ */
+/* “キラキラ” */
 .wbDanceSparkle{
   position:absolute;
   left:50%;
@@ -91,9 +77,15 @@
   opacity:.92;
   pointer-events:none;
   text-shadow: 0 10px 22px rgba(0,0,0,.18);
-  animation: wbSparkleFloatV2 .7s ease-in-out infinite;
+  animation: wbSparkleFloatV21 .7s ease-in-out infinite;
 }
-@keyframes wbSparkleFloatV2{
+
+@keyframes wbDanceWiggleV21{
+  0%   { transform: rotate(-4deg) translateY(0px) scale(1.00); }
+  50%  { transform: rotate(4deg)  translateY(-2px) scale(1.02); }
+  100% { transform: rotate(-4deg) translateY(0px) scale(1.00); }
+}
+@keyframes wbSparkleFloatV21{
   0%{ transform:translateX(-50%) translateY(0); opacity:.75; }
   50%{ transform:translateX(-50%) translateY(-6px); opacity:1; }
   100%{ transform:translateX(-50%) translateY(0); opacity:.75; }
@@ -106,7 +98,7 @@
     if (!el || !el.isConnected) return null;
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height) return null;
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, rect: r };
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
   }
 
   function findBunnyWraps() {
@@ -118,24 +110,6 @@
     const imgs = Array.from(bunnyLayer.querySelectorAll("img"));
     const parents = imgs.map(img => img.parentElement).filter(Boolean);
     return Array.from(new Set(parents));
-  }
-
-  // transform競合回避：imgをinnerで包む（bed_rest_bonusと同じ発想）
-  function ensureDanceInner(wrap) {
-    if (!wrap) return null;
-    let inner = null;
-    try { inner = wrap.querySelector(":scope > .wbDanceInner"); } catch {}
-    if (!inner) inner = wrap.querySelector(".wbDanceInner");
-    if (inner) return inner;
-
-    const img = wrap.querySelector("img");
-    if (!img) return null;
-
-    inner = document.createElement("div");
-    inner.className = "wbDanceInner";
-    wrap.insertBefore(inner, img);
-    inner.appendChild(img);
-    return inner;
   }
 
   function ensureSparkle(wrap) {
@@ -150,7 +124,6 @@
     if (!wrap) return;
     if (on) {
       wrap.classList.add("wbDancing");
-      ensureDanceInner(wrap);
       ensureSparkle(wrap);
     } else {
       wrap.classList.remove("wbDancing");
@@ -164,26 +137,20 @@
     const wrap = document.getElementById(CFG.fxWrapId);
     if (!wrap || !wrap.isConnected) return null;
 
-    // display:none の時は無効
     const cs = getComputedStyle(wrap);
     if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity || "1") <= 0.01) return null;
 
     const L = document.getElementById(CFG.leftBeamId);
     const R = document.getElementById(CFG.rightBeamId);
     const list = [L, R].filter(Boolean).filter(el => el.isConnected);
-
-    // どっちも無いなら無効
     if (!list.length) return null;
 
-    // beam 自体がほぼ透明でも当たり判定としては使う（opacity 0 は無効）
     const rects = [];
     for (const el of list) {
       const r = el.getBoundingClientRect();
       if (r.width > 5 && r.height > 5) rects.push(r);
     }
-    if (!rects.length) return null;
-
-    return rects;
+    return rects.length ? rects : null;
   }
 
   function inRectPadded(pt, r, pad) {
@@ -317,10 +284,11 @@
 
       let dancingCount = 0;
       for (const w of wraps) {
-        const c = centerOfEl(w);
+        // ✅ wrap中心より “img中心” の方が当たりが安定（bedがinnerで包んでてもOK）
+        const img = w.querySelector?.("img") || null;
+        const c = centerOfEl(img) || centerOfEl(w);
         if (!c) { setDancing(w, false); continue; }
 
-        // ✅ beam rect に入ってるか（簡易当たり判定）
         let hit = false;
         for (const r of beams) {
           if (inRectPadded(c, r, pad)) { hit = true; break; }
@@ -337,14 +305,12 @@
     tick();
     const timer = setInterval(tick, CFG.tickMs);
 
-    // bgcolor / itemPlace が通知してくれるなら拾う（無くてもOK）
     try { WB?.on?.("itemplace:state_changed", tick); } catch {}
     try { WB?.on?.("itemPlaced", tick); } catch {}
     try { WB?.on?.("itemRemoved", tick); } catch {}
     try { WB?.on?.("bunnyCountChanged", tick); } catch {}
     try { WB?.on?.("resize", tick); } catch {}
 
-    // 外部停止API
     if (WB) {
       WB.mirrorballDance = {
         stop: () => {
@@ -358,7 +324,7 @@
       };
     }
 
-    console.log("[mirrorball_dance] ready V2 (spotlight hit only)", {
+    console.log("[mirrorball_dance] ready V2.1", {
       fxWrapId: CFG.fxWrapId,
       leftBeamId: CFG.leftBeamId,
       rightBeamId: CFG.rightBeamId,
