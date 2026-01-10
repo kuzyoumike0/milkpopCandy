@@ -2,162 +2,201 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <title>Milkpop牧場</title>
-
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#ffe3f1" />
+  <title>Milkpop 牧場</title>
 
-  <link rel="manifest" href="./manifest.webmanifest" />
-  <meta name="theme-color" content="#ffd6e7" />
+  <style>
+    /* =========================
+       RESET / BASE
+    ========================= */
+    *{ box-sizing:border-box; }
+    html,body{
+      margin:0;
+      padding:0;
+      width:100%;
+      height:100%;
+      background:#fff3f8;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow:hidden;
+      touch-action: manipulation;
+    }
 
-  <link rel="stylesheet" href="./style.css?v=20260110_1" />
+    /* =========================
+       LAYERS
+    ========================= */
+    #bgLayer{
+      position:fixed;
+      inset:0;
+      z-index:0;
+      overflow:hidden;
+      background: linear-gradient(180deg, #ffe7b8 0%, #ffd6e7 55%, #ffffff 100%);
+    }
 
-  <meta http-equiv="Content-Security-Policy"
-        content="
-          default-src 'self';
-          img-src 'self' data:;
-          media-src 'self';
-          style-src 'self' 'unsafe-inline';
-          script-src 'self' 'unsafe-inline';
-          font-src 'self' data:;
-        ">
+    #field{
+      position:fixed;
+      inset:0;
+      z-index:10;
+      overflow:hidden;
+      background: transparent; /* bgcolor.js が同期してくれる */
+    }
+
+    /* うさぎ/コイン/アイテムのレイヤ（必要なら itemPlace.js が itemLayer を作ってもOK） */
+    #itemLayer{
+      position:absolute;
+      inset:0;
+      z-index:20;
+      pointer-events:none; /* itemPlace が操作したいなら itemPlace 側で上書きしてOK */
+    }
+
+    #bunnyLayer{
+      position:absolute;
+      inset:0;
+      z-index:30;
+      pointer-events:none; /* wrap内imgが pointer-events:auto なのでOK */
+    }
+
+    #coinLayer{
+      position:absolute;
+      inset:0;
+      z-index:35;
+      pointer-events:auto;
+    }
+
+    /* =========================
+       HUD
+    ========================= */
+    #hud{
+      position:fixed;
+      top:8px;
+      left:50%;
+      transform:translateX(-50%);
+      display:flex;
+      gap:8px;
+      z-index:2147483647;
+      pointer-events:auto;
+      align-items:center;
+      padding:0 8px;
+      max-width: min(980px, 100vw);
+    }
+    #hudButtons{
+      display:flex;
+      gap:8px;
+      flex-wrap:wrap;
+      align-items:center;
+      justify-content:center;
+    }
+
+    #hud button{
+      padding:6px 10px;
+      border-radius:12px;
+      border:none;
+      background:#fff;
+      box-shadow:0 8px 22px rgba(0,0,0,.16);
+      cursor:pointer;
+      font-weight:900;
+      letter-spacing:.02em;
+      user-select:none;
+    }
+    #hud button:active{ transform:translateY(1px); }
+
+    #coin{
+      padding:6px 12px;
+      background:#fff;
+      border-radius:14px;
+      box-shadow:0 8px 22px rgba(0,0,0,.16);
+      font-weight:1000;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      white-space:nowrap;
+      user-select:none;
+    }
+    #coinValue{
+      min-width:64px;
+      text-align:right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* =========================
+       OPTIONAL: lower safe-area padding
+    ========================= */
+    @supports (padding: max(0px)) {
+      #hud{ top: max(8px, env(safe-area-inset-top)); }
+    }
+  </style>
 </head>
 
 <body>
+  <!-- 背景 -->
+  <div id="bgLayer"></div>
 
-  <!-- ===== HUD ===== -->
-  <header id="hud">
-    <div id="coin">🪙 <span id="coinValue">0</span></div>
+  <!-- ゲームフィールド -->
+  <div id="field">
+    <!-- itemPlaceが使うレイヤ（無くても動くが、あると安定） -->
+    <div id="itemLayer"></div>
 
+    <!-- うさぎ -->
+    <div id="bunnyLayer"></div>
+
+    <!-- コイン -->
+    <div id="coinLayer"></div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
     <div id="hudButtons">
-      <!-- ✅ HUDに残すのは「お迎え」「花火」だけ -->
-      <button id="omukaeBtn" type="button">お迎え</button>
+      <button id="omukaeBtn" type="button">🐰 お迎え</button>
+      <button id="shopBtn"   type="button">🛒 ショップ</button>
+      <button id="slotBtn"   type="button">🎰 スロット</button>
       <button id="hanabiBtn" type="button">🎆 花火</button>
-
-      <!-- ✅ 互換用：DOMとしては置いてOK（見せない/押さない）。他JSが click() で呼ぶ -->
-      <button id="shopBtn"     type="button" style="display:none;">ショップ</button>
-      <button id="slotBtn"     type="button" style="display:none;">スロット</button>
-      <button id="departBtn"   type="button" style="display:none;">旅立ち</button>
-      <button id="rankBtn"     type="button" style="display:none;">ランキング</button>
-      <button id="resetBtn"    type="button" style="display:none;">リセット</button>
-
-      <!-- ✅ 追加：転生（牧場の星）互換ボタン（基本はハンバーガーメニューから呼ぶ想定） -->
-      <button id="prestigeBtn" type="button" style="display:none;">転生</button>
+      <button id="departBtn" type="button">🚪 旅立ち</button>
+      <button id="rankBtn"   type="button">🏆 ランク</button>
+      <button id="resetBtn"  type="button">🧹 リセット</button>
     </div>
 
-    <div id="title" aria-label="current-title"></div>
-  </header>
+    <div id="coin" aria-label="所持コイン">
+      🪙 <span id="coinValue">0</span>
+    </div>
+  </div>
 
-  <!-- ===== メインフィールド ===== -->
-  <main id="field">
-    <!-- ✅ bgLayer は「背景専用」：ここにミラーボール/スポットライト等が乗る -->
-    <div id="bgLayer"></div>
+  <!-- =========================
+       SCRIPTS（読み込み順が重要）
+  ========================= -->
 
-    <div id="tenkiLayer"></div>
-    <div id="bunnyLayer"></div>
-    <div id="coinLayer"></div>
-    <!-- ✅ unchiLayer は unchi.js 側で自動生成（ここには書かない） -->
-  </main>
+  <!-- コア -->
+  <script src="./app.js?v=20260111_1680"></script>
 
-  <!-- ✅ WBを先に用意（WB not found を根絶） -->
-  <script src="./wb_boot.js?v=20260110_1"></script>
+  <!-- ショップ/アイテム配置（あなたの環境に合わせて） -->
+  <script src="./shop.js?v=20260111_1"></script>
+  <script src="./itemPlace.js?v=20260111_1"></script>
 
-  <!-- ✅ 背景（朝昼夜 + ミラーボール） -->
-  <script src="./bgcolor.js?v=20260110_1"></script>
+  <!-- 背景（mirrorballスポット + 転生背景） -->
+  <script src="./bgcolor.js?v=20260111_13"></script>
 
-  <!-- 天気 -->
-  <script src="./tenki.js?v=20260110_1"></script>
+  <!-- BGM（ある場合） -->
+  <script src="./BGM.js?v=20260111_1"></script>
 
-  <!-- 花火（ボタンはHUDに残す） -->
-  <script src="./hanabi.js?v=20260110_1"></script>
+  <!-- 花火（ある場合） -->
+  <script src="./hanabi.js?v=20260111_1"></script>
 
-  <!-- ===== コア（WBを作る） ===== -->
-  <script src="./app.js?v=20260110_1"></script>
+  <!-- お洒落（ある場合） -->
+  <script src="./isyou.js?v=20260111_1"></script>
 
-  <!-- ✅ BGM（モーダル版：WB.bgm.openModal() 提供） -->
-  <script src="./BGM.js?v=20260110_1"></script>
+  <!-- ✅ 転生専用生物（星>=1で1体出現） -->
+  <script src="./reincarnation_pet.js?v=20260111_1"></script>
 
-  <!-- ✅ うんち（app.js から分離した unchi）※BGMの後・他モジュールの前が安全 -->
-  <script src="./unchi.js?v=20260110_1"></script>
+  <!-- ✅ ミラーボールで踊る（※あなたの「スポットに当たってる時だけ」版は次で差し替え推奨） -->
+  <script src="./mirrorball_dance.js?v=20260111_1"></script>
 
-  <!-- ✅ ショップ（ミラーボール購入＋設置ON/OFF） -->
-  <script src="./shop.js?v=20260110_1"></script>
+  <!-- ✅ ベッド休憩（※次のあなたの修正版をここに置く） -->
+  <script src="./bed_rest_bonus.js?v=20260111_1"></script>
 
-  <!-- ✅ アイテム配置（shop購入アイテムを赤枠で配置） -->
-  <script src="./itemPlace.js?v=20260110_1"></script>
+  <!-- ✅ ハンバーガーメニュー（規約もここから開く） -->
+  <script src="./gameMenu.js?v=20260111_24"></script>
 
-  <!-- ✅ 追加：ベッド付近で休む＋コイン微増（後付け拡張） -->
-  <script src="./bed_rest_bonus.js?v=20260110_1"></script>
-
-  <!-- ✅ 追加：ミラーボール範囲内で踊る（SE/モーション）（後付け拡張） -->
-  <script src="./mirrorball_dance.js?v=20260110_1"></script>
-
-  <!-- ===== 拡張（WB依存） ===== -->
-  <script src="./zisseki.js?v=20260110_1"></script>
-  <script src="./syougou.js?v=20260110_1"></script>
-
-  <!-- ✅ 追加：転生（牧場の星） -->
-  <script src="./prestige.js?v=20260110_1"></script>
-
-  <!-- ✅ omukae は「お迎えボタン」で開く -->
-  <script src="./omukae.js?v=20260110_1"></script>
-
-  <!-- お洒落 -->
-  <script src="./isyou.js?v=20260110_1"></script>
-
-  <!-- 図鑑 -->
-  <script src="./zukan.js?v=20260110_1"></script>
-
-  <script src="./farewell_messages.js?v=20260110_1"></script>
-  <script src="./tabidati.js?v=20260110_1"></script>
-  <script src="./slot.js?v=20260110_1"></script>
-
-  <!-- ✅ 右上ハンバーガーメニュー（最後に読み込む） -->
-  <script src="./gameMenu.js?v=20260110_1"></script>
-
-  <!-- ✅ 追加：互換ボタン（prestigeBtn）が押されたら転生UIを開く（安全） -->
-  <script>
-    (function () {
-      function hook() {
-        const b = document.getElementById("prestigeBtn");
-        if (!b) return;
-
-        b.addEventListener("click", function (e) {
-          e.preventDefault();
-          try { window.WB?.prestige?.open?.(); } catch {}
-        });
-
-        // 他JSが click() で呼ぶ用の互換
-        try {
-          window.WB = window.WB || {};
-          window.WB.openPrestige = function () {
-            try { window.WB?.prestige?.open?.(); } catch {}
-          };
-        } catch {}
-      }
-      if (document.readyState === "loading") {
-        window.addEventListener("load", hook);
-      } else {
-        hook();
-      }
-    })();
-  </script>
-
-  <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
-  <script>
-    (function () {
-      const params = new URLSearchParams(location.search);
-      const noSw = params.get("nosw") === "1";
-
-      if (noSw) {
-        console.warn("[SW] disabled by ?nosw=1");
-        return;
-      }
-
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.register("./sw.js").catch(() => {});
-      }
-    })();
-  </script>
-
+  <!-- kiyaku.js は gameMenu.js が “未読込なら注入して開く” ので通常は不要
+  <script src="./kiyaku.js?v=20260111_1"></script>
+  -->
 </body>
 </html>
