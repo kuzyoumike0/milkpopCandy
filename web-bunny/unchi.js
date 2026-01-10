@@ -1,7 +1,8 @@
 // unchi.js（非module）— 個体別ゲージ / 同時排出防止 / 分散排出
+// ✅ babybunny だけ排出対象から除外
 (() => {
   "use strict";
-  console.log("[unchi.js] LOADED v1.4.2 (skip babybunny unchi)", Date.now());
+  console.log("[unchi.js] LOADED v1.4.2 (skip babybunny)", Date.now());
 
   /* =========================
    * Config
@@ -22,7 +23,7 @@
 
   // 💰 価値
   const UNCHI_VALUE = 10;
-  const OUGON_VALUE = 10000; // ✅ ここを10000に
+  const OUGON_VALUE = 10000;
 
   // 🧱 上限
   const MAX_UNCHI_ON_FIELD = 20;
@@ -44,7 +45,7 @@
   function waitForWB(){
     return new Promise(res=>{
       const t=setInterval(()=>{
-        if(window.WB){clearInterval(t);res(window.WB);}
+        if(window.WB){ clearInterval(t); res(window.WB); }
       },50);
     });
   }
@@ -57,9 +58,9 @@
 
   function playSE(){
     try{
-      const v=window.WB?.getSEVolume?.() ?? 0.85;
-      seUnchi.volume=clamp(v*UNCHI_SE_BASE,0,1);
-      seUnchi.currentTime=0;
+      const v = window.WB?.getSEVolume?.() ?? 0.85;
+      seUnchi.volume = clamp(v*UNCHI_SE_BASE,0,1);
+      seUnchi.currentTime = 0;
       seUnchi.play().catch(()=>{});
     }catch{}
   }
@@ -169,7 +170,7 @@
   }
 
   class UnchiDrop extends BaseDrop{
-    constructor(o){super({...o,cls:"unchiDrop",src:ASSETS.unchiImg});}
+    constructor(o){ super({...o,cls:"unchiDrop",src:ASSETS.unchiImg}); }
     collect(){
       window.WB.coins+=UNCHI_VALUE;
       window.WB.updateHud?.();
@@ -180,9 +181,9 @@
   }
 
   class OugonUnchiDrop extends BaseDrop{
-    constructor(o){super({...o,cls:"ougonunchiDrop",src:ASSETS.ougonUnchi});}
+    constructor(o){ super({...o,cls:"ougonunchiDrop",src:ASSETS.ougonUnchi}); }
     collect(){
-      window.WB.coins+=OUGON_VALUE; // ✅ 10000入る
+      window.WB.coins+=OUGON_VALUE;
       window.WB.updateHud?.();
       playSE();
       this.destroy();
@@ -196,28 +197,23 @@
     const x=(r.left-fr.left)+r.width*0.4+rand(-10,10);
     const y=(r.top-fr.top)+r.height*0.9;
     return type==="ougon"
-      ?new OugonUnchiDrop({field,layer,x,y})
-      :new UnchiDrop({field,layer,x,y});
+      ? new OugonUnchiDrop({field,layer,x,y})
+      : new UnchiDrop({field,layer,x,y});
   }
 
   /* =========================
-   * ✅ babybunny判定（ここが追加）
+   * babybunny判定
    * ========================= */
   function isBabyBunny(b){
     try{
       const t = String(
         b?.kind ?? b?.type ?? b?.key ?? b?.name ?? b?.species ?? ""
       ).toLowerCase();
-      // "babybunny" / "baby_bunny" / "baby" など幅広く拾う
-      if (t.includes("babybunny")) return true;
-      if (t.includes("baby_bunny")) return true;
-      if (t === "baby") return true;
+      if (t.includes("babybunny") || t.includes("baby_bunny") || t==="baby") return true;
 
-      // もし wrapにクラス名が入ってる実装でも拾う
       const cls = String(b?.wrap?.className ?? "").toLowerCase();
       if (cls.includes("babybunny")) return true;
 
-      // もし画像パスで判定できる実装でも拾う
       const src = String(b?.img?.src ?? b?.src ?? "").toLowerCase();
       if (src.includes("babybunny")) return true;
 
@@ -228,7 +224,7 @@
   }
 
   /* =========================
-   * 個体別ゲージ（分散の核心）
+   * 個体別ゲージ（分散）
    * ========================= */
   const gauge=new Map(); // bornAt -> 0..100
 
@@ -241,14 +237,13 @@
     for(const b of list){
       if(spawnedThisFrame)break;
 
-      // ✅ babybunnyは排出しない（ゲージも進めない）
-      if (isBabyBunny(b)) continue;
+      // ✅ babybunnyは排出対象外（ゲージも進めない）
+      if(isBabyBunny(b)) continue;
 
       const id=b?.bornAt;
       if(!id)continue;
 
       if(!gauge.has(id)){
-        // ⭐ 初期値ランダム → 完全に時間がズレる
         gauge.set(id,Math.random()*UNCHI_CHARGE_MAX);
       }
 
@@ -258,7 +253,7 @@
         v-=UNCHI_CHARGE_MAX;
         const type=Math.random()<OUGON_CHANCE?"ougon":"normal";
         spawnNearBunny(field,layer,b,type);
-        spawnedThisFrame=true; // ✅ 同時排出防止
+        spawnedThisFrame=true;
       }
 
       gauge.set(id,v);
@@ -286,6 +281,6 @@
     }
     requestAnimationFrame(loop);
 
-    console.log("[unchi.js] ready (skip babybunny)");
+    console.log("[unchi.js] ready (babybunny excluded)");
   });
 })();
