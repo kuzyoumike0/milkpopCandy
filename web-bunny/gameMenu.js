@@ -1,6 +1,8 @@
-// gameMenu.js（非module）V2.4
+// gameMenu.js（非module）V2.5
 // ✅ 利用規約：kiyaku.js を「未読込なら自動で読み込む」→ その後必ず KIYAKU.open()
 // ✅ 予約キュー + イベント + 動的script注入の三段構え
+// ✅ 追加：🌟 転生（牧場の星）メニュー項目
+//    - WB.prestige.open() / window.WB_PRESTIGE.open() / #prestigeBtn click の順でベストエフォート
 
 (() => {
   "use strict";
@@ -124,6 +126,9 @@
           <button class="item" type="button" data-act="slot">🎰 スロット</button>
           <button class="item" type="button" data-act="zukan">📖 図鑑</button>
           <button class="item" type="button" data-act="bgm">🎵 BGM</button>
+
+          <!-- ✅ 追加：転生 -->
+          <button class="item" type="button" data-act="prestige">🌟 転生（牧場の星）</button>
         </div>
 
         <div class="smallrow">
@@ -134,7 +139,8 @@
         <div class="note">
           ※ BGMは一度クリックが必要です。<br>
           ※ アイテム配置：選んだアイテムが透明赤枠で出ます → 置きたい場所をクリックで確定。<br>
-          ※ スロット：コイン消費に注意。
+          ※ スロット：コイン消費に注意。<br>
+          ※ 転生：コイン/うさぎをリセットして「牧場の星」を得ます（恒久解放に使用）。
         </div>
       `;
       document.body.appendChild(panel);
@@ -170,6 +176,31 @@
     }
 
     try { if (window.WB?.openSlot) { window.WB.openSlot(); return true; } } catch {}
+    return false;
+  }
+
+  /* =========================
+   * ✅ Prestige best effort
+   * ========================= */
+  function openPrestigeBestEffort() {
+    // 1) WB.prestige.open()
+    try { if (window.WB?.prestige?.open) { window.WB.prestige.open(); return true; } } catch {}
+
+    // 2) WB_PRESTIGE.open()（WB無い/遅い環境）
+    try { if (window.WB_PRESTIGE?.open) { window.WB_PRESTIGE.open(); return true; } } catch {}
+
+    // 3) 互換ボタン click
+    const btn = document.getElementById("prestigeBtn");
+    if (btn) {
+      try { btn.click(); return true; } catch {}
+      try {
+        btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+        return true;
+      } catch {}
+    }
+
+    // 4) 互換関数
+    try { if (window.WB?.openPrestige) { window.WB.openPrestige(); return true; } } catch {}
     return false;
   }
 
@@ -283,6 +314,13 @@
     if (act === "zukan") { safeCall(() => window.WB?.zukan?.open?.("bunny")); return; }
     if (act === "bgm")   { openBgmModalGuaranteed(); return; }
 
+    // ✅ 追加：転生
+    if (act === "prestige") {
+      safeCall(() => openPrestigeBestEffort());
+      setTimeout(() => openPrestigeBestEffort(), 120);
+      return;
+    }
+
     if (act === "xlink") {
       try { window.open(X_URL, "_blank", "noopener,noreferrer"); } catch {}
       return;
@@ -323,7 +361,7 @@
       closePanel(panel);
     }, { passive: true });
 
-    console.log("[gameMenu] ready v2.4");
+    console.log("[gameMenu] ready v2.5");
   }
 
   if (document.readyState === "loading") {
