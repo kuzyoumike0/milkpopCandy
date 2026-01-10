@@ -1,18 +1,6 @@
-// gameMenu.js（非module）V2.3
-// ✅ 右上にハンバーガーメニュー1個だけ作る
-// ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🧸アイテム配置 / 🎰スロット / 📖図鑑 / 🎵BGM
-// ✅ 追加：🐦 X（@Soni_complaint）へのリンク
-// ✅ 変更：📜 利用規約 → kiyaku.js のモーダルを開く（KIYAKU.open）
-// ✅ 利用規約は「予約キュー」対応：kiyaku.js が後から読まれても必ず開く
-// ✅ 呼び出し：
-//   - shop     : WB.shop.open()
-//   - isyou    : ISYOU.openModal()
-//   - itemplace: ITEMPLACE.open()
-//   - slot     : WB.slot.open() / SLOT.open() / #slotBtn click（順で吸収）
-//   - zukan    : WB.zukan.open("bunny")
-//   - bgm      : WB.bgm.openModal()（✅必ず開く：待機＆予約付き）
-// ✅ 外側クリックで閉じる
-// ✅ FIX: BGMモーダルが出ない根絶（WB.bgm待機 + openModal予約キュー）
+// gameMenu.js（非module）V2.4
+// ✅ 利用規約：kiyaku.js を「未読込なら自動で読み込む」→ その後必ず KIYAKU.open()
+// ✅ 予約キュー + イベント + 動的script注入の三段構え
 
 (() => {
   "use strict";
@@ -219,13 +207,27 @@
   }
 
   /* =========================
-   * ✅ 利用規約 open (QUEUE + EVENT + WAIT)
+   * ✅ 利用規約 open（QUEUE + script注入 + WAIT）
    * ========================= */
+  const KIYAKU_SCRIPT_ID = "milkpopKiyakuScriptV1";
+  const KIYAKU_SRC = "./kiyaku.js"; // ✅ ここがパスの本命（同階層に置く）
+
   function queueOpenKiyaku() {
     try { window.__milkpopOpenModalQueue.push({ type: "kiyaku", at: Date.now() }); } catch {}
   }
 
-  async function waitForKiyaku(maxMs = 5000) {
+  function ensureKiyakuScriptInjected() {
+    if (document.getElementById(KIYAKU_SCRIPT_ID)) return;
+    const s = document.createElement("script");
+    s.id = KIYAKU_SCRIPT_ID;
+    s.src = KIYAKU_SRC;
+    s.async = true;
+    s.onload = () => console.log("[gameMenu] kiyaku.js loaded");
+    s.onerror = () => console.warn("[gameMenu] failed to load kiyaku.js:", KIYAKU_SRC);
+    document.head.appendChild(s);
+  }
+
+  async function waitForKiyaku(maxMs = 6000) {
     const t0 = Date.now();
     while (Date.now() - t0 < maxMs) {
       if (window.KIYAKU?.open) return true;
@@ -235,17 +237,20 @@
   }
 
   async function openKiyakuGuaranteed() {
-    // ✅ 1) まず予約（kiyaku.js が後読みでも必ず開く）
+    // ✅ 1) まず予約（後読みでも kiyaku.js が吸収して open する）
     queueOpenKiyaku();
 
-    // ✅ 2) すでにあれば即 open
+    // ✅ 2) すでにあるなら即 open
     try { if (window.KIYAKU?.open) { window.KIYAKU.open(); return true; } } catch {}
 
-    // ✅ 3) イベント保険（kiyaku.js v1.2.1 以降）
+    // ✅ 3) そもそも読まれてない可能性が高いので script を注入
+    ensureKiyakuScriptInjected();
+
+    // ✅ 4) イベント保険（kiyaku.js側が拾う）
     try { window.dispatchEvent(new Event("milkpop:openKiyaku")); } catch {}
 
-    // ✅ 4) ないなら少し待つ
-    const ok = await waitForKiyaku(5000);
+    // ✅ 5) それでも待つ
+    const ok = await waitForKiyaku(6000);
     if (ok) {
       try { window.KIYAKU.open(); return true; } catch {}
     }
@@ -318,7 +323,7 @@
       closePanel(panel);
     }, { passive: true });
 
-    console.log("[gameMenu] ready v2.3");
+    console.log("[gameMenu] ready v2.4");
   }
 
   if (document.readyState === "loading") {
