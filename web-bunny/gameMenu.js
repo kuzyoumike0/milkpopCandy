@@ -1,4 +1,4 @@
-// gameMenu.js（非module）
+// gameMenu.js（非module）V2
 // ✅ 右上にハンバーガーメニュー1個だけ作る
 // ✅ メニュー項目：🛒ショップ / 🎀お洒落 / 🧸アイテム配置 / 🎰スロット / 📖図鑑 / 🎵BGM
 // ✅ 呼び出し：
@@ -7,8 +7,9 @@
 //   - itemplace: ITEMPLACE.open()
 //   - slot     : WB.slot.open() / SLOT.open() / #slotBtn click（順で吸収）
 //   - zukan    : WB.zukan.open("bunny")
-//   - bgm      : WB.bgm.openModal()
+//   - bgm      : WB.bgm.openModal()（✅必ず開く：待機＆予約付き）
 // ✅ 外側クリックで閉じる
+// ✅ FIX: BGMモーダルが出ない根絶（WB.bgm待機 + openModal予約キュー）
 
 (() => {
   "use strict";
@@ -19,6 +20,11 @@
     style: "gameMenuStyleV1",
   };
 
+  const $ = (q, p = document) => p.querySelector(q);
+
+  /* =========================
+   * Utils
+   * ========================= */
   function ensureStyle() {
     if (document.getElementById(UI.style)) return;
     const s = document.createElement("style");
@@ -130,36 +136,73 @@
     setTimeout(() => { try { fn(); } catch {} }, retryMs);
   }
 
+  /* =========================
+   * Slot best effort
+   * ========================= */
   function openSlotBestEffort() {
-    // 1) いちばん理想：WB.slot.open()
-    try {
-      if (window.WB?.slot?.open) { window.WB.slot.open(); return true; }
-    } catch {}
+    try { if (window.WB?.slot?.open) { window.WB.slot.open(); return true; } } catch {}
+    try { if (window.SLOT?.open) { window.SLOT.open(); return true; } } catch {}
 
-    // 2) 次：グローバル SLOT.open()
-    try {
-      if (window.SLOT?.open) { window.SLOT.open(); return true; }
-    } catch {}
-
-    // 3) 次：#slotBtn を「クリックしたことにする」
     const btn = document.getElementById("slotBtn");
     if (btn) {
       try { btn.click(); return true; } catch {}
-      // クリックが潰されてる環境用（イベント発火）
       try {
         btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
         return true;
       } catch {}
     }
 
-    // 4) 最後：WB.openSlot みたいな互換があるか
-    try {
-      if (window.WB?.openSlot) { window.WB.openSlot(); return true; }
-    } catch {}
-
+    try { if (window.WB?.openSlot) { window.WB.openSlot(); return true; } } catch {}
     return false;
   }
 
+  /* =========================
+   * ✅ BGM open (WAIT + QUEUE)
+   * ========================= */
+  // BGM.js がまだ読み込まれてない/patch前でも「開いて欲しい」を予約できる
+  window.__milkpopOpenModalQueue = window.__milkpopOpenModalQueue || [];
+
+  function queueOpenBgmModal() {
+    try {
+      window.__milkpopOpenModalQueue.push({ type: "bgm", at: Date.now() });
+    } catch {}
+  }
+
+  async function waitForBgmOpenModal(maxMs = 8000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < maxMs) {
+      if (window.WB?.bgm?.openModal) return true;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return false;
+  }
+
+  async function openBgmModalGuaranteed() {
+    // まずは予約（BGM.js側が吸収できるように）
+    queueOpenBgmModal();
+
+    // ユーザー操作中に unlock を踏む（SE/BGM両対応）
+    try { window.WB?.unlockAudioOnce?.(); } catch {}
+
+    // すでにあるなら即開く
+    try {
+      if (window.WB?.bgm?.openModal) { window.WB.bgm.openModal(); return true; }
+    } catch {}
+
+    // ないなら待つ（ロード順対策）
+    const ok = await waitForBgmOpenModal(8000);
+    if (ok) {
+      try { window.WB.bgm.openModal(); return true; } catch {}
+    }
+
+    // それでも無理なら「BGM.jsが未読込」なのでここで終わり（黙殺しない）
+    console.warn("[gameMenu] BGM modal not ready: BGM.js not loaded or WB.bgm not patched");
+    return false;
+  }
+
+  /* =========================
+   * Action handler
+   * ========================= */
   function handleAction(act) {
     if (act === "shop") {
       safeCall(() => window.WB?.shop?.open?.());
@@ -184,9 +227,7 @@
       return;
     }
     if (act === "slot") {
-      // ✅ ここ追加：スロットを開く
       safeCall(() => openSlotBestEffort());
-      // ちょい遅延で再トライ（ロード順対策）
       setTimeout(() => { openSlotBestEffort(); }, 120);
       return;
     }
@@ -195,15 +236,15 @@
       return;
     }
     if (act === "bgm") {
-      safeCall(() => window.WB?.bgm?.openModal?.());
-      setTimeout(() => {
-        if (window.WB?.bgm?.openModal) return;
-        try { window.WB?.bgm?.mountUI?.({ position: "top-right", title: "BGM" }); } catch {}
-      }, 0);
+      // ✅ ここが本命：必ず openModal を開く（待機＆予約）
+      openBgmModalGuaranteed();
       return;
     }
   }
 
+  /* =========================
+   * Boot
+   * ========================= */
   function boot() {
     const { btn, panel } = ensureUI();
 
