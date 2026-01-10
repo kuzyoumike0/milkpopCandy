@@ -1,7 +1,7 @@
 // BGM.js（非module）— ✅WBマージ対応 / ✅BGMモーダル必ず表示 / ✅SE音量もここで管理
 (() => {
   "use strict";
-  console.log("[BGM.js] LOADED v1.0 (WB merge + guaranteed modal)", Date.now());
+  console.log("[BGM.js] LOADED v1.1 (SE registry + UFO follows SE slider)", Date.now());
 
   /* =========================
    * Config / Storage
@@ -10,9 +10,6 @@
   const LS_KEY_SE_VOL       = "milkpop_se_volume_v1";   // 0..1 (互換)
   const LS_KEY_BGM_VOL      = "milkpop_bgm_volume_v1";  // 0..1 (互換)
 
-  // BGMの音源（存在しなくてもモーダルは出る）
-  // 1) window.MILKPOP_BGM = { morning:"...", day:"...", night:"..." } があればそれを使う
-  // 2) 無ければデフォルトパス（必要に応じて差し替え）
   const DEFAULT_BGM = {
     morning: "./assets/bgm/morning.mp3",
     day:     "./assets/bgm/day.mp3",
@@ -26,7 +23,6 @@
    * Load/Save Settings
    * ========================= */
   function loadSettings() {
-    // 新形式
     try {
       const raw = localStorage.getItem(LS_KEY_BGM_SETTINGS);
       if (raw) {
@@ -39,7 +35,6 @@
       }
     } catch {}
 
-    // 旧互換
     const bgmVol = clamp(Number(localStorage.getItem(LS_KEY_BGM_VOL) ?? 0.35) || 0.35, 0, 1);
     const seVol  = clamp(Number(localStorage.getItem(LS_KEY_SE_VOL)  ?? 0.85) || 0.85, 0, 1);
     return { muted: false, bgmVol, seVol };
@@ -57,10 +52,60 @@
   // app.js が参照する “SE音量の共有”
   window.__milkpopSeVolume = settings.seVol;
 
+  /* =========================
+   * ✅ SE registry（UFO.mp3 などを SEスライダーに追従させる）
+   * ========================= */
+  const seRegistry = new Set(); // Audio or HTMLMediaElement
+
+  function getSeEffectiveVolume() {
+    return settings.muted ? 0 : clamp(Number(settings.seVol) || 0, 0, 1);
+  }
+
+  function applySeToRegistry() {
+    const vol = getSeEffectiveVolume();
+    seRegistry.forEach((a) => {
+      try {
+        if (!a) return;
+        // muted と volume を両方揃える（他の実装差を吸収）
+        a.muted = !!settings.muted;
+        a.volume = vol;
+      } catch {}
+    });
+  }
+
+  // 外部から登録：WB.bgm.registerSE(audio)
+  function registerSE(audioEl) {
+    try {
+      if (!audioEl) return false;
+      seRegistry.add(audioEl);
+      // 登録直後に現在値を反映
+      try {
+        audioEl.muted = !!settings.muted;
+        audioEl.volume = getSeEffectiveVolume();
+      } catch {}
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function unregisterSE(audioEl) {
+    try {
+      seRegistry.delete(audioEl);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function setSeVolume(v) {
     settings.seVol = clamp(Number(v) || 0, 0, 1);
     window.__milkpopSeVolume = settings.seVol;
     saveSettings(settings);
+
+    // ✅ 登録済みSEへ反映（UFO含む）
+    applySeToRegistry();
+
     // app.js の playSE がこれを見てる場合がある
     window.dispatchEvent(new Event("milkpop:seVolume"));
   }
@@ -74,6 +119,10 @@
   function setMuted(m) {
     settings.muted = !!m;
     saveSettings(settings);
+
+    // ✅ 登録済みSEへ反映（UFO含む）
+    applySeToRegistry();
+
     applyMute();
   }
 
@@ -89,7 +138,6 @@
     if (audioUnlocked) return;
     audioUnlocked = true;
 
-    // 先にapp.js側のunlockも呼ぶ
     try { window.WB?.unlockAudioOnce?.(); } catch {}
 
     try {
@@ -107,9 +155,7 @@
       ? window.MILKPOP_BGM
       : DEFAULT_BGM;
 
-    // JSTで朝昼夜判定
-    const now = new Date();
-    const h = now.getHours(); // ユーザー環境のローカル（日本想定）
+    const h = new Date().getHours();
     if (h >= 5 && h < 11) return map.morning || map.day || map.night;
     if (h >= 11 && h < 18) return map.day || map.morning || map.night;
     return map.night || map.day || map.morning;
@@ -129,11 +175,8 @@
     const src = pickBgmSrc();
     if (!src) return;
 
-    // srcが変わった時だけ差し替え
     try {
-      if (bgm.src !== new URL(src, location.href).href) {
-        bgm.src = src;
-      }
+      if (bgm.src !== new URL(src, location.href).href) bgm.src = src;
     } catch {
       bgm.src = src;
     }
@@ -143,7 +186,6 @@
     try {
       if (audioUnlocked) await bgm.play();
     } catch (e) {
-      // 自動再生ブロック時は無視（ユーザー操作後に再試行される）
       console.warn("[BGM] play blocked:", e?.message || e);
     }
   }
@@ -152,7 +194,6 @@
     try { bgm.pause(); } catch {}
   }
 
-  // 定期的に時間帯が変わったら曲を切替（任意）
   let lastSlot = null;
   function slotOfHour(h) {
     if (h >= 5 && h < 11) return "morning";
@@ -166,7 +207,6 @@
       if (lastSlot == null) lastSlot = slot;
       if (slot !== lastSlot) {
         lastSlot = slot;
-        // 再生中なら差し替え
         if (!bgm.paused) play();
       }
     } catch {}
@@ -187,7 +227,6 @@
     const st = document.createElement("style");
     st.id = UI.style;
     st.textContent = `
-      /* 何があっても見える */
       #${UI.backdrop}{
         position: fixed !important;
         inset: 0 !important;
@@ -209,29 +248,12 @@
         padding: 14px 14px 12px !important;
         font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif !important;
       }
-      #${UI.panel} h3{
-        margin: 0 0 10px 0 !important;
-        font-size: 16px !important;
-      }
-      #${UI.panel} .row{
-        display:flex; align-items:center; gap:10px;
-        margin: 10px 0;
-      }
-      #${UI.panel} .row label{
-        width: 92px; font-size: 13px; opacity:.85;
-      }
-      #${UI.panel} input[type="range"]{
-        flex: 1;
-      }
-      #${UI.panel} .actions{
-        display:flex; gap:10px; justify-content:flex-end;
-        margin-top: 12px;
-      }
-      #${UI.panel} button{
-        border: 0; border-radius: 12px;
-        padding: 10px 12px;
-        cursor: pointer;
-      }
+      #${UI.panel} h3{ margin:0 0 10px 0 !important; font-size:16px !important; }
+      #${UI.panel} .row{ display:flex; align-items:center; gap:10px; margin: 10px 0; }
+      #${UI.panel} .row label{ width: 92px; font-size: 13px; opacity:.85; }
+      #${UI.panel} input[type="range"]{ flex: 1; }
+      #${UI.panel} .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top: 12px; }
+      #${UI.panel} button{ border:0; border-radius:12px; padding:10px 12px; cursor:pointer; }
       #${UI.panel} .primary{ background:#ffd6e7; }
       #${UI.panel} .ghost{ background:#f2f2f2; }
     `;
@@ -286,13 +308,9 @@
       document.body.appendChild(panel);
     }
 
-    // 外側クリックで閉じる
     backdrop.onclick = () => closeModal();
-
-    // クリックが背景に抜けない
     panel.onclick = (e) => e.stopPropagation();
 
-    // bind
     const mute = $("#bgmMuteToggle", panel);
     const bgmR = $("#bgmVolRange", panel);
     const seR  = $("#seVolRange", panel);
@@ -313,16 +331,10 @@
 
     $("#bgmPlayBtn", panel).onclick = () => play();
     $("#bgmPauseBtn", panel).onclick = () => pause();
-    $("#bgmReloadBtn", panel).onclick = () => {
-      // 強制的にsrc差し替え → play
-      try { bgm.src = ""; } catch {}
-      play();
-    };
+    $("#bgmReloadBtn", panel).onclick = () => { try { bgm.src = ""; } catch {} play(); };
     $("#bgmCloseBtn", panel).onclick = () => closeModal();
 
-    // 初期同期
     syncUI();
-
     return { backdrop, panel, syncUI };
   }
 
@@ -355,18 +367,20 @@
       setMuted,
       setBgmVolume,
       setSeVolume,
+
+      // ✅ 追加：UFO.mp3 を登録してSEスライダーで調整できる
+      registerSE,
+      unregisterSE,
+
       getState: () => ({ ...settings, playing: !bgm.paused }),
     };
 
-    // 既存WBを壊さずにマージ
     const next = Object.assign({}, prev);
     next.bgm = Object.assign({}, (prev.bgm || {}), bgmApi);
 
-    // 互換：WB.getSEVolume を持ってない場合に提供
     if (typeof next.getSEVolume !== "function") {
       next.getSEVolume = () => clamp(Number(window.__milkpopSeVolume) || settings.seVol || 0.85, 0, 1);
     }
-    // 互換：WB.unlockAudioOnce が無い場合
     if (typeof next.unlockAudioOnce !== "function") {
       next.unlockAudioOnce = unlockAudioOnce;
     }
@@ -376,31 +390,21 @@
 
   exportWB();
 
-  /* =========================
-   * app.js からの emit("ui:bgm") を受けて開く
-   * ========================= */
   function hookUiEvent() {
-    // すでにWB.onがあるなら使う
     try {
       if (window.WB?.on) {
         window.WB.on("ui:bgm", () => openModal());
       }
     } catch {}
-
-    // ない場合の保険：DOMイベントでも開けるように
     window.addEventListener("milkpop:openBgm", () => openModal());
   }
   hookUiEvent();
 
-  /* =========================
-   * Optional: HUDにBGMボタンを生やす（無ければ）
-   * ========================= */
   function ensureHudButton() {
-    // すでにあるなら何もしない
     if (document.getElementById(UI.btnInHud)) return;
 
     const hudButtons = document.getElementById("hudButtons");
-    if (!hudButtons) return; // HUDの構造が違うなら出さない
+    if (!hudButtons) return;
 
     const btn = document.createElement("button");
     btn.id = UI.btnInHud;
@@ -410,12 +414,11 @@
     btn.addEventListener("click", () => openModal());
     hudButtons.appendChild(btn);
   }
-
-  // ちょっと待ってHUDができてから差す
   setTimeout(ensureHudButton, 200);
 
-  // 初期はミュート/音量反映
+  // 初期反映
   applyMute();
   applyBgmVolume();
+  applySeToRegistry(); // ✅ 念のため（登録済みがあれば反映）
 
 })();
