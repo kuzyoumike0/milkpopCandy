@@ -1,29 +1,40 @@
-// BGM.js（非module / ✅購入＆選択UIが「必ず出る」完全版）
-// - body待ちしてからUI生成（モーダルが出ない問題を根絶）
-// - 購入 → 即選択 → 即再生
-// - 自動BGM（時間帯）に戻す対応
-// - WB差し替え耐性 / unlockAudioOnce 連結
-// - ハンバーガーメニュー式UI
+// BGM.js（非module / ✅BGM購入＆選択 + ✅BGM音量 + ✅SE音量スライダー + ✅openModal確実）
+// ✅ gameMenu.js の WB.bgm.openModal() で「必ず開く」
+// ✅ 旧UI(V1/V2)が残ってても削除して作り直す（出ない問題根絶）
+// ✅ SEスライダー：WB.getSEVolume / WB.setSEVolume / WB.se.play/loop/stop / registerSE まで全部提供
+// ✅ tenki.js / unchi.js / app.js からのSE登録（__milkpopSeRegisterQueue）も拾って追従
+// ✅ BGMは「選択中」が時間帯より優先 / 「自動に戻す」あり
+// ✅ ブラウザ自動再生対策：ユーザー操作（pointerdown/keydown）で unlock → 再生開始
 
 (() => {
   "use strict";
-  console.log("[BGM.js] LOADED final");
+  console.log("[BGM.js] LOADED v3.2 (openModal+SE slider+shop)", Date.now());
 
   /* =========================
-   * Storage keys
+   * Storage
    * ========================= */
-  const LS_KEY_SETTINGS = "milkpop_bgm_settings_v2";
-  const LS_KEY_OWNED    = "milkpop_bgm_owned_v2";
-  const LS_KEY_SELECT   = "milkpop_bgm_selected_v2";
+  const LS_KEY_BGM_SETTINGS = "milkpop_bgm_settings_v2"; // {volume, muted, enabled}
+  const LS_KEY_SE_VOL       = "milkpop_se_volume_v1";   // number 0..1
+  const LS_KEY_OWNED        = "milkpop_bgm_owned_v2";   // {key:true}
+  const LS_KEY_SELECT       = "milkpop_bgm_selected_v2";// {selectedKey:null|string}
 
   /* =========================
-   * Tracks / Prices
+   * Tracks（ここを書き換えるだけで増やせる）
+   *  - あなたが添付した mp3 は「プロジェクト内 assets に置いたパス」にして使ってください
    * ========================= */
   const TRACKS = {
+    // 時間帯
     morning: "./assets/bgm_morning.mp3",
     day:     "./assets/bgm_day.mp3",
     night:   "./assets/bgm_night.mp3",
+
+    // 特別
     depart:  "./assets/bgm_depart.mp3",
+
+    // 追加BGM（例：添付mp3を assets に入れた想定）
+    cocktail: "./assets/bgm/Cocktail_Glass.mp3",
+    stream:   "./assets/bgm/Stream.mp3",
+    dokkan:   "./assets/bgm/おもしろすぎてどっかん.mp3",
   };
 
   const PRICES = {
@@ -31,6 +42,9 @@
     day:     3000,
     night:   3000,
     depart:  8000,
+    cocktail: 4000,
+    stream:   4000,
+    dokkan:   5000,
   };
 
   const LABELS = {
@@ -38,11 +52,28 @@
     day:     "昼BGM",
     night:   "夜BGM",
     depart:  "旅立ちBGM",
+    cocktail:"Cocktail Glass",
+    stream:  "Stream",
+    dokkan:  "おもしろすぎてどっかん",
   };
 
+  const DESCS = {
+    morning: "朝の時間帯（5-10時）",
+    day:     "昼の時間帯（11-17時）",
+    night:   "夜の時間帯（それ以外）",
+    depart:  "特別BGM（旅立ち演出など）",
+    cocktail:"追加BGM（購入して選択すると流せる）",
+    stream:  "追加BGM（購入して選択すると流せる）",
+    dokkan:  "追加BGM（購入して選択すると流せる）",
+  };
+
+  /* =========================
+   * UI ids
+   * ========================= */
   const UI = {
     btn:   "bgmHamburgerV3",
     panel: "bgmPanelV3",
+    toast: "bgmToastV3",
     style: "bgmStyleV3",
   };
 
@@ -50,78 +81,165 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
   /* =========================
-   * Load / Save
+   * State load/save
    * ========================= */
-  function loadSettings() {
+  function loadBgmSettings() {
     try {
-      const j = JSON.parse(localStorage.getItem(LS_KEY_SETTINGS) || "{}");
+      const raw = localStorage.getItem(LS_KEY_BGM_SETTINGS);
+      if (!raw) return { volume: 0.50, muted: false, enabled: true };
+      const j = JSON.parse(raw);
       return {
         volume: clamp(Number(j.volume ?? 0.5), 0, 1),
         muted: !!j.muted,
         enabled: j.enabled !== false,
       };
     } catch {
-      return { volume: 0.5, muted: false, enabled: true };
+      return { volume: 0.50, muted: false, enabled: true };
     }
   }
-  function saveSettings(s) {
-    localStorage.setItem(LS_KEY_SETTINGS, JSON.stringify(s));
+  function saveBgmSettings(s) {
+    try { localStorage.setItem(LS_KEY_BGM_SETTINGS, JSON.stringify(s)); } catch {}
+  }
+
+  function loadSeVol() {
+    try {
+      const raw = localStorage.getItem(LS_KEY_SE_VOL);
+      const v = Number(raw);
+      return clamp(Number.isFinite(v) ? v : 0.85, 0, 1);
+    } catch {
+      return 0.85;
+    }
+  }
+  function saveSeVol(v) {
+    try { localStorage.setItem(LS_KEY_SE_VOL, String(clamp(Number(v) || 0, 0, 1))); } catch {}
   }
 
   function loadOwned() {
     try {
-      const j = JSON.parse(localStorage.getItem(LS_KEY_OWNED) || "{}");
-      return j && typeof j === "object" ? j : {};
+      const raw = localStorage.getItem(LS_KEY_OWNED);
+      if (!raw) return {};
+      const j = JSON.parse(raw);
+      return (j && typeof j === "object") ? j : {};
     } catch { return {}; }
   }
   function saveOwned(o) {
-    localStorage.setItem(LS_KEY_OWNED, JSON.stringify(o));
+    try { localStorage.setItem(LS_KEY_OWNED, JSON.stringify(o)); } catch {}
   }
 
   function loadSelected() {
     try {
-      const j = JSON.parse(localStorage.getItem(LS_KEY_SELECT) || "{}");
-      return { selectedKey: j.selectedKey ?? null };
+      const raw = localStorage.getItem(LS_KEY_SELECT);
+      if (!raw) return { selectedKey: null };
+      const j = JSON.parse(raw);
+      const k = j?.selectedKey ?? null;
+      if (k && !TRACKS[k]) return { selectedKey: null };
+      return { selectedKey: k || null };
     } catch { return { selectedKey: null }; }
   }
-  function saveSelected(s) {
-    localStorage.setItem(LS_KEY_SELECT, JSON.stringify(s));
+  function saveSelected(sel) {
+    try { localStorage.setItem(LS_KEY_SELECT, JSON.stringify(sel)); } catch {}
   }
 
-  let settings = loadSettings();
-  let owned    = loadOwned();
+  let bgmSettings = loadBgmSettings();
+  let seVolume = loadSeVol();
+  let owned = loadOwned();
   let selected = loadSelected();
 
+  function isOwned(key) { return !!owned?.[key]; }
+
   /* =========================
-   * Audio core
+   * Coins compat（WB）
    * ========================= */
-  let audio = new Audio();
-  audio.loop = true;
-  audio.preload = "auto";
-
-  let unlocked = false;
-  let currentKey = null;
-
-  function applyVolume() {
-    audio.volume = settings.muted ? 0 : settings.volume;
+  function getCoinsWB() {
+    const WB = window.WB;
+    try {
+      if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0;
+      if (WB && typeof WB.getCoins === "function") return Number(WB.getCoins()) || 0;
+      if (WB && typeof WB.coins !== "undefined") return Number(WB.coins) || 0;
+      const el = document.getElementById("coinValue");
+      if (el) return Number(el.textContent || "0") || 0;
+    } catch {}
+    return 0;
   }
 
-  function unlockOnce() {
-    if (unlocked) return;
-    unlocked = true;
+  function setCoinsWB(next) {
+    const WB = window.WB;
+    const v = Math.max(0, Math.floor(Number(next) || 0));
     try {
-      audio.muted = true;
-      audio.play().then(() => {
-        audio.pause();
-        audio.currentTime = 0;
-        audio.muted = false;
-        start(true);
-      }).catch(() => {});
+      if (WB && typeof WB.setCoin === "function") { WB.setCoin(v); return true; }
+      if (WB && typeof WB.setCoins === "function") { WB.setCoins(v); return true; }
+      if (WB && typeof WB.coins !== "undefined") WB.coins = v;
+      const el = document.getElementById("coinValue");
+      if (el) el.textContent = String(v);
+      return true;
+    } catch {}
+    return false;
+  }
+
+  function spendCoinsWB(amount) {
+    const WB = window.WB;
+    const a = Math.max(0, Math.floor(Number(amount) || 0));
+    if (!a) return true;
+    try {
+      if (WB && typeof WB.spendCoins === "function") return !!WB.spendCoins(a);
+      if (WB && typeof WB.spendCoin === "function") return !!WB.spendCoin(a);
+      const cur = getCoinsWB();
+      if (cur < a) return false;
+      setCoinsWB(cur - a);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /* =========================
+   * Toast
+   * ========================= */
+  function toast(msg) {
+    try {
+      let el = document.getElementById(UI.toast);
+      if (!el) {
+        el = document.createElement("div");
+        el.id = UI.toast;
+        el.style.cssText = `
+position:fixed; left:50%; top:16px; transform:translateX(-50%);
+z-index:2147483646;
+background:rgba(0,0,0,.78); color:#fff;
+padding:10px 12px; border-radius:14px;
+font-weight:900; font-size:13px;
+box-shadow:0 14px 40px rgba(0,0,0,.25);
+pointer-events:none; opacity:0; transition:opacity .18s ease;
+`;
+        document.body.appendChild(el);
+      }
+      el.textContent = msg;
+      el.style.opacity = "1";
+      clearTimeout(el.__t);
+      el.__t = setTimeout(() => { el.style.opacity = "0"; }, 1300);
     } catch {}
   }
 
-  window.addEventListener("pointerdown", unlockOnce, { once: true, passive: true });
-  window.addEventListener("keydown", unlockOnce, { once: true, passive: true });
+  /* =========================
+   * BGM Audio
+   * ========================= */
+  let unlocked = false;
+  let audio = null;
+  let currentKey = null;
+  let specialKey = null;
+
+  function ensureBgmAudio() {
+    if (audio) return audio;
+    audio = new Audio();
+    audio.loop = true;
+    audio.preload = "auto";
+    applyBgmVolume();
+    return audio;
+  }
+
+  function applyBgmVolume() {
+    ensureBgmAudio();
+    audio.volume = bgmSettings.muted ? 0 : bgmSettings.volume;
+  }
 
   function pickByTime() {
     const h = new Date().getHours();
@@ -130,193 +248,717 @@
     return "night";
   }
 
-  function isOwned(k) { return !!owned[k]; }
-
-  async function play(key) {
-    if (!TRACKS[key] || !isOwned(key)) return;
-    if (!settings.enabled) return;
-    if (!unlocked) return;
-
-    if (currentKey !== key) {
-      audio.src = TRACKS[key];
-      audio.currentTime = 0;
-      currentKey = key;
-    }
-    applyVolume();
-    try { await audio.play(); } catch {}
+  function resolveKeyBySrc(src) {
+    for (const k of Object.keys(TRACKS)) if (TRACKS[k] === src) return k;
+    return null;
   }
 
-  function stop() {
+  async function tryPlayBgm(src, keyHint = null) {
+    ensureBgmAudio();
+    if (!src) return false;
+
+    const key = keyHint || resolveKeyBySrc(src);
+    if (key && !isOwned(key)) { stopBgm(); return false; }
+
+    const href = new URL(src, location.href).href;
+    if (audio.src !== href) {
+      try { audio.pause(); } catch {}
+      audio.src = src;
+      audio.currentTime = 0;
+    }
+
+    applyBgmVolume();
+
+    if (!bgmSettings.enabled) return false;
+    if (!unlocked) return false;
+
+    try { await audio.play(); return true; } catch { return false; }
+  }
+
+  function stopBgm() {
+    if (!audio) return;
     try { audio.pause(); } catch {}
   }
 
-  function start(force = false) {
-    let key = selected.selectedKey;
-    if (!key || !isOwned(key)) {
-      key = pickByTime();
-      if (!isOwned(key)) key = Object.keys(TRACKS).find(isOwned) || null;
-    }
-    if (!key) return stop();
+  function decideKeyToPlay() {
+    if (specialKey && TRACKS[specialKey] && isOwned(specialKey)) return specialKey;
+
+    const sk = selected?.selectedKey ?? null;
+    if (sk && TRACKS[sk] && isOwned(sk)) return sk;
+
+    const t = pickByTime();
+    if (isOwned(t)) return t;
+
+    // fallback
+    return Object.keys(TRACKS).find(isOwned) || null;
+  }
+
+  function startBgm(force = false) {
+    const key = decideKeyToPlay();
+    if (!key) { currentKey = null; stopBgm(); return; }
     if (!force && key === currentKey) return;
-    play(key);
+    currentKey = key;
+    tryPlayBgm(TRACKS[key], key);
+  }
+
+  async function unlockBgmOnce() {
+    if (unlocked) return;
+    unlocked = true;
+    startBgm(true);
   }
 
   /* =========================
-   * Coin helpers (WB互換)
+   * SE system（register / play / loop / stop）
    * ========================= */
-  function getCoins() {
+  const seRegistry = new Set();          // Audio elements
+  const loopMap = new Map();             // key -> Audio
+
+  function getSEVolume() {
+    // 共有変数も更新しておく（他JSが参照しやすい）
+    return clamp(Number(window.__milkpopSeVolume ?? seVolume), 0, 1);
+  }
+  function setSEVolume(v) {
+    seVolume = clamp(Number(v) || 0, 0, 1);
+    window.__milkpopSeVolume = seVolume;
+    saveSeVol(seVolume);
+
+    // 登録SEに反映（loopはbase×slider方式）
     try {
-      if (window.WB?.getCoin) return WB.getCoin();
-      if (typeof window.WB?.coins === "number") return window.WB.coins;
-      return Number($("#coinValue")?.textContent || 0);
-    } catch { return 0; }
+      for (const a of seRegistry) {
+        if (a && typeof a.volume === "number") a.volume = seVolume;
+      }
+    } catch {}
+    try {
+      for (const a of loopMap.values()) {
+        if (a && typeof a.__base === "number") a.volume = clamp(a.__base * seVolume, 0, 1);
+      }
+    } catch {}
   }
 
-  function spendCoins(n) {
-    n = Math.floor(n);
-    if (getCoins() < n) return false;
+  function isMutedAll() { return !!bgmSettings.muted; } // 仕様：BGMミュート＝SEもミュート扱いでOK
+
+  function registerSE(audioEl) {
     try {
-      if (window.WB?.spendCoin) return WB.spendCoin(n);
-      window.WB.coins -= n;
+      if (!audioEl) return;
+      seRegistry.add(audioEl);
+      // 初期適用
+      audioEl.volume = isMutedAll() ? 0 : getSEVolume();
+      audioEl.muted = !!isMutedAll();
+    } catch {}
+  }
+
+  function sePlay(src, base = 1.0) {
+    try {
+      if (!unlocked) return;
+      const a = new Audio(encodeURI(src));
+      a.preload = "auto";
+      a.loop = false;
+      a.volume = isMutedAll() ? 0 : clamp(base * getSEVolume(), 0, 1);
+      a.muted = !!isMutedAll();
+      a.play().catch(() => {});
+      // 短命なので registry には入れない（入れると増え続ける）
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
+  }
+
+  function seLoop(key, src, base = 1.0) {
+    try {
+      if (!unlocked) return false;
+
+      // 既存があれば同じsrcならそのまま、違うなら差し替え
+      const prev = loopMap.get(key);
+      const href = new URL(src, location.href).href;
+
+      if (prev) {
+        if (prev.src === href) {
+          prev.__base = base;
+          prev.volume = isMutedAll() ? 0 : clamp(base * getSEVolume(), 0, 1);
+          prev.muted = !!isMutedAll();
+          if (prev.paused) prev.play().catch(() => {});
+          return true;
+        }
+        try { prev.pause(); } catch {}
+        loopMap.delete(key);
+      }
+
+      const a = new Audio();
+      a.preload = "auto";
+      a.loop = true;
+      a.src = encodeURI(src);
+      a.__base = base;
+      a.volume = isMutedAll() ? 0 : clamp(base * getSEVolume(), 0, 1);
+      a.muted = !!isMutedAll();
+      a.play().catch(() => {});
+      loopMap.set(key, a);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function seStop(key) {
+    try {
+      const a = loopMap.get(key);
+      if (!a) return;
+      try { a.pause(); } catch {}
+      loopMap.delete(key);
+    } catch {}
+  }
+
+  function applyMuteToSE() {
+    const m = !!isMutedAll();
+    try {
+      for (const a of seRegistry) {
+        if (!a) continue;
+        a.muted = m;
+        a.volume = m ? 0 : getSEVolume();
+      }
+    } catch {}
+    try {
+      for (const a of loopMap.values()) {
+        if (!a) continue;
+        a.muted = m;
+        a.volume = m ? 0 : clamp((a.__base || 1) * getSEVolume(), 0, 1);
+      }
+    } catch {}
+  }
+
+  /* =========================
+   * Shop / Select
+   * ========================= */
+  function buyBgm(key) {
+    if (!TRACKS[key] || !PRICES[key]) return { ok: false, reason: "unknown" };
+    if (isOwned(key)) return { ok: true, reason: "already" };
+
+    const price = PRICES[key];
+    const cur = getCoinsWB();
+    if (cur < price) return { ok: false, reason: "coins", need: price, have: cur };
+
+    const ok = spendCoinsWB(price);
+    if (!ok) return { ok: false, reason: "coins_api" };
+
+    owned[key] = true;
+    saveOwned(owned);
+    toast(`✅ ${LABELS[key]} 購入！ -${price}🪙`);
+    return { ok: true, reason: "bought" };
+  }
+
+  function selectBgm(keyOrNull) {
+    const k = keyOrNull || null;
+    if (k === null) {
+      selected.selectedKey = null;
+      saveSelected(selected);
+      toast("🔁 自動BGMに戻した");
+      startBgm(true);
+      return { ok: true };
+    }
+    if (!TRACKS[k]) return { ok: false, reason: "unknown" };
+    if (!isOwned(k)) return { ok: false, reason: "not_owned" };
+
+    selected.selectedKey = k;
+    saveSelected(selected);
+    toast(`🎵 ${LABELS[k]} を流す`);
+    startBgm(true);
+    return { ok: true };
+  }
+
+  function playSpecial(keyOrSrc) {
+    // key
+    if (TRACKS[keyOrSrc]) {
+      if (!isOwned(keyOrSrc)) { toast("未購入です"); return; }
+      specialKey = keyOrSrc;
+      tryPlayBgm(TRACKS[keyOrSrc], keyOrSrc);
+      return;
+    }
+    // src
+    const src = keyOrSrc;
+    if (!src) return;
+    specialKey = "__custom__";
+    tryPlayBgm(src, null);
+  }
+
+  function clearSpecial() {
+    specialKey = null;
+    startBgm(true);
   }
 
   /* =========================
    * UI
    * ========================= */
-  function mountUI() {
-    if ($("#" + UI.btn)) return;
-
-    if (!document.getElementById(UI.style)) {
-      const st = document.createElement("style");
-      st.id = UI.style;
-      st.textContent = `
-#${UI.btn}{
-  position:fixed; top:10px; right:10px;
-  width:44px;height:44px; border:none;
-  border-radius:14px; cursor:pointer;
-  background:#fff; box-shadow:0 12px 32px rgba(0,0,0,.2);
-  z-index:2147483000;
-}
-#${UI.panel}{
-  position:fixed; top:62px; right:10px;
-  width:340px; max-width:92vw;
-  background:#fff; border-radius:16px;
-  box-shadow:0 18px 44px rgba(0,0,0,.25);
-  padding:12px; display:none;
-  z-index:2147483001;
-}
-.item{ display:flex; justify-content:space-between; gap:8px; margin:8px 0; }
-.item button{ border:none; border-radius:12px; padding:6px 10px; cursor:pointer; }
-.active{ background:#333;color:#fff; }
-`;
-      document.head.appendChild(st);
+  function removeOldUI() {
+    const ids = [
+      // old
+      "bgmHamburgerV1","bgmPanelV1","bgmHamburgerV2","bgmPanelV2",
+      // maybe older styles
+      "bgmStyleV1","bgmStyleV2",
+    ];
+    for (const id of ids) {
+      try { document.getElementById(id)?.remove(); } catch {}
     }
+    // toast は残ってても害ない
+  }
+
+  function ensureStyle() {
+    if (document.getElementById(UI.style)) return;
+
+    const style = document.createElement("style");
+    style.id = UI.style;
+    style.textContent = `
+#${UI.btn}{
+  position:fixed; z-index:2147483000;
+  top:10px; right:10px;
+  width:44px;height:44px;
+  border:none;border-radius:14px;
+  background:rgba(255,255,255,.95);
+  box-shadow:0 12px 32px rgba(0,0,0,.18);
+  cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+#${UI.btn} .bars{ width:18px; height:14px; position:relative; }
+#${UI.btn} .bars i{
+  position:absolute; left:0; right:0; height:2px; border-radius:2px; background:#333;
+}
+#${UI.btn} .bars i:nth-child(1){ top:0; }
+#${UI.btn} .bars i:nth-child(2){ top:6px; }
+#${UI.btn} .bars i:nth-child(3){ top:12px; }
+
+#${UI.panel}{
+  position:fixed; z-index:2147483001;
+  top:62px; right:10px;
+  width:min(380px, 92vw);
+  background:rgba(255,255,255,.98);
+  border-radius:16px;
+  box-shadow:0 18px 44px rgba(0,0,0,.22);
+  padding:12px 12px 10px;
+  display:none;
+}
+#${UI.panel} .row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+#${UI.panel} .ttl{ font-weight:900; }
+#${UI.panel} .sub{ font-size:12px; opacity:.75; margin-top:2px; }
+#${UI.panel} .btn{
+  border:none; border-radius:12px;
+  padding:8px 10px;
+  font-weight:900;
+  background:#ffd6e7;
+  cursor:pointer;
+}
+#${UI.panel} .btn.ghost{ background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08); }
+#${UI.panel} .btn.small{ padding:6px 8px; border-radius:10px; font-weight:900; }
+#${UI.panel} .slider{ width:100%; margin:10px 0 6px; }
+#${UI.panel} .fine{ font-size:12px; opacity:.75; }
+#${UI.panel} .sep{ height:1px; background:rgba(0,0,0,.08); margin:10px 0; }
+
+#bgmShopV3 .item{
+  display:flex; align-items:flex-start; justify-content:space-between;
+  gap:10px; padding:8px 8px;
+  border-radius:14px;
+  background:rgba(0,0,0,.03);
+  margin:8px 0;
+}
+#bgmShopV3 .name{ font-weight:900; }
+#bgmShopV3 .meta{ font-size:12px; opacity:.75; margin-top:2px; line-height:1.35; }
+#bgmShopV3 .right{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+#bgmShopV3 .tag{
+  font-size:12px; font-weight:900;
+  padding:4px 8px; border-radius:999px;
+  background:#fff; box-shadow:0 10px 24px rgba(0,0,0,.08);
+}
+#bgmShopV3 .buy{
+  border:none; border-radius:12px;
+  padding:8px 10px; font-weight:900;
+  cursor:pointer; background:#ffd6e7;
+}
+#bgmShopV3 .buy[disabled]{ opacity:.55; cursor:not-allowed; }
+#bgmShopV3 .select{
+  border:none; border-radius:12px;
+  padding:8px 10px; font-weight:900;
+  cursor:pointer; background:#fff;
+  box-shadow:0 10px 24px rgba(0,0,0,.08);
+}
+#bgmShopV3 .select[disabled]{ opacity:.55; cursor:not-allowed; }
+#bgmShopV3 .select.active{ background:#333; color:#fff; box-shadow:none; }
+`;
+    document.head.appendChild(style);
+  }
+
+  function renderItem(key) {
+    const price = PRICES[key] ?? 0;
+    const label = LABELS[key] ?? key;
+    const desc  = DESCS[key] ?? "";
+    return `
+<div class="item">
+  <div style="min-width:170px;">
+    <div class="name">${label}</div>
+    <div class="meta">${desc}</div>
+  </div>
+  <div class="right">
+    <div class="tag" id="bgmPrice_${key}">${price}🪙</div>
+    <button class="buy" id="bgmBuy_${key}" type="button">購入</button>
+    <button class="select" id="bgmSelect_${key}" type="button">流す</button>
+  </div>
+</div>`;
+  }
+
+  function mountUI() {
+    // すでにあるならOK
+    if (document.getElementById(UI.btn) && document.getElementById(UI.panel)) return;
+
+    removeOldUI();
+    ensureStyle();
 
     const btn = document.createElement("button");
     btn.id = UI.btn;
-    btn.textContent = "🎵";
+    btn.type = "button";
+    btn.innerHTML = `<span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>`;
+    btn.title = "BGM設定";
 
     const panel = document.createElement("div");
     panel.id = UI.panel;
 
+    const keys = Object.keys(TRACKS);
+
     panel.innerHTML = `
-<b>BGM設定</b>
-<div style="margin:6px 0">
-  <button id="bgmOn">ON/OFF</button>
-  <button id="bgmMute">ミュート</button>
+<div class="row">
+  <div>
+    <div class="ttl">BGM</div>
+    <div class="sub" id="bgmStateTextV3">未再生（画面をクリックで開始）</div>
+  </div>
+  <button class="btn ghost" id="bgmCloseV3" type="button">×</button>
 </div>
-<input id="bgmVol" type="range" min="0" max="100">
-<hr>
-<div id="bgmShop"></div>
-<button id="bgmAuto">🔁 自動に戻す</button>
+
+<div class="sep"></div>
+
+<div class="row">
+  <button class="btn" id="bgmToggleV3" type="button">ON</button>
+  <button class="btn ghost" id="bgmMuteV3" type="button">ミュート</button>
+</div>
+
+<div class="fine" style="margin-top:6px;">BGM音量</div>
+<input class="slider" id="bgmVolV3" type="range" min="0" max="100" step="1" />
+
+<div class="sep"></div>
+
+<div class="row">
+  <div class="ttl">SE音量</div>
+  <div class="tag" id="seVolTagV3">🔊 0</div>
+</div>
+<input class="slider" id="seVolV3" type="range" min="0" max="100" step="1" />
+<div class="fine">※ UFO/うんち/コイン/クリック音などに効きます</div>
+
+<div class="sep"></div>
+
+<div class="row">
+  <div class="ttl">BGMショップ（購入＆選択）</div>
+  <div class="tag" id="bgmCoinTagV3">🪙 0</div>
+</div>
+
+<div class="row" style="margin-top:6px;">
+  <button class="btn ghost small" id="bgmAutoV3" type="button">🔁 自動に戻す</button>
+  <div class="fine" id="bgmSelTextV3"></div>
+</div>
+
+<div class="fine" id="bgmInfoV3" style="margin:6px 0 0;"></div>
+
+<div id="bgmShopV3">
+  ${keys.map(k => renderItem(k)).join("")}
+</div>
 `;
 
     document.body.appendChild(btn);
     document.body.appendChild(panel);
 
-    btn.onclick = () => {
-      panel.style.display = panel.style.display === "block" ? "none" : "block";
-      render();
-    };
+    const stateText = $("#bgmStateTextV3", panel);
+    const info = $("#bgmInfoV3", panel);
+    const selText = $("#bgmSelTextV3", panel);
+    const toggle = $("#bgmToggleV3", panel);
+    const mute = $("#bgmMuteV3", panel);
+    const bgmVol = $("#bgmVolV3", panel);
+    const seVol = $("#seVolV3", panel);
+    const seTag = $("#seVolTagV3", panel);
+    const close = $("#bgmCloseV3", panel);
+    const coinTag = $("#bgmCoinTagV3", panel);
+    const autoBtn = $("#bgmAutoV3", panel);
 
-    $("#bgmOn", panel).onclick = () => {
-      settings.enabled = !settings.enabled;
-      saveSettings(settings);
-      settings.enabled ? start(true) : stop();
-    };
+    const buyBtns = {};
+    const selectBtns = {};
+    const priceTags = {};
+    for (const k of keys) {
+      buyBtns[k] = $(`#bgmBuy_${k}`, panel);
+      selectBtns[k] = $(`#bgmSelect_${k}`, panel);
+      priceTags[k] = $(`#bgmPrice_${k}`, panel);
+    }
 
-    $("#bgmMute", panel).onclick = () => {
-      settings.muted = !settings.muted;
-      saveSettings(settings);
-      applyVolume();
-    };
+    function refresh() {
+      // sliders
+      bgmVol.value = String(Math.round(bgmSettings.volume * 100));
+      seVol.value  = String(Math.round(getSEVolume() * 100));
+      seTag.textContent = `🔊 ${Math.round(getSEVolume() * 100)}`;
 
-    const vol = $("#bgmVol", panel);
-    vol.value = Math.round(settings.volume * 100);
-    vol.oninput = () => {
-      settings.volume = vol.value / 100;
-      saveSettings(settings);
-      applyVolume();
-    };
+      // toggles
+      toggle.textContent = bgmSettings.enabled ? "ON" : "OFF";
+      toggle.style.opacity = bgmSettings.enabled ? "1" : "0.6";
+      mute.textContent = bgmSettings.muted ? "ミュート中" : "ミュート";
+      mute.style.opacity = bgmSettings.muted ? "0.75" : "1";
 
-    $("#bgmAuto", panel).onclick = () => {
-      selected.selectedKey = null;
-      saveSelected(selected);
-      start(true);
-    };
+      // coin
+      const c = getCoinsWB();
+      coinTag.textContent = `🪙 ${c}`;
 
-    function render() {
-      const shop = $("#bgmShop", panel);
-      shop.innerHTML = "";
-      Object.keys(TRACKS).forEach(k => {
-        const row = document.createElement("div");
-        row.className = "item";
-        row.innerHTML = `
-<span>${LABELS[k]} (${PRICES[k]}🪙)</span>
-<div>
-  <button data-buy>購入</button>
-  <button data-sel>流す</button>
-</div>`;
-        const [buy, sel] = row.querySelectorAll("button");
+      // selection text
+      const sel = selected?.selectedKey ?? null;
+      selText.textContent = sel ? `選択中：${LABELS[sel]}` : "選択中：自動";
 
-        buy.disabled = isOwned(k) || getCoins() < PRICES[k];
-        buy.onclick = () => {
-          if (spendCoins(PRICES[k])) {
-            owned[k] = true;
-            saveOwned(owned);
-            selected.selectedKey = k;
-            saveSelected(selected);
-            start(true);
-            render();
-          }
-        };
+      const nowKey = decideKeyToPlay() || pickByTime();
+      info.textContent =
+        (specialKey && specialKey !== "__custom__") ? `特別：${LABELS[specialKey] || specialKey}` :
+        sel ? `選択：${LABELS[sel]}` :
+        `通常：${LABELS[nowKey] || nowKey}`;
 
-        sel.disabled = !isOwned(k);
-        sel.classList.toggle("active", selected.selectedKey === k);
-        sel.onclick = () => {
-          selected.selectedKey = k;
-          saveSelected(selected);
-          start(true);
-          render();
-        };
+      // state
+      const playing = audio && !audio.paused && unlocked && bgmSettings.enabled && !bgmSettings.muted && audio.volume > 0;
+      stateText.textContent = playing ? "再生中" : "停止中（クリックで開始）";
 
-        shop.appendChild(row);
+      // buttons
+      for (const k of keys) {
+        const own = isOwned(k);
+        const price = PRICES[k] || 0;
+
+        if (priceTags[k]) priceTags[k].textContent = own ? "購入済み" : `${price}🪙`;
+
+        if (buyBtns[k]) {
+          buyBtns[k].disabled = own || (c < price);
+          buyBtns[k].textContent = own ? "OK" : "購入";
+        }
+        if (selectBtns[k]) {
+          selectBtns[k].disabled = !own;
+          selectBtns[k].classList.toggle("active", sel === k);
+          selectBtns[k].textContent = (sel === k) ? "選択中" : "流す";
+        }
+      }
+    }
+
+    function openPanel() {
+      panel.style.display = "block";
+      refresh();
+    }
+    function closePanel() {
+      panel.style.display = "none";
+    }
+
+    btn.addEventListener("click", () => {
+      panel.style.display = (panel.style.display === "block") ? "none" : "block";
+      refresh();
+    });
+    close.addEventListener("click", closePanel);
+
+    toggle.addEventListener("click", async () => {
+      bgmSettings.enabled = !bgmSettings.enabled;
+      saveBgmSettings(bgmSettings);
+      if (!bgmSettings.enabled) stopBgm();
+      else {
+        await unlockBgmOnce();
+        startBgm(true);
+      }
+      refresh();
+    });
+
+    mute.addEventListener("click", () => {
+      bgmSettings.muted = !bgmSettings.muted;
+      saveBgmSettings(bgmSettings);
+      applyBgmVolume();
+      applyMuteToSE();
+      refresh();
+    });
+
+    bgmVol.addEventListener("input", async () => {
+      bgmSettings.volume = clamp(Number(bgmVol.value) / 100, 0, 1);
+      saveBgmSettings(bgmSettings);
+      applyBgmVolume();
+      if (bgmSettings.enabled) {
+        await unlockBgmOnce();
+        startBgm(false);
+      }
+      refresh();
+    });
+
+    seVol.addEventListener("input", () => {
+      setSEVolume(Number(seVol.value) / 100);
+      applyMuteToSE();
+      refresh();
+    });
+
+    autoBtn.addEventListener("click", async () => {
+      await unlockBgmOnce();
+      selectBgm(null);
+      refresh();
+    });
+
+    for (const k of keys) {
+      buyBtns[k]?.addEventListener("click", async () => {
+        await unlockBgmOnce();
+        const r = buyBgm(k);
+        if (!r.ok) {
+          if (r.reason === "coins") toast(`🪙 足りない！ ${r.have} / ${r.need}`);
+          else toast("購入できませんでした");
+        } else {
+          selectBgm(k); // 購入したら即流す
+        }
+        refresh();
+      });
+
+      selectBtns[k]?.addEventListener("click", async () => {
+        await unlockBgmOnce();
+        const r = selectBgm(k);
+        if (!r.ok) toast("未購入です");
+        refresh();
       });
     }
 
-    render();
+    // 外側クリックで閉じる
+    document.addEventListener("pointerdown", (e) => {
+      if (panel.style.display !== "block") return;
+      if (panel.contains(e.target) || btn.contains(e.target)) return;
+      closePanel();
+    }, { passive: true });
+
+    // refresh loop
+    setInterval(refresh, 600);
+    refresh();
+  }
+
+  function openModal() {
+    // ✅ gameMenu.js から確実に開けるAPI
+    try { mountUI(); } catch {}
+    const panel = document.getElementById(UI.panel);
+    if (panel) panel.style.display = "block";
   }
 
   /* =========================
-   * Boot（★重要：body待ち）
+   * WB patch（swap-safe）
    * ========================= */
-  (function waitBody(){
-    if (!document.body) return setTimeout(waitBody, 50);
-    mountUI();
-    start(false);
-    setInterval(() => start(false), 30000);
-  })();
+  let lastWBRef = null;
 
+  function patchWB(WB) {
+    if (!WB || typeof WB !== "object") return;
+    if (lastWBRef === WB && WB.__bgmPatchedV32) return;
+    lastWBRef = WB;
+
+    // unlock 連結（app.js が WB.unlockAudioOnce を呼ぶのでここでBGMも unlock）
+    const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
+    WB.unlockAudioOnce = async () => {
+      try { prevUnlock?.(); } catch {}
+      await unlockBgmOnce();
+    };
+
+    WB.getSEVolume = () => getSEVolume();
+    WB.setSEVolume = (v) => setSEVolume(v);
+
+    WB.se = WB.se || {};
+    WB.se.play = (src, base = 1.0) => sePlay(src, base);
+    WB.se.loop = (key, src, base = 1.0) => seLoop(key, src, base);
+    WB.se.stop = (key) => seStop(key);
+
+    WB.bgm = WB.bgm || {};
+    WB.bgm.mountUI = mountUI;
+    WB.bgm.openModal = openModal; // ✅ これが無いと「メニューから開けない」
+    WB.bgm.start = () => startBgm(true);
+    WB.bgm.stop = () => stopBgm();
+    WB.bgm.playSpecial = playSpecial;
+    WB.bgm.clearSpecial = clearSpecial;
+    WB.bgm.TRACKS = TRACKS;
+    WB.bgm.PRICES = PRICES;
+    WB.bgm.LABELS = LABELS;
+    WB.bgm.isOwned = isOwned;
+    WB.bgm.buy = buyBgm;
+    WB.bgm.select = selectBgm;
+    WB.bgm.getSelected = () => selected?.selectedKey ?? null;
+    WB.bgm.getCoins = () => getCoinsWB();
+
+    // registerSE 公開（app.js / unchi.js / tenki.js から使える）
+    WB.bgm.registerSE = registerSE;
+
+    WB.__bgmPatchedV32 = true;
+
+    // もし unlock 済みで再生ONなら追従
+    if (unlocked && bgmSettings.enabled) startBgm(false);
+  }
+
+  function startWBWatcher() {
+    patchWB(window.WB);
+    const start = Date.now();
+    const t = setInterval(() => {
+      patchWB(window.WB);
+      if (Date.now() - start > 20000) clearInterval(t);
+    }, 200);
+  }
+
+  /* =========================
+   * SE登録キュー回収（app.jsより先/後どっちでもOKにする）
+   * ========================= */
+  function drainRegisterQueue() {
+    try {
+      const q = window.__milkpopSeRegisterQueue;
+      if (!Array.isArray(q) || q.length === 0) return;
+      while (q.length) {
+        const a = q.shift();
+        registerSE(a);
+      }
+    } catch {}
+  }
+
+  /* =========================
+   * Autoplay unlock（ユーザー操作で一度だけ）
+   * ========================= */
+  function setupAutoplayUnlock() {
+    const handler = async () => {
+      patchWB(window.WB);
+      await unlockBgmOnce();
+      drainRegisterQueue();
+    };
+    window.addEventListener("pointerdown", handler, { passive: true });
+    window.addEventListener("keydown", handler, { passive: true });
+    window.addEventListener("touchstart", handler, { passive: true });
+  }
+
+  function startTimeWatcher() {
+    setInterval(() => startBgm(false), 30_000);
+  }
+
+  function waitForBody(timeoutMs = 8000) {
+    const start = Date.now();
+    return new Promise((resolve, reject) => {
+      const t = setInterval(() => {
+        if (document.body) { clearInterval(t); resolve(); return; }
+        if (Date.now() - start > timeoutMs) { clearInterval(t); reject(new Error("body wait timeout")); }
+      }, 30);
+    });
+  }
+
+  /* =========================
+   * Boot
+   * ========================= */
+  (async function boot() {
+    ensureBgmAudio();
+    // SE共有変数
+    window.__milkpopSeVolume = getSEVolume();
+
+    startWBWatcher();
+    setupAutoplayUnlock();
+    startTimeWatcher();
+
+    // body待ち→UI生成（確実）
+    try { await waitForBody(); } catch {}
+    mountUI();
+
+    // 最初は開かない（勝手に開くと邪魔なので）。必要なら gameMenu から openModal。
+    // ただし「BGMモーダルが出ない」対策で、WBがあるならAPIは必ず生える。
+    patchWB(window.WB);
+
+    // 起動時もキューを拾う
+    setInterval(drainRegisterQueue, 700);
+
+    console.log("[BGM.js] ready (use WB.bgm.openModal())");
+  })();
 })();
