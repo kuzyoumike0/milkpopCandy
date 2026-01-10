@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.9.1 (unchi gauge +10% fixed comment)", Date.now());
+  console.log("[app.js] LOADED v16.9.2 (WB merge + zIndex safe + unchi gauge +10%)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -32,11 +32,11 @@
   };
 
   const BUNNY_DEFS = {
-    bunny1:  { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+    bunny1:   { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:   { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:   { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:   { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny: { label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
   };
 
   /* =========================
@@ -65,14 +65,13 @@
 
   /* =========================
    * ✅ 通常うんち（うんちゲージ満タンで出現）
-   * - さらに頻度を落とす
    * - うさぎより上のレイヤー
    * - クリックでSE + 削除
    * ========================= */
   const UNCHI_CHARGE_MAX = 100;
 
   // ✅ +10%：0.18 → 0.198（0.18 × 1.10）
-  // 目安：満タンまで約 100 / 0.198 = 505.05 秒（約 8.4 分）
+  // 目安：満タンまで約 505秒（約 8.4分）
   const UNCHI_CHARGE_PER_SEC = 0.198;
 
   // クリックでコイン加算するなら（不要なら 0 に）
@@ -99,16 +98,16 @@
   /* =========================
    * DOM
    * ========================= */
-  const field      = document.getElementById("field");
-  const bunnyLayer = document.getElementById("bunnyLayer");
-  const coinLayer  = document.getElementById("coinLayer");
-  const coinValueEl= document.getElementById("coinValue");
+  const field       = document.getElementById("field");
+  const bunnyLayer  = document.getElementById("bunnyLayer");
+  const coinLayer   = document.getElementById("coinLayer");
+  const coinValueEl = document.getElementById("coinValue");
 
-  const shopBtn    = document.getElementById("shopBtn");
-  const departBtn  = document.getElementById("departBtn");
-  const resetBtn   = document.getElementById("resetBtn");
-  const rankBtn    = document.getElementById("rankBtn");
-  const slotBtn    = document.getElementById("slotBtn");
+  const shopBtn   = document.getElementById("shopBtn");
+  const departBtn = document.getElementById("departBtn");
+  const resetBtn  = document.getElementById("resetBtn");
+  const rankBtn   = document.getElementById("rankBtn");
+  const slotBtn   = document.getElementById("slotBtn");
 
   if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
     console.error("[app.js] 必要DOMが見つかりません");
@@ -116,11 +115,25 @@
   }
 
   /* =========================
-   * ✅ うんちレイヤー（うさぎより上）
+   * ✅ 安全なZ-INDEX設計
+   * - モーダル(BGM等)を潰さない
+   * - うんちは「うさぎより上」だが「モーダルより下」
+   * ========================= */
+  const Z = {
+    UNCHI_LAYER: 120,   // うさぎより上にしたいが、モーダルを邪魔しない低め
+    UNCHI_DROP:  121,
+    HART:        130,   // ハートも同様にモーダルを邪魔しない
+  };
+
+  /* =========================
+   * ✅ うんちレイヤー（うさぎより上 / モーダルより下）
    * ========================= */
   function ensureUnchiLayer() {
     let layer = document.getElementById("unchiLayer");
-    if (layer) return layer;
+    if (layer) {
+      layer.style.zIndex = String(Z.UNCHI_LAYER);
+      return layer;
+    }
 
     layer = document.createElement("div");
     layer.id = "unchiLayer";
@@ -130,7 +143,7 @@
     layer.style.width = "100%";
     layer.style.height = "100%";
     layer.style.pointerEvents = "none"; // 子要素でON
-    layer.style.zIndex = "9990";        // bunnyより上に
+    layer.style.zIndex = String(Z.UNCHI_LAYER);
     field.appendChild(layer);
     return layer;
   }
@@ -265,16 +278,22 @@
     st.textContent = `
       .coin{ width:22px !important; height:22px !important; }
       .ougonunchi{ width:26px !important; height:26px !important; position:absolute; }
+
       .unchiDrop{
         width:24px !important; height:24px !important;
         position:absolute;
         user-select:none; -webkit-user-drag:none;
         pointer-events:auto;
         cursor:pointer;
-        z-index: 9992;
+        z-index:${Z.UNCHI_DROP};
       }
+
       .wbChargeHart {
-        position:absolute; z-index:9999; pointer-events:none; user-select:none; -webkit-user-drag:none;
+        position:absolute;
+        z-index:${Z.HART};
+        pointer-events:none;
+        user-select:none;
+        -webkit-user-drag:none;
         transform: translate(-50%, -50%);
         animation: wbHartBob 1.05s ease-in-out infinite;
         filter: drop-shadow(0 6px 10px rgba(0,0,0,.18));
@@ -548,6 +567,9 @@
     }
   }
 
+  /* =========================
+   * Bunny
+   * ========================= */
   const bunnies = [];
 
   class Bunny {
@@ -569,10 +591,12 @@
       this.wrap.appendChild(this.el);
       bunnyLayer.appendChild(this.wrap);
 
+      // 個体チャージ（ハート）
       this.charge = 0;
       this.chargeReady = false;
       this.hartEl = null;
 
+      // 個体うんちゲージ
       this.unchiCharge = 0;
 
       refreshFieldSize();
@@ -842,10 +866,10 @@
   /* =========================
    * Buttons（emit only）
    * ========================= */
-  shopBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:shop",  {}); });
-  departBtn?.addEventListener("click",() => { unlockAudioOnce(); emit("ui:depart",{}); });
-  rankBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:rank",  {}); });
-  slotBtn?.addEventListener("click",  () => { unlockAudioOnce(); emit("ui:slot",  {}); });
+  shopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
+  departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
+  rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
+  slotBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:slot",   {}); });
 
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
@@ -863,61 +887,76 @@
   }
 
   /* =========================
-   * WB Public API
+   * ✅ WB Public API（上書き禁止：マージ）
+   * - これで WB.bgm / WB.shop / WB.zukan 等が消えない
    * ========================= */
-  window.WB = {
-    on, off, emit,
-    ASSETS, BUNNY_DEFS, LS, DEPART_COST,
-    field, shopBtn, departBtn, rankBtn, resetBtn, slotBtn,
+  (function exportWB() {
+    const prev = (window.WB && typeof window.WB === "object") ? window.WB : {};
 
-    get coins() { return coins; },
-    set coins(v) {
-      coins = Math.max(0, Math.floor(Number(v) || 0));
-      saveCoins();
-      updateHud();
-    },
+    const api = {
+      on, off, emit,
+      ASSETS, BUNNY_DEFS, LS, DEPART_COST,
+      field, shopBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
-    getCoin: () => coins,
-    spendCoin: (n) => {
-      n = Math.floor(Number(n) || 0);
-      if (n <= 0) return true;
-      if (coins < n) return false;
-      coins -= n;
-      saveCoins();
-      updateHud();
-      return true;
-    },
+      get coins() { return coins; },
+      set coins(v) {
+        coins = Math.max(0, Math.floor(Number(v) || 0));
+        saveCoins();
+        updateHud();
+      },
 
-    bunnies,
-    getBunnies: () => bunnies,
-    spawnBunny,
-    removeBunnyInstance,
+      getCoin: () => coins,
+      spendCoin: (n) => {
+        n = Math.floor(Number(n) || 0);
+        if (n <= 0) return true;
+        if (coins < n) return false;
+        coins -= n;
+        saveCoins();
+        updateHud();
+        return true;
+      },
 
-    saveCoins,
-    saveBunnyMeta,
+      bunnies,
+      getBunnies: () => bunnies,
+      spawnBunny,
+      removeBunnyInstance,
 
-    unlockAudioOnce,
-    playSE,
-    getSEVolume,
+      saveCoins,
+      saveBunnyMeta,
 
-    seTabidati,
-    seUnchi,
+      unlockAudioOnce,
+      playSE,
+      getSEVolume,
 
-    updateHud,
+      seTabidati,
+      seUnchi,
 
-    getBunnyCharge: (bornAt) => {
-      const t = Number(bornAt);
-      const b = bunnies.find(x => x && x.bornAt === t);
-      return b ? { charge: b.charge, ready: b.chargeReady, unchi: b.unchiCharge } : null;
-    },
+      updateHud,
 
-    spawnUnchiNearBunny: (bornAt) => {
-      const t = Number(bornAt);
-      const b = bunnies.find(x => x && x.bornAt === t);
-      if (b) spawnUnchiNearBunny(b);
-    },
-  };
+      getBunnyCharge: (bornAt) => {
+        const t = Number(bornAt);
+        const b = bunnies.find(x => x && x.bornAt === t);
+        return b ? { charge: b.charge, ready: b.chargeReady, unchi: b.unchiCharge } : null;
+      },
 
+      spawnUnchiNearBunny: (bornAt) => {
+        const t = Number(bornAt);
+        const b = bunnies.find(x => x && x.bornAt === t);
+        if (b) spawnUnchiNearBunny(b);
+      },
+    };
+
+    window.WB = Object.assign({}, prev, api);
+
+    // 念のためネストも保持
+    if (prev.bgm && !window.WB.bgm) window.WB.bgm = prev.bgm;
+    if (prev.shop && !window.WB.shop) window.WB.shop = prev.shop;
+    if (prev.zukan && !window.WB.zukan) window.WB.zukan = prev.zukan;
+  })();
+
+  /* =========================
+   * Init / Loop
+   * ========================= */
   function initBunnies() {
     const meta = loadBunnyMeta();
 
@@ -961,6 +1000,9 @@
 
   init();
 
+  /* =========================
+   * WB差し替えガード（最低限）
+   * ========================= */
   (function wbRePatchGuard() {
     let last = window.WB;
     setInterval(() => {
@@ -971,6 +1013,11 @@
       if (typeof window.WB.playSE !== "function") window.WB.playSE = playSE;
       if (typeof window.WB.getSEVolume !== "function") window.WB.getSEVolume = getSEVolume;
       if (typeof window.WB.unlockAudioOnce !== "function") window.WB.unlockAudioOnce = unlockAudioOnce;
+
+      // ネストが消えないように（他jsが再代入しても拾う）
+      if (window.WB && last && last.bgm && !window.WB.bgm) window.WB.bgm = last.bgm;
+      if (window.WB && last && last.shop && !window.WB.shop) window.WB.shop = last.shop;
+      if (window.WB && last && last.zukan && !window.WB.zukan) window.WB.zukan = last.zukan;
     }, 300);
   })();
 
