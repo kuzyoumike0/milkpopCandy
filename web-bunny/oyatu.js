@@ -1,34 +1,14 @@
-// oyatu.js（HUD追加：モーダルで選択 + 連打で落とす + 落とす時SE + 60msクール + 拾うと「次のクリック2倍」）v1.4.0
-// ✅ HUDに #oyatuBtn があれば押してモーダルを開く
-// ✅ モーダルでおやつ画像を選択（ランダムも可）
-// ✅ 「落とす」ボタンを連打で複数個落とせる（同時最大数あり）
-// ✅ 落とした瞬間にSE（BGM.jsのSEスライダー追従）
-// ✅ SE最短間隔クールダウン（デフォ60ms）
-// ✅ 落ちたおやつをクリックで拾う → 30秒以内に“1回だけ”うさぎクリック獲得2倍
-// ✅ coinChanged / 監視フォールバック両対応
-// ✅ LS：バフ状態のみ保存（ドロップは多重なので保存しない＝軽量）
-//
-// ✅ NEW: おやつドロップにコイン消費（WB.spendCoin があればそれ優先）
-// - 1個落とすごとに COST_PER_DROP を消費（連打＝連続消費）
-// - 不足なら落とさない＆トースト
-//
-// 画像は assets/oyatu/ に置いてください（このパスで参照）
-// - ./assets/oyatu/candy_candycane_halloween_orange.png
-// - ./assets/oyatu/wataame_white.png
-// - ./assets/oyatu/cupcake_cream_pink_choco.png
-// - ./assets/oyatu/orange_cut.png
-//
-// SEはここに置く（添付SE）
-// - ./assets/se/Onoma-Pop04-1(High-Dry).mp3
-//
-// 読み込み：mirrorball_dance.js の前〜最後の方推奨
-//
-// デバッグ：window.OYATU.open() / window.OYATU.dropNow() / window.OYATU.clearBuff()
+// oyatu.js（HUD追加：モーダルで選択 + 連打で落とす + 落とす時SE + 60msクール + 拾うと「次のクリック2倍」）v1.4.1
+// ✅ v1.4.0 + NEW: うさぎが近づいたら自動で「食べて消える」
+// - おやつが着地後、一定間隔で「近い うさぎ」との距離をチェック
+// - 距離が近いと、赤枠→「ぱくっ」(消える) → バフ付与（拾った扱い）
+// - クリックで拾う挙動も残す（どちらでもOK）
+// - 軽量：最大個数制限 + 追跡tickは120ms + 余計な毎フレーム更新なし
 
 (() => {
   "use strict";
-  if (window.__OYATU_V140__) return;
-  window.__OYATU_V140__ = true;
+  if (window.__OYATU_V141__) return;
+  window.__OYATU_V141__ = true;
 
   const CFG = {
     FIELD_ID: "field",
@@ -52,7 +32,7 @@
     FALL_MS: 820,
 
     // 表示
-    SIZE: 46,      // ✅ 少し小さく
+    SIZE: 46,
     Z: 260000,
 
     // ✅ 落とした瞬間のSE（添付SE）
@@ -69,6 +49,15 @@
 
     // ふわっと消す
     FADE_MS: 160,
+
+    // ✅ NEW: 自動で食べる判定
+    EAT_TICK_MS: 120,          // 軽量チェック
+    EAT_DIST_PX: 46,           // おやつ中心〜うさぎ中心の距離
+    EAT_HINT_MS: 220,          // 近い状態が少し続いたら食べる
+    EAT_OUTLINE: "rgba(255,64,64,.85)",
+
+    // ✅ うさぎ検出セレクタ（環境差分に強く）
+    BUNNY_WRAP_SELECTOR: ".bunnyWrap, .bunny-wrap",
   };
 
   const field = document.getElementById(CFG.FIELD_ID);
@@ -193,7 +182,6 @@
   /* =========================
    * SE（BGM.jsがあれば追従） + 60msクールダウン
    * ========================= */
-  let __oyatuDropFallback = null;
   let __lastDropSeAt = 0;
 
   function playDropSE() {
@@ -218,7 +206,6 @@
       a.src = encodeURI(CFG.OYATU_DROP_SE_SRC);
       a.volume = 0.9;
       a.play().catch(() => {});
-      __oyatuDropFallback = a;
     } catch {}
   }
 
@@ -226,9 +213,9 @@
    * CSS
    * ========================= */
   function ensureCss() {
-    if (document.getElementById("oyatuCssV14")) return;
+    if (document.getElementById("oyatuCssV141")) return;
     const s = document.createElement("style");
-    s.id = "oyatuCssV14";
+    s.id = "oyatuCssV141";
     s.textContent = `
 @keyframes oyatuFallV14{
   0%{ transform:translate3d(var(--x), -90px, 0) rotate(-10deg); opacity:0; }
@@ -252,6 +239,7 @@
   touch-action: manipulation;
   will-change: transform, opacity;
   opacity:0;
+  border-radius: 14px;
 }
 .oyatuDropV14.show{ opacity:1; transition:opacity ${CFG.FADE_MS}ms ease; }
 .oyatuDropV14.hide{ opacity:0; transition:opacity ${CFG.FADE_MS}ms ease; }
@@ -260,6 +248,12 @@
   pointer-events:none;
   image-rendering: pixelated;
   filter: drop-shadow(0 10px 18px rgba(0,0,0,.22));
+}
+
+/* ✅ うさぎが近い時の赤枠（食べる直前） */
+.oyatuDropV14.near{
+  outline: 4px solid ${CFG.EAT_OUTLINE};
+  outline-offset: 2px;
 }
 
 /* バフ表示（右下） */
@@ -328,7 +322,7 @@
   ensureCss();
 
   /* =========================
-   * Buff（30秒以内に1回だけ2倍）※拾ったら再付与/延長
+   * Buff（30秒以内に1回だけ2倍）
    * ========================= */
   function loadBuff() {
     const b = loadJson(CFG.LS_BUFF, null);
@@ -381,7 +375,7 @@
   }
 
   /* =========================
-   * Drops（複数）+ ✅課金
+   * Drops
    * ========================= */
   let dropSeq = 0;
 
@@ -401,9 +395,26 @@
     return (list[Math.floor(Math.random() * list.length)] || list[0]).src;
   }
 
-  function getDropCost(selectedId) {
-    // 今は一律。将来レア度で変えたいならここだけ弄ればOK
+  function getDropCost() {
     return CFG.COST_PER_DROP;
+  }
+
+  // ✅ おやつを消す（共通）
+  function removeDrop(d, reason = "pickup") {
+    if (!d || !d.isConnected) return;
+    if (d.__oyatuRemoving) return;
+    d.__oyatuRemoving = true;
+
+    d.classList.remove("near");
+    d.classList.remove("show");
+    d.classList.add("hide");
+
+    setTimeout(() => { try { d.remove(); } catch {} }, CFG.FADE_MS + 40);
+
+    // バフ付与（拾った扱い）
+    startBuff();
+
+    try { window.WB?.emit?.("oyatu:pickup", { reason, until: Date.now() + CFG.BUFF_WINDOW_MS }); } catch {}
   }
 
   function spawnDrop(selectedId) {
@@ -413,7 +424,7 @@
     }
 
     const WB = window.WB || null;
-    const cost = getDropCost(selectedId);
+    const cost = getDropCost();
 
     // ✅ コイン消費（不足なら落とさない）
     if (!spendCoins(WB, cost)) {
@@ -441,24 +452,21 @@
     d.style.setProperty("--y", `${Math.round(y)}px`);
     d.innerHTML = `<img alt="おやつ">`;
 
+    // 着地後に“食べられる”フラグ（落下中に食べられないように）
+    d.__oyatuLanded = false;
+    d.__nearSince = 0;
+
     const img = d.querySelector("img");
     if (img) {
       img.src = src;
       img.addEventListener("error", () => { img.style.opacity = "0"; }, { once: true });
     }
 
-    // クリックで拾う（無料でバフは同じ）
+    // クリックで拾う（今まで通り）
     d.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-
-      startBuff();
-
-      d.classList.remove("show");
-      d.classList.add("hide");
-      setTimeout(() => { try { d.remove(); } catch {} }, CFG.FADE_MS + 40);
-
-      try { window.WB?.emit?.("oyatu:pickup", { until: Date.now() + CFG.BUFF_WINDOW_MS }); } catch {}
+      removeDrop(d, "click");
     });
 
     field.appendChild(d);
@@ -468,12 +476,93 @@
       d.style.animation = `oyatuFallV14 ${CFG.FALL_MS}ms ease-out forwards`;
       setTimeout(() => {
         if (!d.isConnected) return;
+        d.__oyatuLanded = true;
         d.style.animation = `oyatuBobV14 1.8s ease-in-out infinite`;
       }, CFG.FALL_MS + 10);
     });
 
     try { window.WB?.emit?.("oyatu:drop", { id: String(selectedId || "random"), cost }); } catch {}
     return true;
+  }
+
+  /* =========================
+   * ✅ NEW: うさぎが近づいたら自動で食べる（軽量）
+   * ========================= */
+  function getBunnyWraps() {
+    return $$(CFG.BUNNY_WRAP_SELECTOR, document);
+  }
+
+  function rectCenter(r) {
+    return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 };
+  }
+
+  function dist(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return Math.hypot(dx, dy);
+  }
+
+  function eatTick() {
+    const drops = $$(".oyatuDropV14", field);
+    if (!drops.length) return;
+
+    const bunnies = getBunnyWraps();
+    if (!bunnies.length) return;
+
+    // 先にうさぎRect計算（回数削減）
+    const bunnyCenters = [];
+    for (const bw of bunnies) {
+      if (!bw || !bw.isConnected) continue;
+      const br = bw.getBoundingClientRect();
+      if (!br.width || !br.height) continue;
+      bunnyCenters.push({ el: bw, c: rectCenter(br) });
+    }
+    if (!bunnyCenters.length) return;
+
+    const now = Date.now();
+
+    for (const d of drops) {
+      if (!d || !d.isConnected) continue;
+      if (d.__oyatuRemoving) continue;
+      if (!d.__oyatuLanded) continue; // 落下中は食べない
+
+      const dr = d.getBoundingClientRect();
+      if (!dr.width || !dr.height) continue;
+      const dc = rectCenter(dr);
+
+      // 一番近い うさぎ
+      let best = null;
+      let bestDist = Infinity;
+      for (const b of bunnyCenters) {
+        const dd = dist(dc, b.c);
+        if (dd < bestDist) { bestDist = dd; best = b.el; }
+      }
+
+      const near = bestDist <= CFG.EAT_DIST_PX;
+
+      if (near) {
+        d.classList.add("near");
+        if (!d.__nearSince) d.__nearSince = now;
+
+        // 近い状態が少し続いたら“食べる”
+        if ((now - d.__nearSince) >= CFG.EAT_HINT_MS) {
+          // ぱくっSE（落下SEを流用：軽量）
+          playDropSE();
+
+          // 食べたら消す（クリックと同じ扱い＋理由だけ変える）
+          removeDrop(d, "eat");
+        }
+      } else {
+        d.classList.remove("near");
+        d.__nearSince = 0;
+      }
+    }
+  }
+
+  let eatTimer = 0;
+  function startEatLoop() {
+    if (eatTimer) return;
+    eatTimer = window.setInterval(eatTick, CFG.EAT_TICK_MS);
   }
 
   /* =========================
@@ -587,8 +676,9 @@
         </div>
         <div class="body">
           <div class="hint">
-            「落とす」1個ごとに <b>${CFG.COST_PER_DROP}🪙</b> 消費します（連打＝連続課金）。
-            落ちたおやつを拾うと「次のうさぎクリックが2倍（30秒以内・1回）」になります。
+            「落とす」1個ごとに <b>${CFG.COST_PER_DROP}🪙</b> 消費します（連打＝連続課金）。<br>
+            落ちたおやつは「クリックで拾う」か「近くのうさぎが自動で食べる」どちらでもOK。<br>
+            拾う/食べると「次のうさぎクリックが2倍（30秒以内・1回）」になります。
           </div>
           <div style="height:10px"></div>
 
@@ -670,7 +760,7 @@
     const m = ensureModal();
     $$(".pick", m).forEach(p => p.classList.toggle("on", (p.dataset.pick || "") === selectedId));
     const costEl = m.querySelector("[data-cost]");
-    if (costEl) costEl.textContent = String(getDropCost(selectedId));
+    if (costEl) costEl.textContent = String(getDropCost());
   }
 
   function renderModalMeta() {
@@ -682,7 +772,7 @@
 
     const WB = window.WB || null;
     const coins = readCoinsDirect(WB);
-    const cost = getDropCost(selectedId);
+    const cost = getDropCost();
 
     const coinsEl = m.querySelector("[data-coins]");
     if (coinsEl) coinsEl.textContent = String(coins);
@@ -694,7 +784,7 @@
     if (buffEl) {
       const b = loadBuff();
       if (!b) buffEl.textContent = "なし";
-      else if (b.used) buffEl.textContent = "使用済み（次は拾って再付与）";
+      else if (b.used) buffEl.textContent = "使用済み（次は拾って/食べて再付与）";
       else {
         const left = Math.max(0, b.until - Date.now());
         buffEl.textContent = `有効（残り ${(left / 1000).toFixed(0)}s）`;
@@ -758,6 +848,9 @@
   try { hookCoinChangedIfPossible(window.WB || null); } catch {}
   startCoinWatchFallback();
 
+  // ✅ NEW: 自動で食べるループ開始
+  startEatLoop();
+
   requestAnimationFrame(loop);
 
   window.OYATU = window.OYATU || {};
@@ -766,12 +859,14 @@
   window.OYATU.dropNow = (id = "random") => spawnDrop(String(id));
   window.OYATU.clearBuff = () => { clearBuff(); updateBadge(); };
 
-  console.log("[oyatu] ready v1.4.0 (paid drops)", {
+  console.log("[oyatu] ready v1.4.1 (paid drops + auto eat)", {
     btn: CFG.HUD_BTN_ID,
     costPerDrop: CFG.COST_PER_DROP,
     maxDrops: CFG.MAX_DROPS_ON_FIELD,
     buffMs: CFG.BUFF_WINDOW_MS,
     seCooldownMs: CFG.DROP_SE_COOLDOWN_MS,
     se: CFG.OYATU_DROP_SE_SRC,
+    eatTickMs: CFG.EAT_TICK_MS,
+    eatDistPx: CFG.EAT_DIST_PX,
   });
 })();
