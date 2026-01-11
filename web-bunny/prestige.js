@@ -1,18 +1,13 @@
-// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.5.1
-// ✅ 現在コイン＆ゲージが反映されない問題FIX
-//    - WB.on("coinChanged") を購読して「現在コイン」を常に同期
-//    - coinChanged の増加分で「転生ゲージ（累計獲得）」を加算（slot/放置/回収/何でも拾う）
-// ✅ 転生時：assets/tennchi.png の兎を「既存うさぎと完全に同じ移動」で1体出現（skin差し替え方式）
-// ✅ tennchi は bunny4 より多くコインを落とす（別ドロップループで確実に上）
-// ✅ 1体だけ（重複生成しない）・LSで常駐
-// ✅ 転生ゲージ（累計獲得コイン）
-//    - コインの「増加分」を自動でゲージ加算（減ってもゲージは減らない）
-//    - slot.js 側で WB.prestige.onCoinsGained(win) を呼べば確実（呼ばなくても coinChanged で拾う）
+// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.5.2
+// ✅ FIX: getCoins が 0 固定になる問題修正（__latestCoins を null に）
+// ✅ coinChanged が number / {coins} どちらでも拾う
+// ✅ tennchi 生成を「戻り値優先」で確実化（spawnBunny が Bunny を返す環境に最適）
+// ✅ app.js が emit("coinChanged") すればスロット/回収/放置すべてゲージ反映
 
 (() => {
   "use strict";
-  if (window.__WB_PRESTIGE_V151__) return;
-  window.__WB_PRESTIGE_V151__ = true;
+  if (window.__WB_PRESTIGE_V152__) return;
+  window.__WB_PRESTIGE_V152__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -22,10 +17,8 @@
     MIN_COINS_TO_PRESTIGE: 50000,
     HOLD_MS: 1200,
 
-    // 予備（coinChangedが無い環境の保険）※基本 coinChanged を推奨
     COIN_WATCH_MS: 250,
 
-    // 転生ゲージ（累計獲得）
     LS_EARNED: "wb_prestige_earned_v1",
 
     DEEP_LOCALSTORAGE_WIPE: false,
@@ -48,7 +41,6 @@
       earned: "転生ゲージ（累計獲得）",
     },
 
-    // ===== 転生兎（tennchi）=====
     TENNCHI: {
       LS_ACTIVE: "wb_tennchi_active_v1",
       WRAP_MARK: "data-tennchi",
@@ -170,7 +162,7 @@
   }
 
   /* =========================
-   * ✅ NEW：転生ゲージ（累計獲得コイン）
+   * 転生ゲージ（累計獲得コイン）
    * ========================= */
   function loadEarned() {
     try {
@@ -190,7 +182,6 @@
     earnedCoins = Math.max(0, earnedCoins + d);
     saveEarned(earnedCoins);
 
-    // 開いてる時は即更新
     try {
       const p = panelEl || document.getElementById(PANEL_ID);
       if (p && p.style.display === "block") render();
@@ -205,15 +196,12 @@
   }
 
   /* =========================
-   * ✅ FIX：現在コインの同期（coinChanged 正）
+   * ✅ FIX：現在コインの同期
    * ========================= */
-  let __latestCoins = 0;
-  let __lastCoinForEarn = 0;
+  let __latestCoins = null;        // ← 0固定バグ回避（null=未確定）
+  let __lastCoinForEarn = null;    // ← 初回 coinChanged で確定する
 
-  function getCoins(WB) {
-    // 常に prestige 側が保持している最新値を優先
-    if (Number.isFinite(__latestCoins)) return __latestCoins;
-
+  function readCoinsDirect(WB) {
     try { if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
     try {
       if (WB && ("coins" in WB)) {
@@ -223,6 +211,11 @@
     } catch {}
     const el = document.getElementById("coinValue");
     return el ? (Number(el.textContent) || 0) : 0;
+  }
+
+  function getCoins(WB) {
+    if (__latestCoins !== null && Number.isFinite(__latestCoins)) return __latestCoins;
+    return readCoinsDirect(WB);
   }
 
   function setCoinsZero(WB) {
@@ -286,25 +279,20 @@
   function format(n) { return (Number(n) || 0).toLocaleString(); }
 
   /* =========================
-   * 予備：coinChangedが無い環境用（DOM/プロパティ監視）
+   * coinChanged 無い環境の保険
    * ========================= */
   let __coinWatchTimer = 0;
   function startCoinWatchFallback(WB) {
     stopCoinWatchFallback();
-    let last = getCoins(WB);
+    let last = readCoinsDirect(WB);
     __coinWatchTimer = window.setInterval(() => {
       const wb = window.WB || WB || null;
-      const cur = (() => {
-        try { if (wb && typeof wb.getCoin === "function") return Number(wb.getCoin()) || 0; } catch {}
-        try { if (wb && ("coins" in wb)) { const v = Number(wb.coins); if (Number.isFinite(v)) return v; } } catch {}
-        const el = document.getElementById("coinValue");
-        return el ? (Number(el.textContent) || 0) : 0;
-      })();
-
+      const cur = readCoinsDirect(wb);
       const diff = cur - last;
       if (diff > 0) addEarned(diff, "watchFallback");
       last = cur;
       __latestCoins = cur;
+      if (__lastCoinForEarn === null) __lastCoinForEarn = cur;
     }, CFG.COIN_WATCH_MS);
   }
   function stopCoinWatchFallback() {
@@ -313,7 +301,7 @@
   }
 
   /* =========================
-   * ✅ tennchi：既存うさぎ生成 → 画像だけ差し替え（移動完全同一）
+   * tennchi（地上うさぎ）：確実生成
    * ========================= */
   function isTennchiActive() {
     return localStorage.getItem(CFG.TENNCHI.LS_ACTIVE) === "true";
@@ -356,10 +344,7 @@
 
   function skinToTennchi(b) {
     if (!b) return false;
-    const img =
-      b.img ||
-      b?.wrap?.querySelector?.("img") ||
-      null;
+    const img = b.img || b?.wrap?.querySelector?.("img") || null;
 
     if (img && img.tagName === "IMG") {
       try { img.src = CFG.TENNCHI.IMG; } catch {}
@@ -377,35 +362,46 @@
       } catch {}
     }
     markTennchi(b);
+
+    // 念のため地上へ救出（wrapのtransform運用でもOK）
+    try { if (typeof b.hardClamp === "function") b.hardClamp(true); } catch {}
+    try { if (typeof b.applyPos === "function") b.applyPos(); } catch {}
+
     return true;
   }
 
+  // ✅ spawnBunny が Bunny を返す環境なら「戻り値」を最優先で使う
   function spawnOneNormalBunnyPreferBunny4(WB) {
-    const tryCalls = [
-      () => WB?.addBunny?.("bunny4"),
+    const calls = [
       () => WB?.spawnBunny?.("bunny4"),
       () => WB?.createBunny?.("bunny4"),
+      () => WB?.addBunny?.("bunny4"),
       () => WB?.omukae?.spawn?.("bunny4"),
       () => WB?.omukae?.add?.("bunny4"),
 
-      () => WB?.addBunny?.(),
       () => WB?.spawnBunny?.(),
       () => WB?.createBunny?.(),
+      () => WB?.addBunny?.(),
       () => WB?.omukae?.spawn?.(),
       () => WB?.omukae?.add?.(),
       () => WB?.adopt?.(),
     ];
 
-    for (const f of tryCalls) {
+    const beforeLen = getBunnyList(WB).length;
+    for (const f of calls) {
       try {
-        const before = getBunnyList(WB).length;
         const r = f();
-        const after = getBunnyList(WB).length;
-        if (after > before) return true;
-        if (r && typeof r.then === "function") return true;
+        if (r && typeof r.then === "function") return { ok: true, bunny: null };
+        if (r && typeof r === "object") {
+          // Bunnyインスタンスっぽい
+          const w = r.wrap || r.el || null;
+          if (w) return { ok: true, bunny: r };
+        }
+        const afterLen = getBunnyList(WB).length;
+        if (afterLen > beforeLen) return { ok: true, bunny: null };
       } catch {}
     }
-    return false;
+    return { ok: false, bunny: null };
   }
 
   function pickNewestBunny(WB, prevIds) {
@@ -418,15 +414,13 @@
       if (b?.wrap?.getAttribute?.(CFG.TENNCHI.WRAP_MARK) === "1") continue;
       cand = b;
     }
-    if (cand) return cand;
-    return list[list.length - 1] || null;
+    return cand || list[list.length - 1] || null;
   }
 
   let __tennchiDropTimer = 0;
 
   function startTennchiCoinDropLoop(WB, b) {
     stopTennchiCoinDropLoop();
-
     if (!WB?.spawnCoinDropAt) return;
 
     const pickTier = () => {
@@ -468,6 +462,7 @@
     if (!WB) return null;
     if (!isTennchiActive()) return null;
 
+    // 既に居るなら再スキン＆ドロップ継続
     const exists = findTennchiBunny(WB);
     if (exists) {
       skinToTennchi(exists);
@@ -478,13 +473,16 @@
     const before = getBunnyList(WB);
     const prevIds = new Set(before.map(b => String(b?.bornAt ?? b?.id ?? b?.uuid ?? "")));
 
-    spawnOneNormalBunnyPreferBunny4(WB);
+    // ✅ 生成（戻り値が Bunny ならそれを使う）
+    const sp = spawnOneNormalBunnyPreferBunny4(WB);
 
-    await new Promise(r => setTimeout(r, 80));
-    let b = pickNewestBunny(WB, prevIds);
+    // 生成直後はDOM反映待ち
+    await new Promise(r => setTimeout(r, 90));
+
+    let b = sp.bunny || pickNewestBunny(WB, prevIds);
 
     if (!b) {
-      await new Promise(r => setTimeout(r, 120));
+      await new Promise(r => setTimeout(r, 140));
       b = pickNewestBunny(WB, prevIds);
     }
     if (!b) return null;
@@ -594,7 +592,6 @@
     const st = loadPrestige();
     const coinsNow = getCoins(WB);
 
-    // 転生計算は「累計獲得（ゲージ）」で行う
     const earnedNow = Math.max(earnedCoins, 0);
     const gainStars = calcStarsFromCoins(earnedNow);
 
@@ -672,7 +669,6 @@
       </div>
     `;
 
-    // 購入
     body.querySelectorAll("[data-buy]").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-buy") || "";
@@ -693,7 +689,6 @@
       });
     });
 
-    // 転生（長押し）
     const btnPrestige = body.querySelector("[data-prestige]");
     if (btnPrestige) {
       const fill = btnPrestige.querySelector(".fill");
@@ -742,34 +737,30 @@
 
       const st = loadPrestige();
 
-      // 転生獲得は「累計獲得コイン（ゲージ）」で計算
       const earned = Math.max(0, loadEarned());
       const gain = calcStarsFromCoins(earned);
       if (gain <= 0) return;
 
-      // 1) 星加算
       st.stars += gain;
       st.history = Array.isArray(st.history) ? st.history : [];
       st.history.push({ t: Date.now(), earned, coins: getCoins(WB), stars: gain });
       if (st.history.length > 80) st.history = st.history.slice(-80);
       savePrestige(st);
 
-      // 2) リセット（残高＆うさぎ）
+      // リセット
       setCoinsZero(WB);
       removeAllBunnies(WB);
       deepWipeLocalStorage();
 
-      // 3) 転生ゲージもリセット
       resetEarned();
 
-      // 4) tennchi 1体（移動完全同一）を出す
+      // ✅ 地上tennchi確実生成
       await spawnTennchiOnPrestige(WB);
 
-      // 5) 通知
+      // 通知（reincarnation_pet.js のトリガーにもなる）
       try { WB?.emit?.("prestige", { stars: gain, total: st.stars }); } catch {}
       try { WB?.emit?.("sy:add", { key: "prestige", delta: 1 }); } catch {}
 
-      // 6) UI更新
       render();
     }
   }
@@ -781,28 +772,33 @@
     let hooked = false;
 
     try {
-      if (WB?.on && !WB.__prestigeCoinHookedV151) {
-        WB.on("coinChanged", (v) => {
-          const cur = Number(v);
+      if (WB?.on && !WB.__prestigeCoinHookedV152) {
+        WB.on("coinChanged", (payload) => {
+          // payload: number または {coins: number}
+          const cur = (() => {
+            if (typeof payload === "number") return payload;
+            if (payload && typeof payload === "object" && payload.coins != null) return Number(payload.coins);
+            return Number(payload);
+          })();
+
           if (!Number.isFinite(cur)) return;
 
-          // 最新値
           __latestCoins = cur;
 
-          // 増加分だけゲージ加算（減っても戻らない）
+          if (__lastCoinForEarn === null) __lastCoinForEarn = cur;
+
           const diff = cur - __lastCoinForEarn;
           if (diff > 0) addEarned(diff, "coinChanged");
 
           __lastCoinForEarn = cur;
 
-          // 開いてる時は即更新
           try {
             const p = panelEl || document.getElementById(PANEL_ID);
             if (p && p.style.display === "block") render();
           } catch {}
         });
 
-        WB.__prestigeCoinHookedV151 = true;
+        WB.__prestigeCoinHookedV152 = true;
         hooked = true;
       }
     } catch {}
@@ -812,15 +808,9 @@
 
   // Public API
   waitForWB().then(async (WB) => {
-    // 初回：過去の残高しか無い場合、ゲージを「いまのコイン以上」に補正（自然な初期挙動）
+    // 初期同期
     try {
-      const nowRaw = (() => {
-        try { if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
-        try { if (WB && ("coins" in WB)) { const v = Number(WB.coins); if (Number.isFinite(v)) return v; } } catch {}
-        const el = document.getElementById("coinValue");
-        return el ? (Number(el.textContent) || 0) : 0;
-      })();
-
+      const nowRaw = readCoinsDirect(WB);
       __latestCoins = nowRaw;
       __lastCoinForEarn = nowRaw;
 
@@ -830,10 +820,7 @@
       }
     } catch {}
 
-    // ✅ coinChanged を最優先でフック
     const okHook = hookCoinChanged(WB);
-
-    // ✅ フックできない環境の保険（DOM/プロパティ監視）
     if (!okHook) startCoinWatchFallback(WB);
 
     const api = {
@@ -857,15 +844,12 @@
       config: CFG,
       PERK_MASTER,
 
-      // 外部から明示的に加算（slot.js から呼べる）
       onCoinsGained: (delta, source = "external") => addEarned(delta, source),
       getEarned: () => Math.max(0, loadEarned()),
       resetEarned: () => resetEarned(),
 
-      // 現在コイン（デバッグや他モジュール用）
       getCoins: () => getCoins(window.WB || WB || null),
 
-      // tennchi 操作
       tennchi: {
         isActive: () => isTennchiActive(),
         ensure: () => ensureTennchiExists(window.WB || null),
@@ -884,10 +868,10 @@
       }
     } catch {}
 
-    console.log("[prestige] ready v1.5.1", {
+    console.log("[prestige] ready v1.5.2", {
       LS_PRESTIGE,
       earned: CFG.LS_EARNED,
-      hookCoinChanged: !!(WB?.__prestigeCoinHookedV151),
+      hookCoinChanged: !!(WB?.__prestigeCoinHookedV152),
       fallbackWatchMs: CFG.COIN_WATCH_MS,
       tennchi: CFG.TENNCHI.IMG
     });
