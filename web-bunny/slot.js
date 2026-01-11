@@ -194,17 +194,33 @@
   /* =========================
    * Coin HUD
    * ========================= */
-  function getCoin() {
-    try {
-      // app.js には getCoin() がある
-      if (window.WB && typeof window.WB.getCoin === "function") return Number(window.WB.getCoin()) || 0;
-    } catch {}
-    try {
-      if (window.WB && typeof window.WB.coins === "number") return window.WB.coins;
-    } catch {}
-    const el = $("#coinValue");
-    return el ? Number(el.textContent) || 0 : 0;
-  }
+ function getCoin() {
+  // 1) 最優先：WB.getCoin
+  try {
+    if (window.WB && typeof window.WB.getCoin === "function") {
+      const v = Number(window.WB.getCoin());
+      return Number.isFinite(v) ? v : 0;
+    }
+  } catch {}
+
+  // 2) 次点：WB.coins（getter）
+  try {
+    if (window.WB && typeof window.WB.coins === "number") {
+      const v = Number(window.WB.coins);
+      return Number.isFinite(v) ? v : 0;
+    }
+  } catch {}
+
+  // 3) ✅ 最後の砦：localStorage（app.js と同じキーを使う）
+  try {
+    const key = window.WB?.LS?.coins || "wb_coins_v6";
+    const v = parseInt(localStorage.getItem(key) || "0", 10);
+    return Number.isFinite(v) ? v : 0;
+  } catch {}
+
+  return 0;
+}
+
 
   // ✅ FIX：setCoin したら必ず coinChanged を emit（prestige.js がこれを購読）
   function setCoin(v, source = "slot") {
