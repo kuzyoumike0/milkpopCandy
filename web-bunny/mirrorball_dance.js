@@ -145,7 +145,6 @@
     w = [...document.querySelectorAll("div")].find(el => {
       const id = (el.id || "");
       if (/bgMirrorFXWrap/i.test(id)) return true;
-      // beamっぽい子を持ってるか
       return !!el.querySelector?.('[id^="bgMirrorFXLeft"],[id^="bgMirrorFXRight"],[id*="bgMirrorFXLeft"],[id*="bgMirrorFXRight"],.beam');
     });
     return w || null;
