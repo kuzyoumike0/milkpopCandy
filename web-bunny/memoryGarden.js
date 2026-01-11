@@ -1,45 +1,61 @@
-// memoryGarden.js（V1.1.1 - messages分離対応 + 実績Toastと被らない専用Toast）
+// memoryGarden.js（V1.1.2 - messages分離対応 + 実績Toastと被らない専用Toast + 出やすさ調整）
 // ✅ localStorage永続化
 // ✅ WBイベントから「感情の種」を自動生成
 // ✅ 放置で成長 → 完了時に3行小説「記憶」ログ生成（messages分離）
 // ✅ ゲームメニューに「🌱 記憶の庭」を追加
 // ✅ 図鑑(zukan)に「記憶」タブを後付け（パッチ）
-// ✅ 重要：実績(zisseki)トーストと被らない（専用トースト＆キュー）
+// ✅ 実績(zisseki)トーストと被らない（専用トースト＆キュー）
+//
+// ★調整（あなた指定）
+// - 放置種：5分
+// - 成長時間：8分（全感情共通）
+// - よろこび発生：コイン増加2000ごと
+// - 連続発生制限：35秒
+// - 完了時：1tickで最大4つまで記憶化
 //
 // 読み込み順：zukan.js / gameMenu.js の後（できれば最後）
 // さらに：memoryGarden_messages.js をこの前に読み込む
 
 (() => {
   "use strict";
-  if (window.__MEMORY_GARDEN_V111__) return;
-  window.__MEMORY_GARDEN_V111__ = true;
+  if (window.__MEMORY_GARDEN_V112__) return;
+  window.__MEMORY_GARDEN_V112__ = true;
 
-  const VERSION = "1.1.1";
+  const VERSION = "1.1.2";
   const LS_KEY = "milkpop_memory_garden_v1";
 
   const CFG = {
     tickMs: 1500,
-    idleSeedAfterMs: 25 * 60 * 1000,
+
+    // ✅ 放置種：5分
+    idleSeedAfterMs: 5 * 60 * 1000,
+
     maxSeeds: 9,
+
+    // ✅ 成長時間：8分（hours換算：8/60）
     growHours: {
-      yorokobi: 6,
-      yasashisa: 5,
-      omoide: 7,
-      akirame: 10,
-      kuyashisa: 6,
-      sabishisa: 8,
+      yorokobi: 8 / 60,
+      yasashisa: 8 / 60,
+      omoide: 8 / 60,
+      akirame: 8 / 60,
+      kuyashisa: 8 / 60,
+      sabishisa: 8 / 60,
     },
-    coinJoyUnit: 1200,
+
+    // ✅ よろこび発生：2000コインごと
+    coinJoyUnit: 2000,
+
+    // ✅ 連続発生制限：35秒
     minSeedIntervalMs: 35 * 1000,
 
     // ✅ Toast配置（実績と被らない）
     toast: {
       right: 12,
-      top: 64,            // HUD下あたり（右上）
+      top: 64,
       maxWidth: 320,
       showMs: 1700,
-      gapMs: 900,         // 連続表示の間隔
-      delayIfOtherToastMs: 550, // 他トーストが居たら少し待つ
+      gapMs: 900,
+      delayIfOtherToastMs: 550,
       prefix: "🌿 記憶の庭：",
     },
   };
@@ -190,7 +206,9 @@
     }
 
     const done = store.seeds.filter(s => (Number(s.growth) || 0) >= 1);
-    for (const s of done.slice(0, 2)) completeSeed(s);
+
+    // ✅ 完了時：1tickで最大4つまで
+    for (const s of done.slice(0, 4)) completeSeed(s);
 
     const idle = t - (Number(store.stats.lastActionAt || t));
     if (idle >= CFG.idleSeedAfterMs) {
