@@ -1,13 +1,16 @@
-// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.5.2
-// ✅ FIX: getCoins が 0 固定になる問題修正（__latestCoins を null に）
+// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.5.3
+// ✅ FIX: 転生うさぎ（tennshi）が “赤ちゃん生成” で app.js の syncSprite に上書きされる問題を根治
+//    - 生成時に bornAt を十分過去にして「大人」で生成（画像維持）
+// ✅ FIX: 転生直後の座標バグ（空中/画面外）対策：hardClamp/applyPos + rescue emit
+// ✅ FIX: spawnBunny 戻り値（Bunny）を最優先で確実化
+// ✅ FIX: skin対象 img の拾い方を強化（b.el / b.img / wrap内img）
 // ✅ coinChanged が number / {coins} どちらでも拾う
-// ✅ tennchi 生成を「戻り値優先」で確実化（spawnBunny が Bunny を返す環境に最適）
-// ✅ app.js が emit("coinChanged") すればスロット/回収/放置すべてゲージ反映
+// ✅ app.js が emit("coinChanged") すればスロット/回収/放置すべてゲージ反映（無い場合はwatchFallback）
 
 (() => {
   "use strict";
-  if (window.__WB_PRESTIGE_V152__) return;
-  window.__WB_PRESTIGE_V152__ = true;
+  if (window.__WB_PRESTIGE_V153__) return;
+  window.__WB_PRESTIGE_V153__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -41,11 +44,17 @@
       earned: "転生ゲージ（累計獲得）",
     },
 
+    // ※名前は TENNCHI のまま互換維持（内部はtennshi運用）
     TENNCHI: {
       LS_ACTIVE: "wb_tennchi_active_v1",
+
+      // wrapに付く印（※tennshi表記に統一）
       WRAP_MARK: "data-tennshi",
+
+      // ✅ 画像
       IMG: "./assets/tennshi.png",
 
+      // コイン落とし
       dropEveryMs: 2300,
       dropCount: 3,
       tierMin: 2,
@@ -198,8 +207,8 @@
   /* =========================
    * ✅ FIX：現在コインの同期
    * ========================= */
-  let __latestCoins = null;        // ← 0固定バグ回避（null=未確定）
-  let __lastCoinForEarn = null;    // ← 初回 coinChanged で確定する
+  let __latestCoins = null;        // null=未確定
+  let __lastCoinForEarn = null;    // 初回確定
 
   function readCoinsDirect(WB) {
     try { if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
@@ -239,8 +248,11 @@
       }
     } catch {}
     try { if (WB && Array.isArray(WB.bunnies)) WB.bunnies.length = 0; } catch {}
+
+    // DOM掃除
     try { document.querySelectorAll(".bunnyWrap, .bunny-wrap").forEach(el => { try { el.remove(); } catch {} }); } catch {}
     try { document.querySelectorAll(".wbChargeHart").forEach(el => { try { el.remove(); } catch {} }); } catch {}
+
     try { WB?.emit?.("bunnyCountChanged", { count: 0 }); } catch {}
     return true;
   }
@@ -304,10 +316,10 @@
    * tennshi（地上うさぎ）：確実生成
    * ========================= */
   function isTennshiActive() {
-    return localStorage.getItem(CFG.TENNSHI.LS_ACTIVE) === "true";
+    return localStorage.getItem(CFG.TENNCHI.LS_ACTIVE) === "true";
   }
   function setTennshiActive(on) {
-    try { localStorage.setItem(CFG.TENNSHI.LS_ACTIVE, on ? "true" : "false"); } catch {}
+    try { localStorage.setItem(CFG.TENNCHI.LS_ACTIVE, on ? "true" : "false"); } catch {}
   }
 
   function getBunnyList(WB) {
@@ -326,13 +338,13 @@
     for (const b of list) {
       const w = b?.wrap;
       if (w?.getAttribute?.(CFG.TENNCHI.WRAP_MARK) === "1") return b;
-      if (b?.isTennchi === true) return b;
+      if (b?.isTennchi === true || b?.isTennshi === true) return b;
     }
     return null;
   }
 
   function markTennchi(b) {
-    try { b.isTennchi = true; } catch {}
+    try { b.isTennchi = true; b.isTennshi = true; } catch {}
     try {
       const w = b?.wrap;
       if (w?.setAttribute) {
@@ -342,44 +354,73 @@
     } catch {}
   }
 
-  function skinToTennchi(b) {
-    if (!b) return false;
-    const img = b.img || b?.wrap?.querySelector?.("img") || null;
+  function pickImgElFromBunny(b) {
+    // app.js: b.el がIMG
+    const cand = b?.el || b?.img || null;
+    if (cand && cand.tagName === "IMG") return cand;
+    try {
+      const w = b?.wrap;
+      const im = w?.querySelector?.("img");
+      if (im && im.tagName === "IMG") return im;
+    } catch {}
+    return null;
+  }
 
-    if (img && img.tagName === "IMG") {
+  function rescueToGround(WB, b) {
+    // 空中・画面外抑止
+    try { if (typeof b?.hardClamp === "function") b.hardClamp(true); } catch {}
+    try { if (typeof b?.applyPos === "function") b.applyPos(); } catch {}
+
+    // app.js の救出処理があれば呼ぶ
+    try { WB?.emit?.("resize", {}); } catch {}
+    try { WB?.emit?.("bunnyCountChanged", { count: getBunnyList(WB).length }); } catch {}
+  }
+
+  function skinToTennchi(WB, b) {
+    if (!b) return false;
+
+    const img = pickImgElFromBunny(b);
+
+    if (img) {
       try { img.src = CFG.TENNCHI.IMG; } catch {}
-      try { img.alt = "tennchi"; } catch {}
+      try { img.alt = "tennshi"; } catch {}
     } else {
       try {
         const w = b.wrap;
-        if (w && !w.querySelector("img")) {
+        if (w) {
           const im = document.createElement("img");
           im.src = CFG.TENNCHI.IMG;
-          im.alt = "tennchi";
+          im.alt = "tennshi";
           im.draggable = false;
           w.appendChild(im);
         }
       } catch {}
     }
+
     markTennchi(b);
-
-    // 念のため地上へ救出（wrapのtransform運用でもOK）
-    try { if (typeof b.hardClamp === "function") b.hardClamp(true); } catch {}
-    try { if (typeof b.applyPos === "function") b.applyPos(); } catch {}
-
+    rescueToGround(WB, b);
     return true;
   }
 
-  // ✅ spawnBunny が Bunny を返す環境なら「戻り値」を最優先で使う
+  // ✅ “大人” bornAt（赤ちゃん扱い→後でsyncSpriteで戻るのを防ぐ）
+  function adultBornAt() {
+    return Date.now() - (10 * 60 * 1000); // 10分前なら確実に大人
+  }
+
+  // ✅ spawnBunnyがあるなら最優先で使い、戻り値Bunnyを掴む
   function spawnOneNormalBunnyPreferBunny4(WB) {
+    const bornAt = adultBornAt();
+
     const calls = [
-      () => WB?.spawnBunny?.("bunny4"),
+      // app.js の spawnBunny(kind, bornAt) を最優先で試す
+      () => (WB?.spawnBunny?.length >= 2 ? WB.spawnBunny("bunny4", bornAt) : WB?.spawnBunny?.("bunny4")),
       () => WB?.createBunny?.("bunny4"),
       () => WB?.addBunny?.("bunny4"),
       () => WB?.omukae?.spawn?.("bunny4"),
       () => WB?.omukae?.add?.("bunny4"),
 
-      () => WB?.spawnBunny?.(),
+      // fallback
+      () => (WB?.spawnBunny?.length >= 2 ? WB.spawnBunny("bunny1", bornAt) : WB?.spawnBunny?.("bunny1")),
       () => WB?.createBunny?.(),
       () => WB?.addBunny?.(),
       () => WB?.omukae?.spawn?.(),
@@ -388,19 +429,25 @@
     ];
 
     const beforeLen = getBunnyList(WB).length;
+
     for (const f of calls) {
       try {
         const r = f();
+
+        // asyncっぽい
         if (r && typeof r.then === "function") return { ok: true, bunny: null };
-        if (r && typeof r === "object") {
-          // Bunnyインスタンスっぽい
-          const w = r.wrap || r.el || null;
-          if (w) return { ok: true, bunny: r };
+
+        // Bunnyインスタンスっぽい（wrapがある）
+        if (r && typeof r === "object" && (r.wrap || r.el || r.img)) {
+          return { ok: true, bunny: r };
         }
+
+        // 配列長で増加確認
         const afterLen = getBunnyList(WB).length;
         if (afterLen > beforeLen) return { ok: true, bunny: null };
       } catch {}
     }
+
     return { ok: false, bunny: null };
   }
 
@@ -429,7 +476,7 @@
     };
 
     __tennchiDropTimer = window.setInterval(() => {
-      if (!isTennchiActive()) return;
+      if (!isTennshiActive()) return;
 
       const bb = findTennchiBunny(WB) || b;
       const w = bb?.wrap;
@@ -460,12 +507,12 @@
 
   async function ensureTennchiExists(WB) {
     if (!WB) return null;
-    if (!isTennchiActive()) return null;
+    if (!isTennshiActive()) return null;
 
     // 既に居るなら再スキン＆ドロップ継続
     const exists = findTennchiBunny(WB);
     if (exists) {
-      skinToTennchi(exists);
+      skinToTennchi(WB, exists);
       startTennchiCoinDropLoop(WB, exists);
       return exists;
     }
@@ -476,30 +523,38 @@
     // ✅ 生成（戻り値が Bunny ならそれを使う）
     const sp = spawnOneNormalBunnyPreferBunny4(WB);
 
-    // 生成直後はDOM反映待ち
-    await new Promise(r => setTimeout(r, 90));
+    // DOM反映を待つ（2フレーム）
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
     let b = sp.bunny || pickNewestBunny(WB, prevIds);
 
     if (!b) {
-      await new Promise(r => setTimeout(r, 140));
+      await new Promise(r => setTimeout(r, 120));
       b = pickNewestBunny(WB, prevIds);
     }
     if (!b) return null;
 
-    skinToTennchi(b);
+    // ✅ スキン適用 + rescue
+    skinToTennchi(WB, b);
+
+    // 念押し：少し後にもう一回 rescue（転生直後のレイアウト変化対策）
+    setTimeout(() => {
+      try { rescueToGround(WB, b); } catch {}
+      try { skinToTennchi(WB, b); } catch {}
+    }, 120);
+
     startTennchiCoinDropLoop(WB, b);
     return b;
   }
 
   async function spawnTennchiOnPrestige(WB) {
-    setTennchiActive(true);
+    setTennshiActive(true);
     const b = await ensureTennchiExists(WB);
     return b;
   }
 
   function removeTennchi(WB) {
-    setTennchiActive(false);
+    setTennshiActive(false);
     stopTennchiCoinDropLoop();
 
     const b = findTennchiBunny(WB);
@@ -754,10 +809,19 @@
 
       resetEarned();
 
-      // ✅ 地上tennchi確実生成
+      // ✅ 地上tennshi確実生成（大人bornAtで生成→画像が戻らない）
       await spawnTennchiOnPrestige(WB);
 
-      // 通知（reincarnation_pet.js のトリガーにもなる）
+      // ✅ 念押し rescue（転生直後の座標バグ対策）
+      try {
+        const b = findTennchiBunny(WB);
+        if (b) {
+          rescueToGround(WB, b);
+          setTimeout(() => { try { rescueToGround(WB, b); } catch {} }, 180);
+        }
+      } catch {}
+
+      // 通知
       try { WB?.emit?.("prestige", { stars: gain, total: st.stars }); } catch {}
       try { WB?.emit?.("sy:add", { key: "prestige", delta: 1 }); } catch {}
 
@@ -772,9 +836,8 @@
     let hooked = false;
 
     try {
-      if (WB?.on && !WB.__prestigeCoinHookedV152) {
+      if (WB?.on && !WB.__prestigeCoinHookedV153) {
         WB.on("coinChanged", (payload) => {
-          // payload: number または {coins: number}
           const cur = (() => {
             if (typeof payload === "number") return payload;
             if (payload && typeof payload === "object" && payload.coins != null) return Number(payload.coins);
@@ -798,7 +861,7 @@
           } catch {}
         });
 
-        WB.__prestigeCoinHookedV152 = true;
+        WB.__prestigeCoinHookedV153 = true;
         hooked = true;
       }
     } catch {}
@@ -851,7 +914,7 @@
       getCoins: () => getCoins(window.WB || WB || null),
 
       tennchi: {
-        isActive: () => isTennchiActive(),
+        isActive: () => isTennshiActive(),
         ensure: () => ensureTennchiExists(window.WB || null),
         spawn: () => spawnTennchiOnPrestige(window.WB || null),
         remove: () => removeTennchi(window.WB || null),
@@ -863,17 +926,17 @@
 
     // リロード後も常駐
     try {
-      if (WB && isTennchiActive()) {
+      if (WB && isTennshiActive()) {
         await ensureTennchiExists(WB);
       }
     } catch {}
 
-    console.log("[prestige] ready v1.5.2", {
+    console.log("[prestige] ready v1.5.3", {
       LS_PRESTIGE,
       earned: CFG.LS_EARNED,
-      hookCoinChanged: !!(WB?.__prestigeCoinHookedV152),
+      hookCoinChanged: !!(WB?.__prestigeCoinHookedV153),
       fallbackWatchMs: CFG.COIN_WATCH_MS,
-      tennchi: CFG.TENNCHI.IMG
+      tennshi: CFG.TENNCHI.IMG
     });
   });
 })();
