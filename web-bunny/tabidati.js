@@ -1,10 +1,9 @@
-// tabidati.js（v14.0：✅旅立ちUIをtabidati.js内で生成 + 赤帯ヒント + ボタンON強調 + 赤枠選択 + クリックで旅立ち）
-// - index.html に #departBtn があればそれを使う（生成しない）
-// - 無ければ HUD列(#hudButtons)に旅立ちボタンを自動生成
-// - 旅立ちモード中：赤帯ヒントをHUD下に固定表示
-// - 旅立ちモード中：うさぎ hover で赤枠 / クリックしたうさぎは “選択” 赤枠 → 旅立ち完了で消える
-// - app.js の emit("ui:depart") でもトグル可
-// - WBがまだ無いタイミングでも待機して確実に初期化
+// tabidati.js（v14.2：✅既存 #departBtn 優先 + 旅立ちクリックを“確実に勝たせる” + 赤帯 + 選択赤枠）
+// - index.html に #departBtn があれば必ずそれを使う（＝二重UI根絶）
+// - 旅立ちモード中：HUD下に赤帯ヒント固定
+// - 旅立ちモード中：hover赤枠 + 選択したうさぎは赤枠保持 → 旅立ち完了で解除
+// - 旅立ちクリックは capture+stopImmediatePropagation で “app.js のコイン生成クリック” より優先
+// - WBがまだ無い場合は待機して確実に初期化
 
 (() => {
   "use strict";
@@ -40,52 +39,58 @@
     const getCost = () => (Number.isFinite(WB.DEPART_COST) ? WB.DEPART_COST : DEFAULT_COST);
 
     let departMode = false;
+    let busy = false;
 
-    // ✅ 既存HUDボタンID（index.html が用意してる場合）
-    const LEGACY_BTN_ID = "departBtn";
-    // ✅ 無い時に tabidati.js が作るボタンID
-    const AUTO_BTN_ID = "departBtnAutoV1";
-
-    // ✅ 赤帯ヒント
-    const BANNER_ID = "departModeBannerV1";
-
-    // ✅ 選択枠
-    const TARGET_CLASS = "departTargetV1";
+    const LEGACY_BTN_ID = "departBtn";     // index.html のボタン
+    const AUTO_BTN_ID   = "departBtnAuto"; // 無い時だけ作る
+    const BANNER_ID     = "departModeBannerV1";
+    const TARGET_CLASS  = "departTargetV1";
 
     /* =========================
-     * Helpers（WB互換）
+     * Helpers
      * ========================= */
     function getBunnyList() {
-      if (typeof WB.getBunnies === "function") return WB.getBunnies();
-      if (Array.isArray(WB.bunnies)) return WB.bunnies;
+      try {
+        if (typeof WB.getBunnies === "function") return WB.getBunnies();
+        if (Array.isArray(WB.bunnies)) return WB.bunnies;
+      } catch {}
       return [];
     }
 
     function getCoins() {
-      if (typeof WB.getCoin === "function") return WB.getCoin();
-      if (typeof WB.coins === "number") return WB.coins;
+      try { if (typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
+      try { if (typeof WB.coins === "number") return Number(WB.coins) || 0; } catch {}
       return 0;
     }
 
     function spendCoins(amount) {
-      if (typeof WB.spendCoin === "function") return WB.spendCoin(amount);
-      if (typeof WB.coins === "number") {
-        if (WB.coins < amount) return false;
-        WB.coins -= amount;
-        WB.saveCoins?.();
-        WB.updateHud?.();
-        return true;
-      }
+      amount = Math.floor(Number(amount) || 0);
+      if (amount <= 0) return true;
+
+      try {
+        if (typeof WB.spendCoin === "function") return !!WB.spendCoin(amount);
+      } catch {}
+
+      try {
+        if (typeof WB.coins === "number") {
+          if (WB.coins < amount) return false;
+          WB.coins -= amount;
+          WB.saveCoins?.();
+          WB.updateHud?.();
+          return true;
+        }
+      } catch {}
+
       return false;
     }
 
     /* =========================
-     * Style / UI
+     * Styles / UI
      * ========================= */
-    function ensureUIStyles() {
-      if (document.getElementById("tabidatiUIStyleV14")) return;
+    function ensureStyles() {
+      if (document.getElementById("tabidatiUIStyleV142")) return;
       const s = document.createElement("style");
-      s.id = "tabidatiUIStyleV14";
+      s.id = "tabidatiUIStyleV142";
       s.textContent = `
 /* ===== Toast ===== */
 .tabidatiToast{
@@ -115,7 +120,7 @@
 #${BANNER_ID}{
   position: fixed;
   left: 50%;
-  top: 56px; /* HUDが上にある前提。必要なら少し調整 */
+  top: 54px;
   transform: translateX(-50%);
   z-index: 2147483647;
   background: rgba(255, 56, 56, .92);
@@ -129,16 +134,15 @@
   pointer-events: none;
 }
 
-/* ===== 旅立ちボタン ON 表示（点滅なしの上品強調） ===== */
+/* ===== 旅立ちボタン ON（上品強調・点滅なし） ===== */
 #${LEGACY_BTN_ID}.on, #${AUTO_BTN_ID}.on{
   background: rgba(255, 64, 64, .14) !important;
-  color: inherit !important;
   outline: 3px solid rgba(255,64,64,.72) !important;
   outline-offset: 2px;
-  box-shadow: 0 10px 26px rgba(255,64,64,.18);
+  box-shadow: 0 10px 26px rgba(255,64,64,.18) !important;
 }
 
-/* ===== 旅立ちモード中：うさぎに赤枠（hover） ===== */
+/* ===== モード中 hover 赤枠 ===== */
 body.departModeOn .bunnyWrap{ outline: none; }
 body.departModeOn .bunnyWrap:hover{
   outline: 5px solid rgba(255, 64, 64, .95);
@@ -147,7 +151,7 @@ body.departModeOn .bunnyWrap:hover{
   box-shadow: 0 0 0 6px rgba(255,64,64,.14);
 }
 
-/* ===== 選択したうさぎ：赤枠を保持 ===== */
+/* ===== 選択保持 赤枠 ===== */
 body.departModeOn .bunnyWrap.${TARGET_CLASS}{
   outline: 5px solid rgba(255, 64, 64, .98);
   outline-offset: 3px;
@@ -168,7 +172,7 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
     }
 
     function toast(msg) {
-      ensureUIStyles();
+      ensureStyles();
       const text = String(msg ?? "").trim();
       if (!text) return;
       const el = document.createElement("div");
@@ -179,12 +183,12 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
     }
 
     function ensureBanner() {
-      ensureUIStyles();
+      ensureStyles();
       let el = document.getElementById(BANNER_ID);
       if (el) return el;
       el = document.createElement("div");
       el.id = BANNER_ID;
-      el.textContent = "✈️ 旅立ちモード：うさぎをクリックで旅立ち（もう一度押すとOFF）";
+      el.textContent = "旅立ちモード：うさぎをクリックで旅立ち（もう一度押すとOFF）";
       document.body.appendChild(el);
       return el;
     }
@@ -202,16 +206,16 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
     }
 
     /* =========================
-     * Button (existing-first)
+     * Button
      * ========================= */
     function ensureDepartButton() {
-      ensureUIStyles();
+      ensureStyles();
 
-      // ✅ 1) 既存の #departBtn があればそれを使う
+      // ✅ 既存 #departBtn を最優先
       const legacy = document.getElementById(LEGACY_BTN_ID);
       if (legacy) {
-        if (!legacy.__tabidatiBoundV14) {
-          legacy.__tabidatiBoundV14 = true;
+        if (!legacy.__tabidatiBoundV142) {
+          legacy.__tabidatiBoundV142 = true;
           legacy.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -222,7 +226,7 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
         return legacy;
       }
 
-      // ✅ 2) 無ければ自動生成（HUD列に追加）
+      // 無い時だけ生成
       let btn = document.getElementById(AUTO_BTN_ID);
       if (btn) return btn;
 
@@ -257,13 +261,10 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
      * ========================= */
     function setDepartMode(on) {
       departMode = !!on;
-
       updateBtnUI();
       try { document.body.classList.toggle("departModeOn", departMode); } catch {}
       setBannerVisible(departMode);
-
       if (!departMode) clearTargets();
-
       toast(departMode ? "✈️ 旅立ちモード：ON（うさぎをクリック）" : "🛑 旅立ちモード：OFF");
     }
 
@@ -275,68 +276,73 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
      * Depart core
      * ========================= */
     async function departBunny(bunny) {
-      if (!bunny) return false;
+      if (!bunny || busy) return false;
+      busy = true;
 
-      const list = getBunnyList();
-      if (list.length <= 1) {
-        toast("最後の1匹は旅立たせられないよ");
-        return false;
-      }
-
-      const cost = getCost();
-      if (getCoins() < cost) {
-        toast(`コイン不足（必要：${cost}🪙）`);
-        return false;
-      }
-      if (!spendCoins(cost)) {
-        toast(`コイン不足（必要：${cost}🪙）`);
-        return false;
-      }
-
-      try { if (WB.playSE && WB.seTabidati) WB.playSE(WB.seTabidati); } catch {}
-
-      try { WB.recordFarewell?.(bunny.kind || bunny.adultSrc || ""); } catch {}
-      try { WB.showFarewellMessage?.(bunny.kind || ""); } catch {}
-
-      // hart消し
-      try { bunny.hideHeart?.(); } catch {}
-      try { bunny.hartEl?.remove?.(); } catch {}
-      try { bunny.wrap?.querySelector?.(".wbChargeHart")?.remove?.(); } catch {}
-
-      // アニメ
-      const w = bunny.wrap;
       try {
-        if (w) {
-          w.classList.add("departing");
-          await new Promise((r) => setTimeout(r, 520));
+        const list = getBunnyList();
+        if (list.length <= 1) {
+          toast("最後の1匹は旅立たせられないよ");
+          return false;
         }
-      } catch {}
 
-      // remove
-      let removed = false;
-      if (typeof WB.removeBunnyInstance === "function") {
-        try { removed = !!WB.removeBunnyInstance(bunny); } catch { removed = false; }
+        const cost = getCost();
+        if (getCoins() < cost) {
+          toast(`コイン不足（必要：${cost}🪙）`);
+          return false;
+        }
+        if (!spendCoins(cost)) {
+          toast(`コイン不足（必要：${cost}🪙）`);
+          return false;
+        }
+
+        try { if (WB.playSE && WB.seTabidati) WB.playSE(WB.seTabidati); } catch {}
+
+        try { WB.recordFarewell?.(bunny.kind || bunny.adultSrc || ""); } catch {}
+        try { WB.showFarewellMessage?.(bunny.kind || ""); } catch {}
+
+        // hart消し
+        try { bunny.hideHeart?.(); } catch {}
+        try { bunny.hartEl?.remove?.(); } catch {}
+        try { bunny.wrap?.querySelector?.(".wbChargeHart")?.remove?.(); } catch {}
+
+        // アニメ
+        const w = bunny.wrap;
+        try {
+          if (w) {
+            w.classList.add("departing");
+            await new Promise((r) => setTimeout(r, 520));
+          }
+        } catch {}
+
+        // remove
+        let removed = false;
+        if (typeof WB.removeBunnyInstance === "function") {
+          try { removed = !!WB.removeBunnyInstance(bunny); } catch { removed = false; }
+        }
+        if (!removed) {
+          const idx = list.indexOf(bunny);
+          if (idx >= 0) list.splice(idx, 1);
+          try { w?.remove?.(); } catch {}
+          try { WB.saveBunnyMeta?.(); } catch {}
+          try { WB.emit?.("bunnyCountChanged", { count: list.length }); } catch {}
+        }
+
+        // 実績/称号通知
+        try { window.SYOUGOU?.add?.("tabidachi", 1); } catch {}
+        try { WB.emit?.("tabidachi"); } catch {}
+
+        // 選択枠解除
+        try { bunny.wrap?.classList.remove(TARGET_CLASS); } catch {}
+
+        return true;
+      } finally {
+        busy = false;
       }
-      if (!removed) {
-        const idx = list.indexOf(bunny);
-        if (idx >= 0) list.splice(idx, 1);
-        try { w?.remove?.(); } catch {}
-        try { WB.saveBunnyMeta?.(); } catch {}
-        try { WB.emit?.("bunnyCountChanged", { count: list.length }); } catch {}
-      }
-
-      // ✅ 実績/称号通知
-      try { window.SYOUGOU?.add?.("tabidachi", 1); } catch {}
-      try { WB.emit?.("tabidachi"); } catch {}
-
-      // ✅ 選択枠は解除
-      try { w?.classList.remove(TARGET_CLASS); } catch {}
-
-      return true;
     }
 
     /* =========================
-     * Click to depart（capture）
+     * Click capture（旅立ちモード中は最優先で勝つ）
      * ========================= */
     function onPointerDownCapture(e) {
       if (!departMode) return;
@@ -345,14 +351,14 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
       const wrap = e.target?.closest?.(".bunnyWrap");
       if (!wrap) return;
 
-      // ✅ “選択枠”を付け替え
+      // ✅ 最優先で止める（app.js のコイン生成を確実に止める）
+      try { e.preventDefault(); } catch {}
+      try { e.stopPropagation(); } catch {}
+      try { e.stopImmediatePropagation?.(); } catch {}
+
+      // ✅ 選択枠
       clearTargets();
       wrap.classList.add(TARGET_CLASS);
-
-      // ✅ 旅立ち中はコイン生成クリック等を止める
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
 
       const list = getBunnyList();
       const bunny = list.find((b) => b && b.wrap === wrap);
@@ -370,8 +376,8 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
 
     // ✅ app.js の emit("ui:depart") でもトグル
     try {
-      if (typeof WB.on === "function" && !WB.__tabidatiUiDepartBoundV14) {
-        WB.__tabidatiUiDepartBoundV14 = true;
+      if (typeof WB.on === "function" && !WB.__tabidatiUiDepartBoundV142) {
+        WB.__tabidatiUiDepartBoundV142 = true;
         WB.on("ui:depart", () => {
           try { WB.unlockAudioOnce?.(); } catch {}
           toggleDepartMode();
@@ -379,19 +385,12 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
       }
     } catch {}
 
+    // ✅ captureで先に取る
     document.addEventListener("pointerdown", onPointerDownCapture, true);
 
-    /* =========================
-     * Public
-     * ========================= */
-    WB.tabidati = {
-      setDepartMode,
-      toggleDepartMode,
-      departBunny,
-      get departMode() { return departMode; },
-    };
+    WB.tabidati = { setDepartMode, toggleDepartMode, departBunny, get departMode(){ return departMode; } };
 
-    console.log("[tabidati] ready v14.0 (UI included)", {
+    console.log("[tabidati] ready v14.2", {
       usingBtn: (document.getElementById(LEGACY_BTN_ID) ? LEGACY_BTN_ID : AUTO_BTN_ID),
     });
   }).catch((e) => {
