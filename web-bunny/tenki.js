@@ -1,4 +1,4 @@
-// tenki.js（UFO強化 + 特殊演出PNGランダム表示：軽量化版）
+// tenki.js（UFO強化 + 特殊演出PNGランダム表示：軽量化版 + ✅雨/雪SEループ）
 // ✅ UFO.mp3 を SEスライダーに紐づけ（WB.se.loop） + ITEMより上
 // ✅ UFOは ITEM（ベッド/ミラーボール/oak）より上に表示：超高z-index
 // ✅ UFO出現中は UFO.mp3 をずっと鳴らし続ける（ループ）
@@ -6,6 +6,7 @@
 // ✅ BGM.js が無い場合はフォールバックで鳴る
 // ✅ UFO出現を “もう少しレア” に
 // ✅ 追加：assets/tenki の PNG（大雨/大雪/雷/オーロラ/桜/紅葉）をランダムで表示（UFOより下）
+// ✅ 追加：雨(rain)/雪(snow) のときだけ assets/tenki 内のSEをループ再生（WB.se.loop追従）
 // ✅ 重要：PNG演出で重くならないように軽量化
 //    - specialは <div background-image> で表示（imgより軽いことが多い）
 //    - JSで毎フレームtransform更新しない（CSSアニメに移行）
@@ -25,6 +26,12 @@
   const UFO_IMG_SRC = "./assets/tenki/UFO.png";
   const UFO_SE_SRC  = "./assets/UFO.mp3";
   const UFO_SE_BASE = 1.0;
+
+  // ✅ 特殊演出SE（assets/tenki の中に置く）
+  // ※日本語ファイル名でも動くことは多いが、環境によっては事故るので英数字推奨
+  const RAIN_SE_SRC = "./assets/tenki/雨が降る1.mp3";
+  const SNOW_SE_SRC = "./assets/tenki/天候・吹雪.mp3";
+  const SPECIAL_SE_BASE = 0.85;
 
   // 出現率（1秒あたり）— レア化
   const UFO_CHANCE_PER_SEC = 0.0035; // 0.35%/sec
@@ -54,6 +61,7 @@
      - “たまに” ランダムで1枚だけ表示
      - UFOより下 / アイテムより上
      - ✅ 軽量化：div + background-image + CSS drift（JS毎フレーム更新なし）
+     - ✅ 雨/雪のときだけSEをループ（WB.se.loop追従）
   ========================= */
   const SPECIAL_Z_INDEX = 340000; // UFO(350000)より下 / アイテムより上想定
   const SPECIAL_CHANCE_PER_SEC = 0.0016; // 0.16%/sec（目安：10分に1回くらい）
@@ -62,8 +70,12 @@
 
   // ✅ さらに軽くしたいなら opacity を 0.45〜0.5 に下げると合成コストが下がることが多い
   const SPECIALS = [
-    { key: "rain",   src: "./assets/tenki/w02_大雨.png",     opacity: 0.55, blend: "screen" },
-    { key: "snow",   src: "./assets/tenki/w05_大雪.png",     opacity: 0.55, blend: "screen" },
+    { key: "rain",   src: "./assets/tenki/w02_大雨.png",     opacity: 0.55, blend: "screen",
+      se: { id: "tenki_rain", src: RAIN_SE_SRC, base: SPECIAL_SE_BASE } },
+
+    { key: "snow",   src: "./assets/tenki/w05_大雪.png",     opacity: 0.55, blend: "screen",
+      se: { id: "tenki_snow", src: SNOW_SE_SRC, base: SPECIAL_SE_BASE } },
+
     { key: "thun",   src: "./assets/tenki/w09_雷.png",       opacity: 0.60, blend: "screen" },
     { key: "aurora", src: "./assets/tenki/w33_オーロラ.png", opacity: 0.55, blend: "screen" },
     { key: "sakura", src: "./assets/tenki/w34_桜.png",       opacity: 0.55, blend: "screen" },
@@ -302,6 +314,51 @@
   }
 
   /* =========================
+     ✅ 特殊演出SE（雨/雪だけ）
+  ========================= */
+  let __specialFallbackAudio = null;
+  let __specialPlayingId = null;
+
+  function startSpecialSound(se) {
+    stopSpecialSound();
+    if (!se || !se.id || !se.src) return;
+    __specialPlayingId = se.id;
+
+    try {
+      const WB = window.WB;
+      if (WB?.se?.loop) {
+        WB.se.loop(se.id, se.src, Number(se.base ?? 1.0));
+        return;
+      }
+    } catch {}
+
+    // フォールバック（BGM.js無しでも鳴る）
+    try {
+      const a = new Audio();
+      a.preload = "auto";
+      a.loop = true;
+      a.src = encodeURI(se.src);
+      a.volume = 0.8;
+      a.play().catch(() => {});
+      __specialFallbackAudio = a;
+    } catch {}
+  }
+
+  function stopSpecialSound() {
+    try {
+      if (__specialPlayingId) window.WB?.se?.stop?.(__specialPlayingId);
+    } catch {}
+    __specialPlayingId = null;
+
+    try {
+      if (__specialFallbackAudio) {
+        __specialFallbackAudio.pause();
+        __specialFallbackAudio = null;
+      }
+    } catch {}
+  }
+
+  /* =========================
      ✅ 特殊演出（軽量）
   ========================= */
   ensureSpecialCssOnce();
@@ -346,6 +403,9 @@
     specialNowOpacity = 0.0;
     el.style.opacity = "0";
 
+    // ✅ 雨/雪ならSE開始（それ以外は停止）
+    startSpecialSound(s.se);
+
     specialActive = true;
     specialTLeft =
       (SPECIAL_MIN_DURATION_SEC + Math.random() * (SPECIAL_MAX_DURATION_SEC - SPECIAL_MIN_DURATION_SEC));
@@ -353,6 +413,8 @@
 
   function stopSpecial() {
     specialActive = false;
+    // ✅ 特殊演出SE停止
+    stopSpecialSound();
     // フェードアウトはanimate側で
   }
 
@@ -365,6 +427,7 @@
     startSpecial(s);
   };
   window.TENKI.stopSpecial = () => stopSpecial();
+  window.TENKI._specialSoundStop = () => stopSpecialSound();
 
   /* =========================
      アニメーション
@@ -445,6 +508,8 @@
 
       // 完全に消えたらDOM掃除（残骸ゼロ）
       if (!specialActive && specialNowOpacity < 0.01) {
+        // ✅ 保険：音が残ってたら止める
+        stopSpecialSound();
         try { specialEl.remove(); } catch {}
         specialEl = null;
       }
