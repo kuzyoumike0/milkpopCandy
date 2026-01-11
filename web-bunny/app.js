@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.5 (coinChanged dual emit for prestige gauge)", Date.now());
+  console.log("[app.js] LOADED v16.7.4 (coinChanged emit + prestige gauge fix)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -92,9 +92,9 @@
    * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1673")) return;
+    if (document.getElementById("wbAppCoreCssV1674")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1673";
+    st.id = "wbAppCoreCssV1674";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -131,7 +131,7 @@
         height:${WRAP_H}px !important;
         will-change: transform;
         touch-action: manipulation;
-        pointer-events:auto !important; /* ✅ ここが超重要：wrapがイベント受ける */
+        pointer-events:auto !important;
       }
       .bunnyWrap .bunny{
         width:100% !important;
@@ -282,7 +282,6 @@
     if (audioUnlocked) return;
     audioUnlocked = true;
 
-    // ✅ SE unlock
     try {
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
@@ -291,7 +290,6 @@
         .catch(() => (sePoyo.muted = false));
     } catch {}
 
-    // ✅ BGMもユーザー操作内で開始を試す（ブロック対策）
     try {
       window.WB?.bgm?.start?.();
       window.WB?.bgm?.play?.();
@@ -325,43 +323,17 @@
 
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
 
-  // ✅ coinChanged を必ず出す（prestige.js 同期用）
-  // ✅ “数値版” + “オブジェクト版” を両方 emit（互換最強）
-  function setCoinsWithEmit(next, source = "") {
-    const prev = coins;
-    next = Math.max(0, Math.floor(Number(next) || 0));
-    coins = next;
-
-    saveCoins();
-    coinValueEl.textContent = String(coins);
-
-    // HUD更新（既存互換）
-    emit("hudUpdated", { coins });
-
-    const delta = coins - prev;
-
-    // ✅ 旧prestige.js(数値しか読めない) 対応
-    emit("coinChanged", coins);
-
-    // ✅ 新prestige.js(オブジェクト対応) もOK
-    emit("coinChanged", { coins, delta, source: String(source || "") });
-  }
-
-  // 互換：他モジュールが setCoin を探してる（prestige.js が使う）
-  function setCoin(v, source = "setCoin") {
-    setCoinsWithEmit(v, source);
-  }
-
-  // 既存互換：HUDの描画更新（coins値は変更しない）
+  // ✅ ここが重要：HUD更新時に coinChanged を必ず emit（prestige が拾う）
   function updateHud() {
     coinValueEl.textContent = String(coins);
+
+    // 既存：HUD更新
     emit("hudUpdated", { coins });
 
-    // ✅ 旧prestige.js対応
+    // ✅ 追加：prestige 用の統一イベント
     emit("coinChanged", coins);
-
-    // ✅ 新prestige.js対応（delta=0）
-    emit("coinChanged", { coins, delta: 0, source: "updateHud" });
+    try { window.dispatchEvent(new CustomEvent("wb:coinChanged", { detail: { coins } })); } catch {}
+    try { window.dispatchEvent(new CustomEvent("milkpop:coinChanged", { detail: { coins } })); } catch {}
   }
 
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
@@ -423,11 +395,8 @@
     }
     collect(){
       if (!this.el || !this.el.isConnected) return;
-
-      const gain = (this.tier + 1) * COIN_VALUE_MULTIPLIER;
-      setCoinsWithEmit(coins + gain, "coinCollect");
-
-      playSE(seCoin);
+      coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
+      saveCoins(); updateHud(); playSE(seCoin);
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
@@ -481,7 +450,6 @@
       this.evolveIfNeeded(true);
       this.syncSprite();
 
-      // ✅ クリックでコイン（“確実”版）
       const tap = (e) => {
         try { e?.preventDefault?.(); } catch {}
         try { e?.stopPropagation?.(); } catch {}
@@ -495,7 +463,6 @@
         this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
       };
 
-      // ✅ pointerdown + click 両対応（clickだけ死ぬ環境でもOK）
       this.wrap.addEventListener("pointerdown", tap, { passive: false });
       this.wrap.addEventListener("click", tap);
 
@@ -721,16 +688,15 @@
     shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
     get coins() { return coins; },
-    set coins(v) { setCoinsWithEmit(v, "WB.coins=set"); },
+    set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
 
     getCoin: () => coins,
-    setCoin, // ✅ prestige.js 互換
-
     spendCoin: (n) => {
       n = Math.floor(Number(n) || 0);
       if (n <= 0) return true;
       if (coins < n) return false;
-      setCoinsWithEmit(coins - n, "spendCoin");
+      coins -= n;
+      saveCoins(); updateHud();
       return true;
     },
 
@@ -794,12 +760,8 @@
     await initBunnies();
     scheduleRescueAll();
 
-    updateHud();
+    updateHud(); // ✅ ここで coinChanged が出る
     emit("bunnyCountChanged", { count: bunnies.length });
-
-    // ✅ 起動直後に現在コインを通知（prestige.js の初期同期）
-    emit("coinChanged", coins);
-    emit("coinChanged", { coins, delta: 0, source: "boot" });
 
     requestAnimationFrame(tick);
   }
