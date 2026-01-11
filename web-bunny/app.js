@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.9 (tennshi as bunny+ stronger than bunny4, keep full features + ougonunchi remove bonus +10000)", Date.now());
+  console.log("[app.js] LOADED v16.7.9 (tennshi spawn on prestige immediately + ougonunchi remove bonus +10000, keep full features)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -334,9 +334,6 @@
 
   /* =========================
    * ✅ ougonunchi.png 削除ボーナス（軽量＆確実）
-   * - “削除処理” を removeOugonUnchi() に集約
-   * - クリックで削除する実装でも拾えるように field で委譲
-   * - 1要素につき1回だけ +10000（重複防止）
    * ========================= */
   const OUGONUNCHI_BONUS = 10000;
   const __ougonGranted = new WeakSet();
@@ -344,18 +341,14 @@
   function isOugonUnchiEl(el) {
     if (!el || el.nodeType !== 1) return false;
 
-    // img src に ougonunchi.png
     if (el.tagName === "IMG") {
       const src = String(el.getAttribute("src") || "");
       if (src.includes("ougonunchi.png")) return true;
     }
-
-    // wrapper の中に ougonunchi.png の img
     try {
       const img = el.querySelector?.('img[src*="ougonunchi.png"]');
       if (img) return true;
     } catch {}
-
     return false;
   }
 
@@ -373,17 +366,14 @@
   function removeOugonUnchi(el) {
     if (!el) return false;
 
-    // 可能なら“wrap”を消す（残骸防止）
     let target = el;
     try {
       const img = (el.tagName === "IMG") ? el : el.querySelector?.('img[src*="ougonunchi.png"]');
       if (img) target = img.closest?.(".unchiWrap") || img.parentElement || img;
     } catch {}
 
-    // 付与（1回だけ）
     grantOugonBonusOnce(target);
 
-    // 実削除
     try { target.remove(); }
     catch { try { target.parentNode?.removeChild?.(target); } catch {} }
 
@@ -392,7 +382,6 @@
   }
 
   // ✅ “クリックで削除”型の黄金うんちなら、これだけで確実に +10000
-  // ※ 既存の黄金うんち削除処理がある場合は、その処理の中も removeOugonUnchi() に置換推奨
   field.addEventListener("pointerdown", (e) => {
     const t = e.target;
     if (!t || t.nodeType !== 1) return;
@@ -546,7 +535,6 @@
         try { e?.preventDefault?.(); } catch {}
         try { e?.stopPropagation?.(); } catch {}
 
-        // ✅ “bunnyと同じ扱い”＝tennshiも通常と同じSE（成体はpoyo）
         playSE(this.isBaby ? seBaby : sePoyo);
 
         const plan = this.getDropPlanFromOwnCharge();
@@ -570,12 +558,10 @@
     }
 
     syncSprite() {
-      // ✅ babyは必ず baby画像
       if (this.isBaby) {
         this.el.src = ASSETS.babyBunny;
         return;
       }
-      // ✅ 成体：tennshi も含めて BUNNY_DEFS から
       this.el.src = (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
     }
 
@@ -591,7 +577,6 @@
       return el;
     }
 
-    // ✅ baby はハートを出さない
     showHeart(){
       if (this.isBaby) return;
       const el = this.ensureHeartEl();
@@ -618,7 +603,6 @@
         this.charge = CHARGE_MAX;
         this.chargeReady = true;
 
-        // ✅ baby はハート表示しない（ready 状態は内部で維持）
         if (!this.isBaby) this.showHeart();
 
         emit("bunnyChargeReady", { bornAt: this.bornAt });
@@ -637,29 +621,22 @@
     getDropPlanFromOwnCharge() {
       const r = this.getChargeRatio();
 
-      // ✅ babybunny は coin1（tier0）しか出さない
       if (this.isBaby) {
         const count = 3 + Math.floor(r * 15);
         return { count, pickTier: () => 0 };
       }
 
-      // ✅ tennshi：bunnyと同じ扱いだが、bunny4より多く出す（クリック時のみ）
       if (this.kind === "tennshi") {
-        // 数を増やす（通常 3~18 を 6~30 に）
         const count = 6 + Math.floor(r * 24);
-
-        // tierは coin3/coin4 寄り（2,3中心。たまに1）
         const pickTier = () => {
           const x = Math.random();
-          if (x < 0.08) return 1;     // coin2 少し
-          if (x < 0.58) return 2;     // coin3 多め
-          return 3;                   // coin4 多め
+          if (x < 0.08) return 1;
+          if (x < 0.58) return 2;
+          return 3;
         };
-
         return { count, pickTier };
       }
 
-      // ✅ 通常成体
       const count = 3 + Math.floor(r * 15);
       const maxTier = Math.floor(r * 3 + 1e-9);
 
@@ -682,7 +659,6 @@
 
       this.isBaby = false;
 
-      // ✅ tennshi は固定（突然変異を起こさない）
       if (this.kind !== "tennshi") {
         if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
       }
@@ -690,7 +666,6 @@
       this.syncSprite();
       this.hardClamp(true);
 
-      // ✅ baby -> adult に変わった瞬間に、もしchargeReadyだったらハートを出せるようにする
       if (this.chargeReady) this.showHeart();
 
       if (isInit) saveBunnyMeta();
@@ -877,11 +852,36 @@
    * ========================= */
   async function initBunnies() {
     const meta = loadBunnyMeta();
+
+    // ✅ prestige.js と同じキー：転生後は true
+    const TENNSHI_ACTIVE_KEY = "wb_tennshi_active_v1";
+    const tennshiActive = (localStorage.getItem(TENNSHI_ACTIVE_KEY) === "true");
+
+    // ✅ babyを踏ませない（最初から成体）
+    const adultBornAt = () => Date.now() - BABY_DURATION_MS - 1500;
+
+    // 既存保存がある場合はそれを復元
     if (meta && meta.length) {
       meta.forEach(m => spawnBunny(m.kind, m.bornAt));
+
+      // tennshiActive なのに保存メタに居ない場合だけ、1体だけ追加
+      if (tennshiActive) {
+        const has = bunnies.some(b => b && b.kind === "tennshi");
+        if (!has) spawnBunny("tennshi", adultBornAt());
+      }
+
       saveBunnyMeta();
       return;
     }
+
+    // ✅ 新規開始：転生してるなら “即tennshi 1体だけ”
+    if (tennshiActive) {
+      spawnBunny("tennshi", adultBornAt());
+      saveBunnyMeta();
+      return;
+    }
+
+    // 通常開始（転生してない時だけ従来の2匹）
     const t = Date.now();
     spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
     spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
