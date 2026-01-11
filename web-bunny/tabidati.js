@@ -1,15 +1,19 @@
-// tabidati.js（v13.0：旅立ちボタンを「お迎え/スロット」と同じHUD列に自動追加）
+// tabidati.js（v13.1：✅既存HUDの #departBtn を優先して使う + 二重UI根絶 + app.js(ui:depart)でも反応）
 // - 旅立ちモードON/OFF
 // - 旅立ち時：コスト支払い / SE / 記録 / メッセージ / うさぎ削除
 // - 旅立ちモード中：うさぎホバーで赤縁取り
-// - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（はみ出し防止）
+// - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（※transform運用の環境では軽め）
 // - 「長い空白メッセージ」対策：専用トーストCSSで表示
 // ✅ SYOUGOU.add("tabidachi") を直接呼ぶ（あれば）
 // ✅ FIX: 旅立ち後に hart.png が残らない（bunny.hideHeart/hartEl/removeBunnyInstance）
-// ✅ 旅立ちボタンは HUD(#hudButtons) に自動で置く（無ければ #hud 末尾）
+// ✅ 旅立ちボタン：
+//    - index.html に #departBtn があるならそれを使う（＝二重生成しない）
+//    - 無い場合だけ departBtnV1 を生成（旧互換）
+// ✅ app.js が emit("ui:depart") しても旅立ちモードをトグル（HUDボタンと同等）
 // ✅ 既存の WB.departBtn があっても壊さない（あればそれも反応）
 
 (() => {
+  "use strict";
   if (!window.WB) return;
   const WB = window.WB;
 
@@ -19,7 +23,11 @@
   let departMode = false;
   let clampTimer = null;
 
-  const BTN_ID = "departBtnV1"; // ← HUDに置くボタンID
+  // 旧版が作ってたボタンID（互換用）
+  const BTN_ID = "departBtnV1";
+
+  // ✅ index.html の既存ボタンID（あなたのHUD）
+  const LEGACY_BTN_ID = "departBtn";
 
   /* =========================
    * Helpers（WB互換）
@@ -100,11 +108,11 @@ body.departModeOn .bunnyWrap:hover{
   opacity: 0;
 }
 
-/* ✅ HUDボタン見た目（他ボタンと揃える・ON状態） */
-#${BTN_ID}{
+/* ✅ ON表示：departBtn / departBtnV1 の両方に効く */
+#${LEGACY_BTN_ID}, #${BTN_ID}{
   position: relative;
 }
-#${BTN_ID}.on{
+#${LEGACY_BTN_ID}.on, #${BTN_ID}.on{
   outline: 3px solid rgba(255,64,64,.55);
   outline-offset: 2px;
   box-shadow: 0 10px 26px rgba(255,64,64,.18);
@@ -125,21 +133,36 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   /* =========================
-   * HUD Button（お迎えと同じように置く）
+   * HUD Button（既存 #departBtn を優先）
    * ========================= */
   function ensureDepartBtn() {
     ensureToastStyles();
 
-    // すでにあるならそれを使う
+    // ✅ 1) まず index.html の departBtn を最優先で使う（＝二重生成根絶）
+    const legacy = document.getElementById(LEGACY_BTN_ID);
+    if (legacy) {
+      if (!legacy.__tabidatiBoundV131) {
+        legacy.__tabidatiBoundV131 = true;
+        legacy.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          try { WB.unlockAudioOnce?.(); } catch {}
+          toggleDepartMode();
+        }, { passive: false });
+      }
+      return legacy;
+    }
+
+    // ✅ 2) 既に departBtnV1 があるならそれを使う
     let btn = document.getElementById(BTN_ID);
     if (btn) return btn;
 
+    // ✅ 3) 無い時だけ作る（旧互換）
     btn = document.createElement("button");
     btn.id = BTN_ID;
     btn.type = "button";
     btn.textContent = "旅立ち";
 
-    // 置き場所：#hudButtons が最優先
     const hudButtons = document.getElementById("hudButtons");
     const hud = document.getElementById("hud") || document.body;
 
@@ -151,15 +174,17 @@ body.departModeOn .bunnyWrap:hover{
       e.stopPropagation();
       try { WB.unlockAudioOnce?.(); } catch {}
       toggleDepartMode();
-    });
+    }, { passive: false });
 
     return btn;
   }
 
   function updateBtnUI() {
-    // WB.departBtn（既存）と新ボタンの両方を同期
-    try { WB.departBtn?.classList.toggle("on", departMode); } catch {}
+    // ✅ 既存departBtn と departBtnV1 を両方同期（存在するものだけ）
+    try { document.getElementById(LEGACY_BTN_ID)?.classList.toggle("on", departMode); } catch {}
     try { document.getElementById(BTN_ID)?.classList.toggle("on", departMode); } catch {}
+    // ✅ さらに WB.departBtn が別に参照を持ってる環境も同期
+    try { WB.departBtn?.classList.toggle("on", departMode); } catch {}
   }
 
   /* =========================
@@ -183,6 +208,8 @@ body.departModeOn .bunnyWrap:hover{
 
   /* =========================
    * Clamp（旅立ち中はみ出し防止）
+   * ※ app.js は translate3d で動かしてるので left/top 直しは効きにくい環境がある
+   *   → “暴走しない軽め”にしておく（無理に位置を書き換えない）
    * ========================= */
   function startClamp() {
     stopClamp();
@@ -194,40 +221,12 @@ body.departModeOn .bunnyWrap:hover{
     clampTimer = setInterval(() => {
       if (!departMode) return;
 
-      const area = (layer || field);
-      const ar = area.getBoundingClientRect();
+      const ar = layer.getBoundingClientRect();
       if (!ar.width || !ar.height) return;
 
-      const wraps = Array.from(document.querySelectorAll(".bunnyWrap"));
-      for (const w of wraps) {
-        if (!w || !w.isConnected) continue;
-
-        const r = w.getBoundingClientRect();
-        if (!r.width || !r.height) continue;
-
-        const overL = ar.left - r.left;
-        const overR = r.right - ar.right;
-        const overT = ar.top - r.top;
-        const overB = r.bottom - ar.bottom;
-
-        if (overL <= 0 && overR <= 0 && overT <= 0 && overB <= 0) continue;
-
-        const cs = getComputedStyle(w);
-        const left = parseFloat(w.style.left || cs.left || "0") || 0;
-        const top  = parseFloat(w.style.top  || cs.top  || "0") || 0;
-
-        let nx = left;
-        let ny = top;
-
-        if (overL > 0) nx += overL;
-        if (overR > 0) nx -= overR;
-        if (overT > 0) ny += overT;
-        if (overB > 0) ny -= overB;
-
-        if (Number.isFinite(nx)) w.style.left = `${nx}px`;
-        if (Number.isFinite(ny)) w.style.top  = `${ny}px`;
-      }
-    }, 100);
+      // ✅ transform運用環境では無理にleft/top触らない（ズレるだけになりがち）
+      // 必要なら app.js 側に「旅立ちモード中は hardClamp 強め」みたいに寄せるのが正攻法
+    }, 120);
   }
 
   function stopClamp() {
@@ -332,17 +331,29 @@ body.departModeOn .bunnyWrap:hover{
   /* =========================
    * Bind
    * ========================= */
-  // ✅ ボタンをHUDに作る（お迎えと同じ列）
+  // ✅ ボタン準備（既存 #departBtn があるならそれにバインドされる）
   ensureDepartBtn();
 
-  // 既存の WB.departBtn がある環境でも動かす（互換）
-  if (WB.departBtn && !WB.departBtn.__tabidatiBound) {
-    WB.departBtn.__tabidatiBound = true;
+  // ✅ 旧互換：WB.departBtn がどこかで設定されてる環境でも反応させる
+  // （index.html の departBtn を WB.departBtn に入れてない環境があるため）
+  if (WB.departBtn && !WB.departBtn.__tabidatiBoundV131) {
+    WB.departBtn.__tabidatiBoundV131 = true;
     WB.departBtn.addEventListener("click", (e) => {
       e.preventDefault();
       toggleDepartMode();
-    });
+    }, { passive: false });
   }
+
+  // ✅ app.js の emit("ui:depart") でもトグル（HUDボタンと同じ動き）
+  try {
+    if (typeof WB.on === "function" && !WB.__tabidatiUiDepartBoundV131) {
+      WB.__tabidatiUiDepartBoundV131 = true;
+      WB.on("ui:depart", () => {
+        try { WB.unlockAudioOnce?.(); } catch {}
+        toggleDepartMode();
+      });
+    }
+  } catch {}
 
   document.addEventListener("pointerdown", onPointerDownCapture, true);
 
@@ -354,6 +365,10 @@ body.departModeOn .bunnyWrap:hover{
     toggleDepartMode,
     departBunny,
     get departMode() { return departMode; },
-    btnId: BTN_ID,
+    btnId: (document.getElementById(LEGACY_BTN_ID) ? LEGACY_BTN_ID : BTN_ID),
   };
+
+  console.log("[tabidati] ready v13.1 (use existing departBtn first)", {
+    using: (document.getElementById(LEGACY_BTN_ID) ? LEGACY_BTN_ID : BTN_ID),
+  });
 })();
