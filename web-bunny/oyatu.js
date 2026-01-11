@@ -1,19 +1,15 @@
-// oyatu.js v1.4.2
-// ✅ v1.4.1 + NEW: うさぎが「おやつへ取りに行く（吸い寄せ）」
-// - おやつ（着地済み）があると、近い うさぎ をターゲットへ少しずつ誘導
-// - 近づいたら赤枠 → 食べて消える（バフ付与）
-// - クリックで拾うも残す
-// - 軽量：120ms tick / 最大個数制限 / 毎フレーム更新なし
-//
-// 注意：app.js が transform で動かす環境向けに、
-// 1) WB.getBunnies() の b.x/b.y 等を優先更新（可能なら“本体座標”を動かす）
-// 2) 取れない環境では wrap の transform を「軽く上書き」して押す（保険）
-// という二段構え。
+// oyatu.js v1.4.3（軽量化 + 確実に消える + 1匹だけ取りに行く）
+// ✅ おやつ落下（課金）+ SE（60msクール）
+// ✅ クリックで拾う→バフ（次のクリック2倍）
+// ✅ 自動で食べる（軽量）
+// ✅ 「取りに行く」：最寄りのうさぎ1匹だけが最寄りおやつへ寄る（負荷激減）
+// ✅ 当たり判定：field内座標で距離計算（getBoundingClientRect乱用を回避）
+// ✅ “消えない”対策：removeを二重で強制
 
 (() => {
   "use strict";
-  if (window.__OYATU_V142__) return;
-  window.__OYATU_V142__ = true;
+  if (window.__OYATU_V143__) return;
+  window.__OYATU_V143__ = true;
 
   const CFG = {
     FIELD_ID: "field",
@@ -44,17 +40,12 @@
 
     FADE_MS: 160,
 
-    // ===== 自動で食べる =====
-    EAT_TICK_MS: 120,
-    EAT_DIST_PX: 46,
-    EAT_HINT_MS: 220,
-    EAT_OUTLINE: "rgba(255,64,64,.85)",
-
-    // ===== 取りに行く（誘導） =====
-    SEEK_RADIUS_PX: 260,     // この距離以内におやつがあると取りに行く
-    SEEK_STOP_PX: 58,        // 近すぎると押しすぎない
-    SEEK_PULL_PX_PER_TICK: 6, // 1tickで押す最大px（軽い吸い寄せ）
-    SEEK_Y_MUL: 0.55,        // 縦方向は少し弱め（地面付近で自然）
+    // ===== 自動で食べる / 取りに行く =====
+    TICK_MS: 140,            // ✅ 少し遅めで十分軽い
+    EAT_DIST_PX: 44,         // ✅ 食べる距離
+    SEEK_RADIUS_PX: 260,     // ✅ 取りに行く範囲
+    SEEK_STEP_PX: 7,         // ✅ 1tickで寄せる量（控えめ）
+    SEEK_Y_MUL: 0.55,        // ✅ 縦方向は弱め
 
     BUNNY_WRAP_SELECTOR: ".bunnyWrap, .bunny-wrap",
   };
@@ -63,7 +54,7 @@
   if (!field) return;
   if (getComputedStyle(field).position === "static") field.style.position = "relative";
 
-  const $ = (q, p = document) => p.querySelector(q);
+  const $  = (q, p = document) => p.querySelector(q);
   const $$ = (q, p = document) => Array.from(p.querySelectorAll(q));
 
   function clamp(n, a, b) {
@@ -73,12 +64,7 @@
   }
 
   function loadJson(key, def = null) {
-    try {
-      const v = JSON.parse(localStorage.getItem(key) || "null");
-      return (v ?? def);
-    } catch {
-      return def;
-    }
+    try { return JSON.parse(localStorage.getItem(key) || "null") ?? def; } catch { return def; }
   }
   function saveJson(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }
   function rm(key) { try { localStorage.removeItem(key); } catch {} }
@@ -136,8 +122,8 @@
   max-width:min(520px, 92vw);
   text-align:center;
 }
-@keyframes oyatuToastIn{ from{ opacity:0; transform:translate(-50%,-70%); } to{ opacity:1; transform:translate(-50%,-50%); } }
-@keyframes oyatuToastOut{ from{ opacity:1; transform:translate(-50%,-50%); } to{ opacity:0; transform:translate(-50%,-35%); } }
+@keyframes oyatuToastIn{ from{ opacity:0; transform:translate(-50%,-70%);} to{ opacity:1; transform:translate(-50%,-50%);} }
+@keyframes oyatuToastOut{ from{ opacity:1; transform:translate(-50%,-50%);} to{ opacity:0; transform:translate(-50%,-35%);} }
 `;
     document.head.appendChild(s);
   }
@@ -152,7 +138,7 @@
   }
 
   /* =========================
-   * SE
+   * SE（落とした瞬間だけ）
    * ========================= */
   let __lastDropSeAt = 0;
   function playDropSE() {
@@ -162,12 +148,8 @@
 
     const WB = window.WB || null;
     try {
-      if (WB?.se?.play) {
-        WB.se.play("oyatu_drop", CFG.OYATU_DROP_SE_SRC, CFG.OYATU_DROP_SE_BASE);
-        return;
-      }
+      if (WB?.se?.play) { WB.se.play("oyatu_drop", CFG.OYATU_DROP_SE_SRC, CFG.OYATU_DROP_SE_BASE); return; }
     } catch {}
-
     try {
       const a = new Audio();
       a.preload = "auto";
@@ -178,12 +160,12 @@
   }
 
   /* =========================
-   * CSS
+   * CSS（軽量）
    * ========================= */
   function ensureCss() {
-    if (document.getElementById("oyatuCssV142")) return;
+    if (document.getElementById("oyatuCssV143")) return;
     const s = document.createElement("style");
-    s.id = "oyatuCssV142";
+    s.id = "oyatuCssV143";
     s.textContent = `
 @keyframes oyatuFallV14{
   0%{ transform:translate3d(var(--x), -90px, 0) rotate(-10deg); opacity:0; }
@@ -215,7 +197,7 @@
   filter: drop-shadow(0 10px 18px rgba(0,0,0,.22));
 }
 .oyatuDropV14.near{
-  outline: 4px solid ${CFG.EAT_OUTLINE};
+  outline: 4px solid rgba(255,64,64,.85);
   outline-offset: 2px;
 }
 
@@ -303,7 +285,6 @@
     badgeEl = d;
     return d;
   }
-
   function updateBadge() {
     const b = loadBuff();
     const el = ensureBadge();
@@ -313,7 +294,6 @@
     el.style.display = "block";
     el.textContent = `🍬 おやつ：次のクリック2倍（残り ${(left / 1000).toFixed(0)}s）`;
   }
-
   function startBuff() {
     const now = Date.now();
     const cur = loadBuff();
@@ -324,7 +304,7 @@
   }
 
   /* =========================
-   * Drops
+   * Drops（field座標を保持）
    * ========================= */
   let dropSeq = 0;
   function dropsOnFieldCount() { return $$(".oyatuDropV14", field).length; }
@@ -339,7 +319,6 @@
     const list = CFG.OYATU_LIST;
     return (list[Math.floor(Math.random() * list.length)] || list[0]).src;
   }
-  function getDropCost() { return CFG.COST_PER_DROP; }
 
   function removeDrop(d, reason = "pickup") {
     if (!d || !d.isConnected) return;
@@ -350,11 +329,14 @@
     d.classList.remove("show");
     d.classList.add("hide");
 
-    setTimeout(() => { try { d.remove(); } catch {} }, CFG.FADE_MS + 40);
-
-    // ✅ 拾った/食べた扱い：バフ付与
+    // ✅ バフ付与（拾う/食べる共通）
     startBuff();
     try { window.WB?.emit?.("oyatu:pickup", { reason, until: Date.now() + CFG.BUFF_WINDOW_MS }); } catch {}
+
+    // ✅ ちゃんと消す（2段階）
+    const kill = () => { try { d.remove(); } catch {} };
+    setTimeout(kill, CFG.FADE_MS + 60);
+    setTimeout(kill, CFG.FADE_MS + 900); // 保険
   }
 
   function spawnDrop(selectedId) {
@@ -364,7 +346,7 @@
     }
 
     const WB = window.WB || null;
-    const cost = getDropCost();
+    const cost = CFG.COST_PER_DROP;
     if (!spendCoins(WB, cost)) {
       toast(`🪙 が足りない…（必要 ${cost}）`);
       return false;
@@ -381,21 +363,21 @@
     const src = pickSrc(selectedId);
 
     const d = document.createElement("div");
-    d.className = "oyatuDropV14";
+    d.className = "oyatuDropV14 show";
     d.dataset.oyatu = "1";
     d.id = `oyatuDropV14_${++dropSeq}`;
+
+    // ✅ field内座標を保持（rect不要）
+    d.dataset.fx = String(Math.round(x));
+    d.dataset.fy = String(Math.round(y));
+    d.__oyatuLanded = false;
+
     d.style.setProperty("--x", `${Math.round(x)}px`);
     d.style.setProperty("--y", `${Math.round(y)}px`);
     d.innerHTML = `<img alt="おやつ">`;
 
-    d.__oyatuLanded = false;
-    d.__nearSince = 0;
-
     const img = d.querySelector("img");
-    if (img) {
-      img.src = src;
-      img.addEventListener("error", () => { img.style.opacity = "0"; }, { once: true });
-    }
+    if (img) img.src = src;
 
     d.addEventListener("click", (e) => {
       e.preventDefault();
@@ -405,241 +387,20 @@
 
     field.appendChild(d);
 
-    requestAnimationFrame(() => {
-      d.classList.add("show");
-      d.style.animation = `oyatuFallV14 ${CFG.FALL_MS}ms ease-out forwards`;
-      setTimeout(() => {
-        if (!d.isConnected) return;
-        d.__oyatuLanded = true;
-        d.style.animation = `oyatuBobV14 1.8s ease-in-out infinite`;
-      }, CFG.FALL_MS + 10);
-    });
+    // 落下→着地
+    d.style.animation = `oyatuFallV14 ${CFG.FALL_MS}ms ease-out forwards`;
+    setTimeout(() => {
+      if (!d.isConnected) return;
+      d.__oyatuLanded = true;
+      d.style.animation = `oyatuBobV14 1.8s ease-in-out infinite`;
+    }, CFG.FALL_MS + 10);
 
     try { window.WB?.emit?.("oyatu:drop", { id: String(selectedId || "random"), cost }); } catch {}
     return true;
   }
 
   /* =========================
-   * ✅ 取りに行く（誘導）: bunny座標更新（できるだけWB本体に寄せる）
-   * ========================= */
-  function getBunnyListFromWB() {
-    const WB = window.WB || null;
-    try { if (WB && typeof WB.getBunnies === "function") return WB.getBunnies() || []; } catch {}
-    try { if (WB && Array.isArray(WB.bunnies)) return WB.bunnies; } catch {}
-    return [];
-  }
-
-  function rectCenter(r) { return { x: (r.left + r.right) / 2, y: (r.top + r.bottom) / 2 }; }
-
-  function setBunnyXY(bunny, nx, ny) {
-    // ✅ 1) よくある座標プロパティ候補に書き込む（app.jsがそれでtransform組むなら勝つ）
-    const candidates = [
-      ["x", "y"],
-      ["_x", "_y"],
-      ["px", "py"],
-    ];
-
-    for (const [kx, ky] of candidates) {
-      if (bunny && Number.isFinite(bunny[kx]) && Number.isFinite(bunny[ky])) {
-        bunny[kx] = nx;
-        bunny[ky] = ny;
-        try { bunny.update?.(); } catch {}
-        try { bunny.render?.(); } catch {}
-        try { bunny.apply?.(); } catch {}
-        return true;
-      }
-    }
-
-    // pos / position オブジェクト
-    try {
-      if (bunny?.pos && Number.isFinite(bunny.pos.x) && Number.isFinite(bunny.pos.y)) {
-        bunny.pos.x = nx; bunny.pos.y = ny;
-        try { bunny.update?.(); } catch {}
-        try { bunny.render?.(); } catch {}
-        return true;
-      }
-      if (bunny?.position && Number.isFinite(bunny.position.x) && Number.isFinite(bunny.position.y)) {
-        bunny.position.x = nx; bunny.position.y = ny;
-        try { bunny.update?.(); } catch {}
-        try { bunny.render?.(); } catch {}
-        return true;
-      }
-    } catch {}
-
-    // ✅ 2) 最後の保険：wrapのtransformを“押す”（上書きされても tick で押し続ける）
-    try {
-      const w = bunny?.wrap;
-      if (w && w.style) {
-        w.style.transform = `translate3d(${nx}px, ${ny}px, 0)`;
-        return true;
-      }
-    } catch {}
-
-    return false;
-  }
-
-  function tryNudgeBunnyTowardDrop(bunny, bunnyRect, dropCenter) {
-    if (!bunny || !bunnyRect) return;
-
-    const bc = rectCenter(bunnyRect);
-    const dx = dropCenter.x - bc.x;
-    const dy = dropCenter.y - bc.y;
-
-    const dist = Math.hypot(dx, dy);
-    if (!Number.isFinite(dist) || dist <= 0.01) return;
-
-    // 近すぎたら押しすぎない（食べ判定に任せる）
-    if (dist < CFG.SEEK_STOP_PX) return;
-    if (dist > CFG.SEEK_RADIUS_PX) return;
-
-    // 1tickの最大押し量（上品）
-    const step = Math.min(CFG.SEEK_PULL_PX_PER_TICK, dist * 0.18);
-    const ux = dx / dist;
-    const uy = dy / dist;
-
-    // “画面上の見た目座標”で押す量（pixel）
-    const ndx = ux * step;
-    const ndy = uy * step * CFG.SEEK_Y_MUL;
-
-    // bunnyの“現在座標”推定：WB座標が分からないので、画面座標の差分だけ足す
-    // → app.jsがtransformで動かしてても、tickで押し続けることで「取りに行く」感が出る
-    const w = bunny?.wrap;
-    if (!w || !w.isConnected) return;
-
-    // 現在のtransformから推定（matrix / translate3d 両対応）
-    let cx = 0, cy = 0;
-    try {
-      const tr = w.style.transform || "";
-      const m3 = tr.match(/translate3d\(\s*([-\d.]+)px,\s*([-\d.]+)px/i);
-      const m2 = tr.match(/translate\(\s*([-\d.]+)px,\s*([-\d.]+)px/i);
-      const mm = tr.match(/matrix\(\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+)\s*\)/i);
-      const mm3 = tr.match(/matrix3d\((.+)\)/i);
-
-      if (m3) { cx = parseFloat(m3[1]) || 0; cy = parseFloat(m3[2]) || 0; }
-      else if (m2) { cx = parseFloat(m2[1]) || 0; cy = parseFloat(m2[2]) || 0; }
-      else if (mm) { cx = parseFloat(mm[5]) || 0; cy = parseFloat(mm[6]) || 0; }
-      else if (mm3) {
-        const parts = mm3[1].split(",").map(s => parseFloat(s.trim()));
-        // matrix3d: 13,14 が translateX/Y
-        if (parts.length >= 16) { cx = parts[12] || 0; cy = parts[13] || 0; }
-      }
-    } catch {}
-
-    // 押す
-    const nx = cx + ndx;
-    const ny = cy + ndy;
-
-    // WB本体に入れられるならそれが最優先（勝ちやすい）
-    if (!setBunnyXY(bunny, nx, ny)) {
-      // setBunnyXY 内で wrap transform 上書きまでやる
-    }
-  }
-
-  /* =========================
-   * ✅ 自動で食べる + 取りに行く tick（同じループで軽量）
-   * ========================= */
-  function getBunnyWraps() { return $$(CFG.BUNNY_WRAP_SELECTOR, document); }
-
-  function eatAndSeekTick() {
-    const drops = $$(".oyatuDropV14", field).filter(d => d && d.isConnected && !d.__oyatuRemoving && d.__oyatuLanded);
-    if (!drops.length) return;
-
-    // drop rect/center を先計算
-    const dropInfo = [];
-    for (const d of drops) {
-      const r = d.getBoundingClientRect();
-      if (!r.width || !r.height) continue;
-      dropInfo.push({ el: d, r, c: rectCenter(r) });
-    }
-    if (!dropInfo.length) return;
-
-    // bunny一覧（WB優先）
-    const list = getBunnyListFromWB();
-    const wrapList = getBunnyWraps();
-
-    // bunnyRect を集める（WBのbunnyとwrapをマッチさせたい）
-    // できるだけ b.wrap があるものを優先し、無ければDOM順で当てる
-    const bunnyRects = [];
-    for (let i = 0; i < list.length; i++) {
-      const b = list[i];
-      const w = b?.wrap || null;
-      const el = (w && w.isConnected) ? w : (wrapList[i] || null);
-      if (!el || !el.isConnected) continue;
-      const br = el.getBoundingClientRect();
-      if (!br.width || !br.height) continue;
-      bunnyRects.push({ bunny: b, el, r: br, c: rectCenter(br) });
-    }
-    // WBが取れない場合もDOMだけで誘導（最低限）
-    if (!bunnyRects.length) {
-      for (const el of wrapList) {
-        if (!el || !el.isConnected) continue;
-        const br = el.getBoundingClientRect();
-        if (!br.width || !br.height) continue;
-        bunnyRects.push({ bunny: { wrap: el }, el, r: br, c: rectCenter(br) });
-      }
-    }
-    if (!bunnyRects.length) return;
-
-    const now = Date.now();
-
-    // 1) 取りに行く：各うさぎに最寄りおやつを割り当てて押す
-    for (const b of bunnyRects) {
-      let best = null;
-      let bestDist = Infinity;
-
-      for (const di of dropInfo) {
-        const dx = di.c.x - b.c.x;
-        const dy = di.c.y - b.c.y;
-        const d = Math.hypot(dx, dy);
-        if (d < bestDist) { bestDist = d; best = di; }
-      }
-      if (!best) continue;
-
-      // 誘導（近い距離だけ）
-      tryNudgeBunnyTowardDrop(b.bunny, b.r, best.c);
-    }
-
-    // 2) 食べる判定：おやつ側で「最寄りうさぎ」との距離で処理
-    for (const di of dropInfo) {
-      const dEl = di.el;
-      if (!dEl || !dEl.isConnected || dEl.__oyatuRemoving) continue;
-
-      // 最寄りうさぎを探す
-      let bestB = null;
-      let bestDist = Infinity;
-
-      for (const b of bunnyRects) {
-        const dx = di.c.x - b.c.x;
-        const dy = di.c.y - b.c.y;
-        const d = Math.hypot(dx, dy);
-        if (d < bestDist) { bestDist = d; bestB = b; }
-      }
-
-      const near = bestDist <= CFG.EAT_DIST_PX;
-
-      if (near) {
-        dEl.classList.add("near");
-        if (!dEl.__nearSince) dEl.__nearSince = now;
-
-        if ((now - dEl.__nearSince) >= CFG.EAT_HINT_MS) {
-          playDropSE();          // ぱくっ（軽いSE）
-          removeDrop(dEl, "eat");
-        }
-      } else {
-        dEl.classList.remove("near");
-        dEl.__nearSince = 0;
-      }
-    }
-  }
-
-  let eatTimer = 0;
-  function startEatLoop() {
-    if (eatTimer) return;
-    eatTimer = window.setInterval(eatAndSeekTick, CFG.EAT_TICK_MS);
-  }
-
-  /* =========================
-   * 2倍処理
+   * 2倍処理：うさぎクリック→coin増加を2倍
    * ========================= */
   let lastBunnyClickAt = 0;
   let lastCoinsSeen = null;
@@ -661,7 +422,6 @@
   function addCoins(WB, delta) {
     const d = Math.max(0, Math.floor(Number(delta) || 0));
     if (!d) return;
-
     try { if (WB && typeof WB.addCoin === "function") { WB.addCoin(d); return; } } catch {}
     const cur = readCoinsDirect(WB);
     setCoinsDirect(WB, cur + d);
@@ -686,11 +446,9 @@
     if (lastBunnyClickAt && (now - lastBunnyClickAt) <= CFG.COINCLICK_WINDOW_MS) {
       const WB = window.WB || null;
       addCoins(WB, diff);
-
       saveBuff(b.until, true);
       updateBadge();
       lastBunnyClickAt = 0;
-
       try { WB?.emit?.("oyatu:double", { bonus: diff }); } catch {}
     }
   }
@@ -716,9 +474,142 @@
     if (watchTimer) return;
     watchTimer = window.setInterval(() => {
       const WB = window.WB || null;
-      const cur = readCoinsDirect(WB);
-      onCoinsChanged(cur);
-    }, 200);
+      onCoinsChanged(readCoinsDirect(WB));
+    }, 220);
+  }
+
+  /* =========================
+   * ✅ 自動で食べる + 取りに行く（軽量）
+   * - drop座標はdataset（rect不要）
+   * - うさぎは「最寄り1匹」だけ動かす
+   * ========================= */
+  function getDropsLanded() {
+    const ds = $$(".oyatuDropV14", field);
+    const out = [];
+    for (const d of ds) {
+      if (!d || !d.isConnected || d.__oyatuRemoving) continue;
+      if (!d.__oyatuLanded) continue;
+      const x = Number(d.dataset.fx), y = Number(d.dataset.fy);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      out.push({ d, x, y });
+    }
+    return out;
+  }
+
+  function getBunniesQuick() {
+    // WBが取れれば優先（wrapが入ってる想定）
+    const WB = window.WB || null;
+    try { if (WB && typeof WB.getBunnies === "function") return WB.getBunnies() || []; } catch {}
+    try { if (WB && Array.isArray(WB.bunnies)) return WB.bunnies; } catch {}
+    return [];
+  }
+
+  function getBunnyCentersFallback() {
+    const wraps = $$(CFG.BUNNY_WRAP_SELECTOR, document);
+    const fr = field.getBoundingClientRect();
+    const list = [];
+    for (const w of wraps) {
+      if (!w || !w.isConnected) continue;
+      const r = w.getBoundingClientRect();
+      if (!r.width || !r.height) continue;
+      // field内の座標に変換
+      const cx = (r.left + r.right) / 2 - fr.left;
+      const cy = (r.top + r.bottom) / 2 - fr.top;
+      list.push({ wrap: w, cx, cy });
+    }
+    return list;
+  }
+
+  function nudgeWrapTransformToward(wrap, dx, dy) {
+    // ✅ ここは最小限の“保険”。app.jsと喧嘩しやすいので強くしない。
+    // 差分だけ少し足す（translate3dのみ扱う）
+    try {
+      const tr = wrap.style.transform || "";
+      const m = tr.match(/translate3d\(\s*([-\d.]+)px,\s*([-\d.]+)px/i);
+      let cx = 0, cy = 0;
+      if (m) { cx = parseFloat(m[1]) || 0; cy = parseFloat(m[2]) || 0; }
+      const nx = cx + dx;
+      const ny = cy + dy;
+      wrap.style.transform = `translate3d(${nx}px, ${ny}px, 0)`;
+    } catch {}
+  }
+
+  function tickEatSeek() {
+    const drops = getDropsLanded();
+    if (!drops.length) return;
+
+    // 最寄り1匹だけを探す（負荷最小）
+    const bunniesWB = getBunniesQuick();
+    const fr = field.getBoundingClientRect();
+
+    let bunnyList = [];
+    if (bunniesWB && bunniesWB.length) {
+      for (const b of bunniesWB) {
+        const w = b?.wrap;
+        if (!w || !w.isConnected) continue;
+        const r = w.getBoundingClientRect();
+        const cx = (r.left + r.right) / 2 - fr.left;
+        const cy = (r.top + r.bottom) / 2 - fr.top;
+        bunnyList.push({ bunny: b, wrap: w, cx, cy });
+      }
+    }
+    if (!bunnyList.length) bunnyList = getBunnyCentersFallback();
+    if (!bunnyList.length) return;
+
+    // dropの“代表”として最寄りペアを作る
+    let best = null;
+    let bestDist = Infinity;
+
+    for (const d of drops) {
+      for (const b of bunnyList) {
+        const dx = d.x - b.cx;
+        const dy = d.y - b.cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = { d: d.d, dx, dy, dist, bunny: b };
+        }
+      }
+    }
+    if (!best) return;
+
+    // 近いなら食べる（確実に消す）
+    if (best.dist <= CFG.EAT_DIST_PX) {
+      try { best.d.classList.add("near"); } catch {}
+      removeDrop(best.d, "eat");
+      return;
+    }
+
+    // 取りに行く（範囲内だけ）
+    if (best.dist > CFG.SEEK_RADIUS_PX) return;
+
+    const step = Math.min(CFG.SEEK_STEP_PX, best.dist * 0.18);
+    const ux = best.dx / best.dist;
+    const uy = best.dy / best.dist;
+
+    const ndx = ux * step;
+    const ndy = uy * step * CFG.SEEK_Y_MUL;
+
+    // WB座標を直接動かせる環境はここを増やすと自然になるが、
+    // 今は“軽く押すだけ”にして喧嘩を避ける
+    if (best.bunny?.wrap) {
+      nudgeWrapTransformToward(best.bunny.wrap, ndx, ndy);
+    } else if (best.bunny?.wrap == null && best.bunny?.wrap !== undefined) {
+      // 何もしない
+    } else {
+      // fallback構造（wrapのみ）
+      if (best.bunny.wrap) nudgeWrapTransformToward(best.bunny.wrap, ndx, ndy);
+    }
+  }
+
+  let tickTimer = 0;
+  function startEatSeekLoop() {
+    if (tickTimer) return;
+    tickTimer = window.setInterval(() => {
+      // ✅ dropが無いなら即return（軽い）
+      if (!document.querySelector(".oyatuDropV14")) return;
+      tickEatSeek();
+    }, CFG.TICK_MS);
   }
 
   /* =========================
@@ -743,7 +634,7 @@
         <div class="body">
           <div class="hint">
             「落とす」1個ごとに <b>${CFG.COST_PER_DROP}🪙</b> 消費します（連打＝連続課金）。<br>
-            落ちたおやつは「クリックで拾う」か「うさぎが取りに来て食べる」どちらでもOK。<br>
+            落ちたおやつは「クリックで拾う」or「うさぎが取りに来て食べる」どちらでもOK。<br>
             拾う/食べると「次のうさぎクリックが2倍（30秒以内・1回）」になります。
           </div>
           <div style="height:10px"></div>
@@ -770,7 +661,7 @@
           </div>
 
           <div style="height:6px"></div>
-          <div class="hint">※ SEは最短 ${CFG.DROP_SE_COOLDOWN_MS}ms 間隔で鳴ります（連打対策）</div>
+          <div class="hint">※ SEは最短 ${CFG.DROP_SE_COOLDOWN_MS}ms 間隔で鳴ります</div>
         </div>
       </div>
     `;
@@ -802,8 +693,8 @@
       grid.addEventListener("click", (e) => {
         const t = e.target?.closest?.(".pick");
         if (!t) return;
-        const id = t.dataset.pick || "random";
-        setSelected(id);
+        selectedId = String(t.dataset.pick || "random");
+        $$(".pick", m).forEach(p => p.classList.toggle("on", (p.dataset.pick || "") === selectedId));
         renderModalMeta();
       });
     }
@@ -821,14 +712,6 @@
     return m;
   }
 
-  function setSelected(id) {
-    selectedId = String(id || "random");
-    const m = ensureModal();
-    $$(".pick", m).forEach(p => p.classList.toggle("on", (p.dataset.pick || "") === selectedId));
-    const costEl = m.querySelector("[data-cost]");
-    if (costEl) costEl.textContent = String(getDropCost());
-  }
-
   function renderModalMeta() {
     const m = document.getElementById(MODAL_ID);
     if (!m || m.style.display !== "block") return;
@@ -838,7 +721,7 @@
 
     const WB = window.WB || null;
     const coins = readCoinsDirect(WB);
-    const cost = getDropCost();
+    const cost = CFG.COST_PER_DROP;
 
     const coinsEl = m.querySelector("[data-coins]");
     if (coinsEl) coinsEl.textContent = String(coins);
@@ -850,7 +733,7 @@
     if (buffEl) {
       const b = loadBuff();
       if (!b) buffEl.textContent = "なし";
-      else if (b.used) buffEl.textContent = "使用済み（次は拾って/食べて再付与）";
+      else if (b.used) buffEl.textContent = "使用済み（拾う/食べるで再付与）";
       else {
         const left = Math.max(0, b.until - Date.now());
         buffEl.textContent = `有効（残り ${(left / 1000).toFixed(0)}s）`;
@@ -869,7 +752,7 @@
         updateBadge();
         const b = loadBuff();
         if (b && Date.now() > b.until) { clearBuff(); updateBadge(); }
-      }, 250);
+      }, 280);
     }
   }
 
@@ -882,38 +765,26 @@
   }
 
   /* =========================
-   * Main loop
-   * ========================= */
-  let lastT = performance.now();
-  function loop(now) {
-    const dt = Math.min(0.05, (now - lastT) / 1000);
-    lastT = now;
-
-    const b = loadBuff();
-    if (b && Date.now() > b.until) { clearBuff(); updateBadge(); }
-    else updateBadge();
-
-    requestAnimationFrame(loop);
-  }
-
-  /* =========================
    * Boot
    * ========================= */
   const btn = document.getElementById(CFG.HUD_BTN_ID);
-  if (btn) {
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      openModal();
-    });
-  }
+  if (btn) btn.addEventListener("click", (e) => { e.preventDefault(); openModal(); });
 
   try { hookCoinChangedIfPossible(window.WB || null); } catch {}
   startCoinWatchFallback();
+  startEatSeekLoop();
 
-  // ✅ 自動で食べる + 取りに行く
-  startEatLoop();
-
-  requestAnimationFrame(loop);
+  // バフ表示更新
+  let lastT = performance.now();
+  function raf(now) {
+    const dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+    const b = loadBuff();
+    if (b && Date.now() > b.until) { clearBuff(); updateBadge(); }
+    else updateBadge();
+    requestAnimationFrame(raf);
+  }
+  requestAnimationFrame(raf);
 
   window.OYATU = window.OYATU || {};
   window.OYATU.open = () => openModal();
@@ -921,13 +792,11 @@
   window.OYATU.dropNow = (id = "random") => spawnDrop(String(id));
   window.OYATU.clearBuff = () => { clearBuff(); updateBadge(); };
 
-  console.log("[oyatu] ready v1.4.2 (paid drops + auto eat + seek)", {
-    btn: CFG.HUD_BTN_ID,
+  console.log("[oyatu] ready v1.4.3 (lighter + forced remove + single seeker)", {
     costPerDrop: CFG.COST_PER_DROP,
-    maxDrops: CFG.MAX_DROPS_ON_FIELD,
-    buffMs: CFG.BUFF_WINDOW_MS,
-    seCooldownMs: CFG.DROP_SE_COOLDOWN_MS,
+    tickMs: CFG.TICK_MS,
+    eatDist: CFG.EAT_DIST_PX,
     seekRadius: CFG.SEEK_RADIUS_PX,
-    seekPull: CFG.SEEK_PULL_PX_PER_TICK,
+    seekStep: CFG.SEEK_STEP_PX,
   });
 })();
