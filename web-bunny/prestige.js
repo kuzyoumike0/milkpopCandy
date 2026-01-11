@@ -1,19 +1,20 @@
-// prestige.js（転生：✅転生ゲージにコインが必要 → 星獲得 → 恒久解放） v1.5.6
+// prestige.js（転生：✅転生ゲージにコインが必要 → 星獲得 → 恒久解放） v1.5.7
 // ✅ FIX: getCoins が 0 固定になる問題修正（__latestCoins を null に）
 // ✅ coinChanged が number / {coins} どちらでも拾う
 // ✅ app.js が emit("coinChanged") すればスロット/回収/放置すべてゲージ反映
 //
-// ★ v1.5.6 変更点（今回の要望）
+// ★ v1.5.7 変更点（今回の要望）
 // ✅ 転生の条件に「所持コイン >= 転生コスト」を追加（足りないと転生不可）
 // ✅ 転生時：所持コインは「転生コスト分だけ差し引き」（固定セットしない）
 // ✅ 転生時：ゲージリセット / うさぎ現状維持 / 天使+1体（累計）
+// ✅ 天使うさぎ生成時：babybunny を一瞬でも見せない（DOM追加の瞬間に即 tennshi.png に差し替え）
 // ✅ 転生天使：assets/tennshi.png を “bunny種(kind=tennshi)” として生成（app.js側の強化が効く）
 // ✅ 転生天使の「自動ドロップ」は完全に無し（クリックで稼ぐだけ）※app.js側が対応している想定
 
 (() => {
   "use strict";
-  if (window.__WB_PRESTIGE_V156__) return;
-  window.__WB_PRESTIGE_V156__ = true;
+  if (window.__WB_PRESTIGE_V157__) return;
+  window.__WB_PRESTIGE_V157__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -338,6 +339,7 @@
 
   /* =========================
    * ✅ tennshi（転生天使）：転生回数ぶん「増える」
+   *    - 追加瞬間に babybunny を見せない：MutationObserver で即差し替え
    * ========================= */
 
   function loadTennshiCount() {
@@ -359,6 +361,16 @@
       if (Array.isArray(WB?.bunnies)) return WB.bunnies;
     } catch {}
     return [];
+  }
+
+  function getBunnyHost(WB) {
+    return (
+      WB?.bunnyLayer ||
+      document.getElementById("bunnyLayer") ||
+      WB?.field ||
+      document.getElementById("field") ||
+      document.body
+    );
   }
 
   function findAllTennshiBunnies(WB) {
@@ -421,8 +433,83 @@
     return true;
   }
 
+  // ✅ 追加：DOMに追加された瞬間に即tennshiへ（babybunnyの1フレームを潰す）
+  function setupInstantTennshiSwap(WB, idStr = "") {
+    const host = getBunnyHost(WB);
+    if (!host) return { stop: () => {}, wait: async () => null };
+
+    let foundWrap = null;
+
+    const applyWrap = (wrap) => {
+      if (!wrap || foundWrap) return;
+
+      const isWrap =
+        wrap.classList?.contains("bunnyWrap") ||
+        wrap.classList?.contains("bunny-wrap") ||
+        (typeof wrap.id === "string" && wrap.id.includes("bunny"));
+
+      if (!isWrap) return;
+
+      foundWrap = wrap;
+
+      try { wrap.setAttribute(CFG.TENNSHI.WRAP_MARK, "1"); } catch {}
+      try { if (idStr) wrap.setAttribute(CFG.TENNSHI.WRAP_ID, idStr); } catch {}
+      try { wrap.classList?.add?.(CFG.TENNSHI.className); } catch {}
+
+      // ✅ ここが最重要：出た瞬間にtennshi.pngへ
+      try {
+        const img = wrap.querySelector?.("img");
+        if (img) {
+          img.src = CFG.TENNSHI.IMG;
+          img.alt = "tennshi";
+        }
+      } catch {}
+
+      // imgが遅い環境の保険
+      try {
+        if (!wrap.querySelector("img")) {
+          const im = document.createElement("img");
+          im.src = CFG.TENNSHI.IMG;
+          im.alt = "tennshi";
+          im.draggable = false;
+          wrap.appendChild(im);
+        }
+      } catch {}
+    };
+
+    const obs = new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const n of m.addedNodes || []) {
+          if (!n || n.nodeType !== 1) continue;
+
+          applyWrap(n);
+
+          try {
+            const w = n.querySelector?.(".bunnyWrap, .bunny-wrap") || null;
+            if (w) applyWrap(w);
+          } catch {}
+        }
+      }
+    });
+
+    try { obs.observe(host, { childList: true, subtree: true }); } catch {}
+
+    const stop = () => { try { obs.disconnect(); } catch {} };
+
+    const wait = async (timeoutMs = 260) => {
+      const start = Date.now();
+      while (!foundWrap && (Date.now() - start) < timeoutMs) {
+        await new Promise(r => setTimeout(r, 16));
+      }
+      return foundWrap;
+    };
+
+    return { stop, wait };
+  }
+
   function spawnOneBunnyPreferTennshi(WB) {
     const calls = [
+      // 可能なら kind=tennshi で直接
       () => WB?.spawnBunny?.(CFG.TENNSHI.KIND),
       () => WB?.createBunny?.(CFG.TENNSHI.KIND),
       () => WB?.addBunny?.(CFG.TENNSHI.KIND),
@@ -472,20 +559,31 @@
     return cand || list[list.length - 1] || null;
   }
 
+  // ✅ 置き換え：Observer付きで「出た瞬間からtennshi」
   async function spawnOneTennshi(WB, idStr = "") {
     const before = getBunnyList(WB);
     const prevIds = new Set(before.map(b => String(b?.bornAt ?? b?.id ?? b?.uuid ?? "")));
 
+    // 出た瞬間差し替え監視
+    const watcher = setupInstantTennshiSwap(WB, idStr);
+
     const sp = spawnOneBunnyPreferTennshi(WB);
-    await new Promise(r => setTimeout(r, 90));
+
+    // wrapがDOMに出た瞬間にtennshiへ（baby表示をほぼ消す）
+    await watcher.wait(260);
+    watcher.stop();
+
+    // さらにインスタンス確定待ち
+    await new Promise(r => setTimeout(r, 30));
 
     let b = sp.bunny || pickNewestBunny(WB, prevIds);
     if (!b) {
-      await new Promise(r => setTimeout(r, 140));
+      await new Promise(r => setTimeout(r, 120));
       b = pickNewestBunny(WB, prevIds);
     }
     if (!b) return null;
 
+    // インスタンス側にも確定情報を付与
     skinToTennshi(b, idStr);
     return b;
   }
@@ -596,14 +694,13 @@
     const coinsNow = getCoins(WB);
     const earnedNow = Math.max(earnedCoins, 0);
 
-    // ✅ コスト：転生ゲージにも所持コインにも必要
     const times = loadTimes();
     const cost = prestigeCostByTimes(times);
 
     // ✅ 転生条件：ゲージ & 所持コイン
     const canPrestige = (earnedNow >= cost) && (coinsNow >= cost);
 
-    // 星は従来通り「ゲージ総量」から算出
+    // 星は「ゲージ総量」から算出
     const gainStars = calcStarsFromCoins(earnedNow);
     const available = Math.max(0, (st.stars - st.spent));
 
@@ -641,7 +738,7 @@
           <div class="hint">次の星（${nextStar}）目安：🪙 ${format(needCoins)}（いま ${pct.toFixed(1)}%）</div>
 
           <div class="hint">※ 転生ゲージは「稼いだ総量」です。</div>
-          <div class="hint">※ v1.5.6：転生には「必要ゲージ」と「必要コイン」の両方を満たす必要があります。</div>
+          <div class="hint">※ v1.5.7：転生には「必要ゲージ」と「必要コイン」の両方を満たす必要があります。</div>
           <div class="hint">※ 転生後：所持コインはコスト分だけ減少、うさぎは維持、ゲージは0。</div>
           <div class="hint">※ 転生する度に 🪽天使が +1 体増えます（累計保存）。</div>
         </div>
@@ -778,29 +875,28 @@
       if (earned < cost0) return; // ✅ ゲージ不足
 
       const coinsBefore = getCoins(WB);
-      if (coinsBefore < cost0) return; // ✅ 所持コイン不足（今回追加）
+      if (coinsBefore < cost0) return; // ✅ 所持コイン不足
 
-      // 星は従来通り「ゲージ総量」から
       const gain = calcStarsFromCoins(earned);
       if (gain <= 0) return;
 
-      // ✅ 星付与
+      // 星付与
       st0.stars += gain;
 
-      // ✅ 転生回数を進める（次回コストが上がる）
+      // 転生回数 +1（次回コスト上昇）
       saveTimes(times0 + 1);
 
-      // ✅ ゲージだけリセット
+      // ゲージリセット
       resetEarned();
 
-      // ✅ 所持コインを転生コスト分だけ減算（固定セットはしない）
+      // ✅ 所持コインを転生コスト分だけ減算
       const coinsAfter = Math.max(0, coinsBefore - cost0);
       setCoinsTo(WB, coinsAfter);
 
-      // ✅ 転生天使：転生する度に +1体（累計）
+      // ✅ 天使 +1体（累計）
       const newCount = await addOneTennshi(WB);
 
-      // ✅ 履歴
+      // 履歴
       st0.history = Array.isArray(st0.history) ? st0.history : [];
       st0.history.push({
         t: Date.now(),
@@ -830,7 +926,7 @@
     let hooked = false;
 
     try {
-      if (WB?.on && !WB.__prestigeCoinHookedV156) {
+      if (WB?.on && !WB.__prestigeCoinHookedV157) {
         WB.on("coinChanged", (payload) => {
           const cur = (() => {
             if (typeof payload === "number") return payload;
@@ -855,7 +951,7 @@
           } catch {}
         });
 
-        WB.__prestigeCoinHookedV156 = true;
+        WB.__prestigeCoinHookedV157 = true;
         hooked = true;
       }
     } catch {}
@@ -865,6 +961,12 @@
 
   // Public API
   waitForWB().then(async (WB) => {
+    // ✅ 先読み：tennshi.png（babyの見えをさらに減らす）
+    try {
+      const im = new Image();
+      im.src = CFG.TENNSHI.IMG;
+    } catch {}
+
     // 初期同期
     try {
       const nowRaw = readCoinsDirect(WB);
@@ -943,11 +1045,11 @@
     if (WB) WB.prestige = api;
     else window.WB_PRESTIGE = api;
 
-    console.log("[prestige] ready v1.5.6", {
+    console.log("[prestige] ready v1.5.7", {
       LS_PRESTIGE,
       earned: CFG.LS_EARNED,
       timesLS: CFG.LS_TIMES,
-      hookCoinChanged: !!(WB?.__prestigeCoinHookedV156),
+      hookCoinChanged: !!(WB?.__prestigeCoinHookedV157),
       fallbackWatchMs: CFG.COIN_WATCH_MS,
       tennshiImg: CFG.TENNSHI.IMG,
       tennshiKind: CFG.TENNSHI.KIND,
