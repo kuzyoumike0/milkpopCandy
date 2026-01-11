@@ -14,7 +14,7 @@
   };
 
   // ⏱ 排出ペース
-  const UNCHI_INTERVAL_SEC = 60; // 約1分
+  const UNCHI_INTERVAL_SEC = 100; // 約1分
   const UNCHI_CHARGE_MAX = 100;
   const UNCHI_CHARGE_PER_SEC = UNCHI_CHARGE_MAX / UNCHI_INTERVAL_SEC;
 
