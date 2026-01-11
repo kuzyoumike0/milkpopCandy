@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.4 (coinChanged emit fix for prestige)", Date.now());
+  console.log("[app.js] LOADED v16.7.5 (coinChanged dual emit for prestige gauge)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -326,6 +326,7 @@
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
 
   // ✅ coinChanged を必ず出す（prestige.js 同期用）
+  // ✅ “数値版” + “オブジェクト版” を両方 emit（互換最強）
   function setCoinsWithEmit(next, source = "") {
     const prev = coins;
     next = Math.max(0, Math.floor(Number(next) || 0));
@@ -337,8 +338,12 @@
     // HUD更新（既存互換）
     emit("hudUpdated", { coins });
 
-    // prestige が拾うイベント（オブジェクト推奨）
     const delta = coins - prev;
+
+    // ✅ 旧prestige.js(数値しか読めない) 対応
+    emit("coinChanged", coins);
+
+    // ✅ 新prestige.js(オブジェクト対応) もOK
     emit("coinChanged", { coins, delta, source: String(source || "") });
   }
 
@@ -351,7 +356,11 @@
   function updateHud() {
     coinValueEl.textContent = String(coins);
     emit("hudUpdated", { coins });
-    // “今の値” を一応通知（delta=0）
+
+    // ✅ 旧prestige.js対応
+    emit("coinChanged", coins);
+
+    // ✅ 新prestige.js対応（delta=0）
     emit("coinChanged", { coins, delta: 0, source: "updateHud" });
   }
 
@@ -789,6 +798,7 @@
     emit("bunnyCountChanged", { count: bunnies.length });
 
     // ✅ 起動直後に現在コインを通知（prestige.js の初期同期）
+    emit("coinChanged", coins);
     emit("coinChanged", { coins, delta: 0, source: "boot" });
 
     requestAnimationFrame(tick);
