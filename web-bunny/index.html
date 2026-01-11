@@ -29,13 +29,12 @@
     <div id="coin">🪙 <span id="coinValue">0</span></div>
 
     <div id="hudButtons">
-      <!-- ✅ 表に出す：お迎え / 旅立ち / 花火 / おやつ -->
       <button id="omukaeBtn" type="button">お迎え</button>
       <button id="departBtn" type="button">旅立ち</button>
       <button id="hanabiBtn" type="button">🎆 花火</button>
       <button id="oyatuBtn" type="button">🍬 おやつ</button>
 
-      <!-- ✅ 互換用：DOMとしては置いてOK（見せない/押さない）。他JSが click() で呼ぶ -->
+      <!-- 互換用（非表示） -->
       <button id="shopBtn"  type="button" style="display:none;">ショップ</button>
       <button id="slotBtn"  type="button" style="display:none;">スロット</button>
       <button id="rankBtn"  type="button" style="display:none;">ランキング</button>
@@ -47,90 +46,74 @@
 
   <!-- ===== メインフィールド ===== -->
   <main id="field">
-    <!-- ✅ bgLayer は「背景専用」：ここにミラーボール/スポットライト等が乗る -->
     <div id="bgLayer"></div>
-
     <div id="tenkiLayer"></div>
     <div id="bunnyLayer"></div>
     <div id="coinLayer"></div>
-    <!-- ✅ unchiLayer は unchi.js 側で自動生成（ここには書かない） -->
+    <!-- unchiLayer は unchi.js 側で生成 -->
   </main>
 
-  <!-- ✅ WBを先に用意（WB not found を根絶） -->
+  <!-- ===== WB bootstrap ===== -->
   <script src="./wb_boot.js?v=20260111_2"></script>
 
-  <!-- ===== コア（WBを作る）===== -->
+  <!-- ===== Core ===== -->
   <script src="./app.js?v=20260111_2"></script>
 
-  <!-- ✅ BGM（モーダル版：WB.bgm.openModal() 提供） -->
+  <!-- ===== BGM ===== -->
   <script src="./BGM.js?v=20260111_2"></script>
 
-  <!-- ✅ うんち（app.js から分離した unchi）※BGMの後・他モジュールの前が安全 -->
+  <!-- ===== Unchi ===== -->
   <script src="./unchi.js?v=20260111_2"></script>
 
-  <!-- ✅ ショップ（ミラーボール購入＋設置ON/OFF） -->
+  <!-- ===== Shop / Item Place ===== -->
   <script src="./shop.js?v=20260111_2"></script>
-
-  <!-- ✅ アイテム配置（shop購入アイテムを赤枠で配置） -->
   <script src="./itemPlace.js?v=20260111_2"></script>
 
-  <!-- ✅ おやつ -->
+  <!-- ===== Oyatu ===== -->
   <script src="./oyatu.js?v=20260111_2"></script>
 
-  <!-- ✅ 背景（朝昼夜 + ミラーボール）
-       ※ mirrorballの実DOM位置(#itemPlace_mirrorball)を拾うため itemPlace の後が安全 -->
+  <!-- ===== Background / Weather ===== -->
   <script src="./bgcolor.js?v=20260111_2"></script>
-
-  <!-- 天気 -->
   <script src="./tenki.js?v=20260111_2"></script>
 
-  <!-- 花火（ボタンはHUDに残す） -->
+  <!-- ===== Hanabi ===== -->
   <script src="./hanabi.js?v=20260111_2"></script>
 
-  <!-- ===== 拡張（WB依存） ===== -->
+  <!-- ===== Achievements / Titles ===== -->
   <script src="./zisseki.js?v=20260111_2"></script>
   <script src="./syougou.js?v=20260111_2"></script>
 
-  <!-- ✅ omukae は「お迎えボタン」で開く -->
+  <!-- ===== Omukae ===== -->
   <script src="./omukae.js?v=20260111_2"></script>
 
-  <!-- お洒落 -->
+  <!-- ===== Fashion / Zukan ===== -->
   <script src="./isyou.js?v=20260111_2"></script>
-
-  <!-- 図鑑 -->
   <script src="./zukan.js?v=20260111_2"></script>
 
-  <!-- 旅立ちメッセージ -->
+  <!-- ===== Farewell / Depart ===== -->
   <script src="./farewell_messages.js?v=20260111_2"></script>
-
-  <!-- 旅立ち -->
   <script src="./tabidati.js?v=20260111_2"></script>
 
-  <!-- スロット -->
+  <!-- ===== Slot ===== -->
   <script src="./slot.js?v=20260111_2"></script>
 
-  <!-- ✅ 転生（牧場の星）モーダル：gameMenu から開くので menu より前に読む -->
+  <!-- ===== Prestige ===== -->
   <script src="./prestige.js?v=20260111_2"></script>
 
-  <!-- ✅ 右上ハンバーガーメニュー -->
+  <!-- ===== Game Menu ===== -->
   <script src="./gameMenu.js?v=20260111_2"></script>
 
-  <!-- ✅ 画面左右の saku（風に揺れる） -->
+  <!-- ===== 🌸 SAKU（画面両端下） ===== -->
   <script src="./saku.js?v=20260111_2"></script>
 
-  <!-- ✅ mirrorball_dance は「絶対に一番最後」 -->
+  <!-- ===== Mirrorball (last) ===== -->
   <script src="./mirrorball_dance.js?v=20260111_2"></script>
 
-  <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
+  <!-- ===== Service Worker ===== -->
   <script>
     (function () {
       const params = new URLSearchParams(location.search);
-      const noSw = params.get("nosw") === "1";
-
-      if (noSw) {
-        console.warn("[SW] disabled by ?nosw=1");
-        return;
-      }
+      if (params.get("nosw") === "1") return;
 
       if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("./sw.js").catch(() => {});
