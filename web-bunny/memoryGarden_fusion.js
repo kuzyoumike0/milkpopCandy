@@ -1,25 +1,26 @@
-// memoryGarden_fusion.js（V1.0 - 記憶の合成：2つの記憶 → 1つの短編 / 高コスト）
+// memoryGarden_fusion.js（V1.1 - 記憶の合成：2つの記憶 → 1つの短編 / 高コスト / messages分離対応）
 //
 // ✅ memoryGarden.js を改造せず「後付けパッチ」で実装
 // ✅ 記憶カードに「🧵 合成に使う」ボタンを追加（2つ選択）
 // ✅ 高コストコインで合成（不足なら中断）
 // ✅ 合成結果は新しい記憶として保存（emotion="tsumugi"）
+// ✅ 合成メッセージは memoryGarden_fusion_messages.js（window.MG_FUSION_MESSAGES）から取得
 // ✅ 合成後：単体表示（MG API があれば）
 // ✅ emit("memoryGarden:updated") で図鑑/庭UIが更新される
 //
-// 読み込み順：memoryGarden.js の後
+// 読み込み順：memoryGarden_messages.js → memoryGarden_fusion_messages.js → memoryGarden.js → memoryGarden_fusion.js
 
 (() => {
   "use strict";
-  if (window.__MEMORY_GARDEN_FUSION_V1__) return;
-  window.__MEMORY_GARDEN_FUSION_V1__ = true;
+  if (window.__MEMORY_GARDEN_FUSION_V11__) return;
+  window.__MEMORY_GARDEN_FUSION_V11__ = true;
 
-  const VERSION = "1.0";
+  const VERSION = "1.1";
 
   const CFG = {
     pollMs: 700,
 
-    // ✅ 高コスト（ここを好みに合わせて上げてOK）
+    // ✅ 高コスト（好みで上げてOK）
     costCoin: 25000,
 
     // 連打ガード
@@ -48,6 +49,14 @@
 
   function uid(prefix) {
     return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+  }
+
+  function todayStr() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
   }
 
   /* =========================
@@ -137,6 +146,7 @@
   }
 
   function playSE() {
+    // memoryGarden.js 側に message SE がある前提（無ければ無音）
     const mg = getMG();
     safe(() => mg?.playMessageSE?.());
   }
@@ -316,7 +326,7 @@
   }
 
   /* =========================
-   * Pick from memory cards
+   * Pick from memory cards (Memory Garden panel)
    * ========================= */
   function findMemoryCardsInGardenPanel() {
     const panel = document.getElementById("mgPanelV1");
@@ -339,7 +349,6 @@
       card.appendChild(row);
     }
 
-    // 既存の「単体で読む」ボタンがあるならその隣に挿す
     const btn = document.createElement("button");
     btn.type = "button";
     btn.setAttribute("data-act", "fusionPick");
@@ -366,7 +375,6 @@
         return;
       }
 
-      // 1つ目 → 2つ目
       if (!pickA) {
         pickA = mem;
         playSE();
@@ -390,39 +398,20 @@
       openFusion();
     });
 
-    // rowの先頭に追加（邪魔なら末尾に変更OK）
     row.insertBefore(btn, row.firstChild);
     return true;
   }
 
   /* =========================
-   * Generate fused short story (3 lines)
+   * Fused message picker (from fusion_messages.js)
    * ========================= */
-  function get3Lines(text) {
-    const lines = String(text || "").split("\n").map(x => x.trim()).filter(Boolean);
-    while (lines.length < 3) lines.push("……");
-    return lines.slice(0, 3);
-  }
-
-  function fuseText(a, b) {
-    const [a1, a2, a3] = get3Lines(a?.text);
-    const [b1, b2, b3] = get3Lines(b?.text);
-
-    // “高コスト”感＝少し儀式っぽい接続詞
-    const c1 = "ほどいて、結ぶ。";
-    const c2 = "二つぶんの静けさが、ひとつの灯りになる。";
-    const c3 = "新しい名前で、明日へ置いていく。";
-
-    // 3行に収める（混ぜ方は読みやすさ優先）
-    // 1行目：A1 + 儀式
-    // 2行目：A2/B2 を融合
-    // 3行目：B3 + 余韻
-    const line1 = `${a1} ${c1}`;
-    const line2 = `${a2} / ${b2}`;
-    const line3 = `${b3} ${c3}`;
-
-    // 念のため長すぎる場合に少し切る（極端な長文対策）
-    return [line1, line2, line3].map(s => s.length > 90 ? s.slice(0, 90) + "…" : s).join("\n");
+  function pickFusionMessage() {
+    const pool = window.MG_FUSION_MESSAGES?.tsumugi;
+    if (Array.isArray(pool) && pool.length) {
+      return String(pool[Math.floor(Math.random() * pool.length)] || "").trim();
+    }
+    // フォールバック（未読込でも落ちない）
+    return "ほどいた記憶を、結び直す。\n二つ分の静けさが残った。\nそれを短編と呼ぶ。";
   }
 
   /* =========================
@@ -456,35 +445,22 @@
 
     playSE();
 
-    const text = fuseText(pickA, pickB);
+    const text = pickFusionMessage();
     const memObj = {
       id: uid("mem"),
       emotion: "tsumugi",
       text,
-      date: safe(() => mg?.store ? (new Date(), null) : null) ? "" : "", // unused; set below
+      date: todayStr(),
       bornAt: Date.now(),
       doneAt: Date.now(),
-      // 栞パッチがあるなら fav にも対応
       fav: false,
-
-      // 合成元
       fusedFrom: [pickA.id, pickB.id],
     };
 
-    // 日付は MG の形式に合わせる
-    memObj.date = (() => {
-      const d = new Date();
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, "0");
-      const dd = String(d.getDate()).padStart(2, "0");
-      return `${y}-${m}-${dd}`;
-    })();
-
-    // 先頭へ追加
     store.memories = store.memories || [];
     store.memories.unshift(memObj);
 
-    // 選択をリセット（気持ちいい）
+    // 選択リセット
     pickA = null;
     pickB = null;
 
@@ -495,16 +471,13 @@
     // 単体表示（MGがあれば）
     safe(() => mg?.showById?.(memObj.id));
 
-    // 合成パネル更新
     openFusion();
   }
 
   /* =========================
-   * Optional: show emotion label nicer
+   * Optional: label hint
    * ========================= */
   function patchTsUmugiLabel() {
-    // memoryGarden.js 側の EMO マップには触れないので、表示自体は "tsumugi" のままでもOK。
-    // ただ、図鑑等で見やすくしたい場合に備えて、store内に簡易ラベルを置く。
     const store = getStore();
     if (!store) return;
     store.__fusionLabel = store.__fusionLabel || { tsumugi: "🧵 つむぎ" };
@@ -528,5 +501,5 @@
   setInterval(tick, CFG.pollMs);
   window.addEventListener("load", () => setTimeout(tick, 0));
 
-  console.log(`[memoryGarden_fusion] loaded v${VERSION}`);
+  console.log(`[memoryGarden_fusion] loaded v${VERSION} (use fusion_messages=${!!window.MG_FUSION_MESSAGES})`);
 })();
