@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.9 (tennshi spawn on prestige immediately + ougonunchi remove bonus +10000, keep full features)", Date.now());
+  console.log("[app.js] LOADED v16.7.9 (tennshi spawn on prestige immediately + ougonunchi remove bonus +10000, keep full features + oyatu seek API)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -30,8 +30,6 @@
     reabunny: { label: "黄金レアみるぽ",   img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
 
     // ✅ 転生天使（tennshi）
-    // - “bunnyと同じ扱い” なので app.js 側は通常種として扱う
-    // - クリックドロップは getDropPlanFromOwnCharge() で強化
     tennshi:  { label: "転生天使みるぽ",   img: "./assets/tennshi.png",  price: 0,     coinMul: 5.2,  desc: "転生で現れる天使。bunny4より稼ぐ。" },
   };
 
@@ -58,6 +56,18 @@
   const WRAP_W = 140;
   const WRAP_H = 140;
   const PAD = 6;
+
+  /* =========================
+   * ✅ Oyatu seek (取りに行く) — app側が正規に動かす
+   * ========================= */
+  const OYATU_SEEK = {
+    // oyatu.js から opts で上書き可
+    radius: 280,        // 反応半径
+    speed: 120,         // px/sec（強すぎない）
+    yMul: 0.55,         // 縦方向弱め
+    durationMs: 1400,   // 追いかける時間
+    eatDist: 46,        // 近い判定（oyatu側が消す目安に使える）
+  };
 
   /* =========================
    * Storage
@@ -271,9 +281,7 @@
 
   window.__milkpopSeRegisterQueue = window.__milkpopSeRegisterQueue || [];
   function tryRegisterSE(a) {
-    try {
-      if (window.WB?.bgm?.registerSE) { window.WB.bgm.registerSE(a); return; }
-    } catch {}
+    try { if (window.WB?.bgm?.registerSE) { window.WB.bgm.registerSE(a); return; } } catch {}
     try { window.__milkpopSeRegisterQueue.push(a); } catch {}
   }
   tryRegisterSE(sePoyo);
@@ -362,7 +370,6 @@
     return true;
   }
 
-  // ✅ 黄金うんちを消す時は必ずこれを呼ぶ（imgでもwrapでもOK）
   function removeOugonUnchi(el) {
     if (!el) return false;
 
@@ -381,7 +388,6 @@
     return true;
   }
 
-  // ✅ “クリックで削除”型の黄金うんちなら、これだけで確実に +10000
   field.addEventListener("pointerdown", (e) => {
     const t = e.target;
     if (!t || t.nodeType !== 1) return;
@@ -399,9 +405,7 @@
     removeOugonUnchi(wrap);
   }, { passive: false });
 
-  function safeKind(k) {
-    return BUNNY_DEFS[k] ? k : "bunny1";
-  }
+  function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
   function loadBunnyMeta() {
     try {
@@ -481,7 +485,6 @@
   }
 
   function spawnCoinDropAt(x, y, tier = 0) {
-    // ✅ 自動（放置）発生は全部禁止。クリック生成だけ許可。
     if (DISABLE_IDLE_COINS && !__allowCoinSpawn) return null;
     const c = new CoinDrop(x, y, tier);
     dropsOnField.push(c);
@@ -521,6 +524,9 @@
       this.chargeReady = false;
       this.hartEl = null;
 
+      // ✅ 外部から「取りに行く」(oyatu等)
+      this.seek = null; // { tx, ty, until, speed, radius, yMul }
+
       const { minX, maxX, minY, maxY, gy } = worldBounds();
       this.x = rand(minX, maxX);
       this.y = clamp(gy - WRAP_H, minY, maxY);
@@ -558,10 +564,7 @@
     }
 
     syncSprite() {
-      if (this.isBaby) {
-        this.el.src = ASSETS.babyBunny;
-        return;
-      }
+      if (this.isBaby) { this.el.src = ASSETS.babyBunny; return; }
       this.el.src = (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
     }
 
@@ -604,7 +607,6 @@
         this.chargeReady = true;
 
         if (!this.isBaby) this.showHeart();
-
         emit("bunnyChargeReady", { bornAt: this.bornAt });
       }
     }
@@ -667,7 +669,6 @@
       this.hardClamp(true);
 
       if (this.chargeReady) this.showHeart();
-
       if (isInit) saveBunnyMeta();
     }
 
@@ -689,10 +690,58 @@
       this.wrap.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     }
 
+    // ✅ oyatu等から呼ぶ：目標へ一定時間「取りに行く」
+    setSeekTarget(tx, ty, opts = null) {
+      const o = opts && typeof opts === "object" ? opts : {};
+      const now = Date.now();
+      const durationMs = Math.max(50, Math.floor(Number(o.durationMs ?? OYATU_SEEK.durationMs) || OYATU_SEEK.durationMs));
+      this.seek = {
+        tx: Number(tx) || 0,
+        ty: Number(ty) || 0,
+        until: now + durationMs,
+        speed: Math.max(10, Number(o.speed ?? OYATU_SEEK.speed) || OYATU_SEEK.speed),
+        radius: Math.max(40, Number(o.radius ?? OYATU_SEEK.radius) || OYATU_SEEK.radius),
+        yMul: clamp(Number(o.yMul ?? OYATU_SEEK.yMul) || OYATU_SEEK.yMul, 0, 1),
+      };
+    }
+
+    // ✅ seekの実処理（update内で自然に混ぜる）
+    applySeek(dt) {
+      if (!this.seek) return;
+      const now = Date.now();
+      if (now > this.seek.until) { this.seek = null; return; }
+
+      const dx = this.seek.tx - this.x;
+      const dy = (this.seek.ty - this.y) * this.seek.yMul;
+      const dist = Math.hypot(dx, dy);
+
+      // 半径外なら何もしない（無駄な動き削減）
+      if (dist > this.seek.radius) return;
+
+      // 向きだけ合わせる（見た目自然）
+      if (Math.abs(dx) > 2) this.dir = dx < 0 ? -1 : 1;
+
+      // 進む
+      const step = this.seek.speed * dt;
+      if (dist <= step) {
+        // 到達したら短めで終了（追いかけ続けない）
+        this.x += dx;
+        this.y += dy;
+        this.seek.until = now; // 次フレで切れる
+        return;
+      }
+      this.x += (dx / dist) * step;
+      this.y += (dy / dist) * step;
+    }
+
     update(dt) {
       this.evolveIfNeeded(false);
       this.addOwnCharge(CHARGE_PER_SEC * dt);
 
+      // ✅ 取りに行く（oyatu）
+      this.applySeek(dt);
+
+      // 通常移動
       const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
       this.x += this.dir * this.baseSpeed * speedMul * dt;
 
@@ -795,6 +844,27 @@
   }
 
   /* =========================
+   * ✅ Oyatu helper: 最寄りうさぎを探す
+   * ========================= */
+  function bunnyCenter(b) {
+    return { cx: b.x + WRAP_W * 0.5, cy: b.y + WRAP_H * 0.75 };
+  }
+  function findNearestBunnyTo(x, y) {
+    if (!bunnies.length) return null;
+    let best = null;
+    let bestD = Infinity;
+    const tx = Number(x) || 0;
+    const ty = Number(y) || 0;
+    for (const b of bunnies) {
+      if (!b) continue;
+      const p = bunnyCenter(b);
+      const d = Math.hypot(tx - p.cx, (ty - p.cy) * 0.6);
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    return best;
+  }
+
+  /* =========================
    * WB merge
    * ========================= */
   const api = {
@@ -821,7 +891,7 @@
     spawnBunny,
     removeBunnyInstance,
 
-    spawnCoinDropAt, // ✅ idleは禁止（クリック許可時のみ）
+    spawnCoinDropAt,
 
     saveCoins,
     saveBunnyMeta,
@@ -832,7 +902,6 @@
 
     updateHud,
 
-    // ✅ 外部モジュールからも“必ず+10000”で削除できるAPI
     ougonUnchi: {
       bonus: OUGONUNCHI_BONUS,
       isOugon: isOugonUnchiEl,
@@ -844,7 +913,30 @@
       const b = bunnies.find(x => x && x.bornAt === t);
       return b ? { charge: b.charge, ready: b.chargeReady } : null;
     },
+
+    // ✅ oyatu用：最寄り1匹に「取りに行く」を指示
+    oyatu: {
+      defaults: Object.assign({}, OYATU_SEEK),
+      findNearest: (x, y) => {
+        const b = findNearestBunnyTo(x, y);
+        return b ? { bornAt: b.bornAt, kind: b.kind } : null;
+      },
+      seekTo: (x, y, opts = null) => {
+        const b = findNearestBunnyTo(x, y);
+        if (!b) return false;
+        b.setSeekTarget(Number(x) || 0, Number(y) || 0, opts || null);
+        return true;
+      },
+      seekBornAt: (bornAt, x, y, opts = null) => {
+        const t = Number(bornAt);
+        const b = bunnies.find(bb => bb && bb.bornAt === t);
+        if (!b) return false;
+        b.setSeekTarget(Number(x) || 0, Number(y) || 0, opts || null);
+        return true;
+      },
+    },
   };
+
   window.WB = Object.assign({}, prevWB, api);
 
   /* =========================
@@ -853,18 +945,14 @@
   async function initBunnies() {
     const meta = loadBunnyMeta();
 
-    // ✅ prestige.js と同じキー：転生後は true
     const TENNSHI_ACTIVE_KEY = "wb_tennshi_active_v1";
     const tennshiActive = (localStorage.getItem(TENNSHI_ACTIVE_KEY) === "true");
 
-    // ✅ babyを踏ませない（最初から成体）
     const adultBornAt = () => Date.now() - BABY_DURATION_MS - 1500;
 
-    // 既存保存がある場合はそれを復元
     if (meta && meta.length) {
       meta.forEach(m => spawnBunny(m.kind, m.bornAt));
 
-      // tennshiActive なのに保存メタに居ない場合だけ、1体だけ追加
       if (tennshiActive) {
         const has = bunnies.some(b => b && b.kind === "tennshi");
         if (!has) spawnBunny("tennshi", adultBornAt());
@@ -874,14 +962,12 @@
       return;
     }
 
-    // ✅ 新規開始：転生してるなら “即tennshi 1体だけ”
     if (tennshiActive) {
       spawnBunny("tennshi", adultBornAt());
       saveBunnyMeta();
       return;
     }
 
-    // 通常開始（転生してない時だけ従来の2匹）
     const t = Date.now();
     spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
     spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
