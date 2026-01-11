@@ -1,10 +1,11 @@
-// memoryGarden.js（V1.1.2 - messages分離対応 + 実績Toastと被らない専用Toast + 出やすさ調整）
+// memoryGarden.js（V1.1.3 - ✅記憶表示時にSE再生 + messages分離 + 実績Toastと被らない専用Toast + 出やすさ調整）
 // ✅ localStorage永続化
 // ✅ WBイベントから「感情の種」を自動生成
 // ✅ 放置で成長 → 完了時に3行小説「記憶」ログ生成（messages分離）
 // ✅ ゲームメニューに「🌱 記憶の庭」を追加
 // ✅ 図鑑(zukan)に「記憶」タブを後付け（パッチ）
 // ✅ 実績(zisseki)トーストと被らない（専用トースト＆キュー）
+// ✅ 記憶メッセージを表示するときに assets/messege/messegese.mp3 を鳴らす
 //
 // ★調整（あなた指定）
 // - 放置種：5分
@@ -18,10 +19,10 @@
 
 (() => {
   "use strict";
-  if (window.__MEMORY_GARDEN_V112__) return;
-  window.__MEMORY_GARDEN_V112__ = true;
+  if (window.__MEMORY_GARDEN_V113__) return;
+  window.__MEMORY_GARDEN_V113__ = true;
 
-  const VERSION = "1.1.2";
+  const VERSION = "1.1.3";
   const LS_KEY = "milkpop_memory_garden_v1";
 
   const CFG = {
@@ -57,6 +58,13 @@
       gapMs: 900,
       delayIfOtherToastMs: 550,
       prefix: "🌿 記憶の庭：",
+    },
+
+    // ✅ 記憶表示SE
+    messageSE: {
+      src: "./assets/messege/messegese.mp3",
+      volume: 0.95,
+      minIntervalMs: 120, // 連続表示でも音が詰まらない保険
     },
   };
 
@@ -129,6 +137,42 @@
   function markAction() {
     store.stats.lastActionAt = Date.now();
     saveStore();
+  }
+
+  /* =========================
+   * Message SE（記憶表示時）
+   * - autoplay制限があるので失敗しても無視
+   * - WB側のSE音量があれば追従
+   * ========================= */
+  let __mgSeAudio = null;
+  let __mgSeLastAt = 0;
+
+  function getWBSEVolume() {
+    try {
+      if (window.WB?.getSEVolume) {
+        const v = Number(window.WB.getSEVolume());
+        if (Number.isFinite(v)) return Math.max(0, Math.min(1, v));
+      }
+    } catch {}
+    return 1;
+  }
+
+  function playMessageSE() {
+    const t = Date.now();
+    if (t - __mgSeLastAt < CFG.messageSE.minIntervalMs) return;
+    __mgSeLastAt = t;
+
+    try {
+      if (!__mgSeAudio) {
+        __mgSeAudio = new Audio(CFG.messageSE.src);
+        __mgSeAudio.preload = "auto";
+      }
+      const vol = CFG.messageSE.volume * getWBSEVolume();
+      __mgSeAudio.volume = Math.max(0, Math.min(1, vol));
+      try { __mgSeAudio.currentTime = 0; } catch {}
+      const p = __mgSeAudio.play();
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch {}
   }
 
   /* =========================
@@ -387,9 +431,11 @@
 
       p.querySelectorAll(".tab").forEach((b) => {
         b.addEventListener("click", () => {
+          // ✅ タブ切り替えも「記憶表示」扱い（memのときSE）
           p.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
           b.classList.add("on");
           currentTab = b.dataset.tab || "seed";
+          if (currentTab === "mem") playMessageSE();
           render();
         });
       });
@@ -429,6 +475,10 @@
       body.innerHTML = `<div class="hint">まだ記憶はありません。<br>種が育つと、3行の小説として残ります。</div>`;
       return;
     }
+
+    // ✅ 記憶一覧を描画する＝「記憶メッセージを表示する」なのでSE
+    playMessageSE();
+
     body.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:12px;">
         ${list.map(m=>{
@@ -466,6 +516,7 @@
     const t = p.querySelector(`.tab[data-tab="${currentTab}"]`);
     if (t) t.classList.add("on");
 
+    if (currentTab === "mem") playMessageSE();
     render();
   }
 
@@ -528,6 +579,8 @@
         b.addEventListener("click", () => {
           p.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
           b.classList.add("on");
+          // ✅ 図鑑側も「記憶表示」なのでSE
+          playMessageSE();
           renderZukanMemory(body);
         });
       }
