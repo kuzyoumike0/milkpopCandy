@@ -1,18 +1,20 @@
-// memoryGarden.js（V1.1 - messages分離対応 / 追加JSだけで直組み込み）
+// memoryGarden.js（V1.1.1 - messages分離対応 + 実績Toastと被らない専用Toast）
 // ✅ localStorage永続化
 // ✅ WBイベントから「感情の種」を自動生成
 // ✅ 放置で成長 → 完了時に3行小説「記憶」ログ生成（messages分離）
 // ✅ ゲームメニューに「🌱 記憶の庭」を追加
 // ✅ 図鑑(zukan)に「記憶」タブを後付け（パッチ）
+// ✅ 重要：実績(zisseki)トーストと被らない（専用トースト＆キュー）
+//
 // 読み込み順：zukan.js / gameMenu.js の後（できれば最後）
 // さらに：memoryGarden_messages.js をこの前に読み込む
 
 (() => {
   "use strict";
-  if (window.__MEMORY_GARDEN_V11__) return;
-  window.__MEMORY_GARDEN_V11__ = true;
+  if (window.__MEMORY_GARDEN_V111__) return;
+  window.__MEMORY_GARDEN_V111__ = true;
 
-  const VERSION = "1.1";
+  const VERSION = "1.1.1";
   const LS_KEY = "milkpop_memory_garden_v1";
 
   const CFG = {
@@ -29,6 +31,17 @@
     },
     coinJoyUnit: 1200,
     minSeedIntervalMs: 35 * 1000,
+
+    // ✅ Toast配置（実績と被らない）
+    toast: {
+      right: 12,
+      top: 64,            // HUD下あたり（右上）
+      maxWidth: 320,
+      showMs: 1700,
+      gapMs: 900,         // 連続表示の間隔
+      delayIfOtherToastMs: 550, // 他トーストが居たら少し待つ
+      prefix: "🌿 記憶の庭：",
+    },
   };
 
   const EMO = {
@@ -189,15 +202,38 @@
   }
 
   /* =========================
-   * Toast (best effort)
+   * Toast (MemoryGarden専用：実績と被らない)
+   * - WB.toast / ZISSEKI.toast は絶対使わない
+   * - 右上固定 + キュー + 他トースト検知で少し遅延
    * ========================= */
+  const __mgToastQueue = [];
+  let __mgToastBusy = false;
+
   function toast(msg) {
     msg = String(msg || "");
-    try {
-      if (window.WB?.toast) return window.WB.toast(msg);
-      if (window.ZISSEKI?.toast) return window.ZISSEKI.toast(msg);
-    } catch {}
+    __mgToastQueue.push(msg);
+    if (__mgToastBusy) return;
+    __mgToastBusy = true;
+    pumpMgToast();
+  }
 
+  function pumpMgToast() {
+    const msg = __mgToastQueue.shift();
+    if (!msg) { __mgToastBusy = false; return; }
+
+    const maybeOtherToast =
+      document.querySelector("#zissekiToast, .zissekiToast, .toast, .wbToast") ||
+      null;
+
+    const delay = maybeOtherToast ? CFG.toast.delayIfOtherToastMs : 0;
+
+    setTimeout(() => {
+      showMgToast(msg);
+      setTimeout(() => pumpMgToast(), CFG.toast.gapMs);
+    }, delay);
+  }
+
+  function showMgToast(msg) {
     try {
       const id = "mgToastV1";
       let el = document.getElementById(id);
@@ -205,26 +241,34 @@
         el = document.createElement("div");
         el.id = id;
         el.style.cssText = `
-          position:fixed; left:50%; bottom:18px; transform:translateX(-50%);
+          position:fixed;
+          right:${CFG.toast.right}px;
+          top:${CFG.toast.top}px;
           z-index:2147483647;
+          max-width:min(${CFG.toast.maxWidth}px, 92vw);
           background:rgba(255,255,255,.96);
           border-radius:14px;
           padding:10px 12px;
-          font-weight:900;
+          font-weight:950;
           box-shadow:0 14px 40px rgba(0,0,0,.22);
-          opacity:0; pointer-events:none;
-          transition:opacity .2s ease, transform .2s ease;
+          opacity:0;
+          pointer-events:none;
+          transform:translateY(-6px);
+          transition:opacity .18s ease, transform .18s ease;
+          white-space:pre-line;
         `;
         document.body.appendChild(el);
       }
-      el.textContent = msg;
+
+      el.textContent = `${CFG.toast.prefix}${msg}`;
       el.style.opacity = "1";
-      el.style.transform = "translateX(-50%) translateY(-6px)";
+      el.style.transform = "translateY(0px)";
+
       clearTimeout(el.__t);
       el.__t = setTimeout(() => {
         el.style.opacity = "0";
-        el.style.transform = "translateX(-50%) translateY(0px)";
-      }, 1600);
+        el.style.transform = "translateY(-6px)";
+      }, CFG.toast.showMs);
     } catch {}
   }
 
@@ -527,7 +571,6 @@
         if (p && body && memTab) {
           p.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
           memTab.classList.add("on");
-          // クリックを利用して描画
           try { memTab.click(); } catch {}
         }
       }
