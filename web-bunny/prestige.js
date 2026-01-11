@@ -1,26 +1,41 @@
-// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.5.3
+// prestige.js（転生：✅転生ゲージにコインが必要 → 星獲得 → 恒久解放） v1.5.4
 // ✅ FIX: getCoins が 0 固定になる問題修正（__latestCoins を null に）
 // ✅ coinChanged が number / {coins} どちらでも拾う
 // ✅ app.js が emit("coinChanged") すればスロット/回収/放置すべてゲージ反映
 // ✅ 転生天使：assets/tennshi.png を “bunny種(kind=tennshi)” として生成（app.js側の強化が効く）
 // ✅ 転生天使の「自動ドロップ」は完全に無し（クリックで稼ぐだけ）
+//
+// ★ v1.5.4 変更点（今回の要望）
+// ✅ 「所持コイン」ではなく「転生ゲージ（累計獲得コイン）」に転生コストを課す
+// ✅ 転生回数が増えるほど「必要コイン（転生コスト）」が上がる
+// ✅ 転生実行：コインは 50,000 にセット / うさぎ現状維持 / ゲージリセット / 天使1体生成
 
 (() => {
   "use strict";
-  if (window.__WB_PRESTIGE_V153__) return;
-  window.__WB_PRESTIGE_V153__ = true;
+  if (window.__WB_PRESTIGE_V154__) return;
+  window.__WB_PRESTIGE_V154__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
 
   const CFG = {
-    STAR_BASE_COINS: 50000,
-    MIN_COINS_TO_PRESTIGE: 50000,
-    HOLD_MS: 1200,
+    STAR_BASE_COINS: 50000,           // 星計算（従来通り：転生ゲージから計算）
+    MIN_COINS_TO_PRESTIGE: 50000,     // 星が+1以上になる最低ライン（UI参考）
 
+    HOLD_MS: 1200,
     COIN_WATCH_MS: 250,
 
     LS_EARNED: "wb_prestige_earned_v1",
+
+    // ✅ 転生後の所持コイン（固定）
+    COINS_AFTER_PRESTIGE: 50000,
+
+    // ✅ 転生コスト（転生ゲージに必要）
+    //    cost(t) = BASE * GROW^t
+    PRESTIGE_COST_BASE: 50000,
+    PRESTIGE_COST_GROW: 1.35,
+
+    LS_TIMES: "wb_prestige_times_v1", // 転生回数（コスト増に使用）
 
     DEEP_LOCALSTORAGE_WIPE: false,
     WIPE_KEYS: [
@@ -40,15 +55,16 @@
       unlock: "解放",
       unlocked: "解放済",
       earned: "転生ゲージ（累計獲得）",
+      cost: "転生コスト（必要ゲージ）",
+      times: "転生回数",
     },
 
     // ✅ 転生天使（tennshi）
     TENNSHI: {
       LS_ACTIVE: "wb_tennshi_active_v1",
       WRAP_MARK: "data-tennshi",
-      KIND: "tennshi",                 // ★app.js側で kind=tennshi として認識させる
-      IMG: "./assets/tennshi.png",     // ★念のため（app.jsが未対応でもskin差し替えする）
-
+      KIND: "tennshi",
+      IMG: "./assets/tennshi.png",
       className: "wbTennshiBunny",
     },
   };
@@ -194,6 +210,23 @@
   }
 
   /* =========================
+   * ✅ 転生回数（コスト増）
+   * ========================= */
+  function loadTimes() {
+    try {
+      const v = Number(localStorage.getItem(CFG.LS_TIMES) || "0");
+      return Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+    } catch { return 0; }
+  }
+  function saveTimes(v) {
+    try { localStorage.setItem(CFG.LS_TIMES, String(Math.max(0, Math.floor(v)))); } catch {}
+  }
+  function prestigeCostByTimes(times) {
+    const t = Math.max(0, Math.floor(Number(times) || 0));
+    return Math.max(0, Math.floor(CFG.PRESTIGE_COST_BASE * Math.pow(CFG.PRESTIGE_COST_GROW, t)));
+  }
+
+  /* =========================
    * ✅ FIX：現在コインの同期
    * ========================= */
   let __latestCoins = null;        // ← 0固定バグ回避（null=未確定）
@@ -216,19 +249,25 @@
     return readCoinsDirect(WB);
   }
 
-  function setCoinsZero(WB) {
-    __latestCoins = 0;
-    __lastCoinForEarn = 0;
+  function setCoinsTo(WB, value) {
+    const v = Math.max(0, Math.floor(Number(value) || 0));
 
-    try { if (WB && typeof WB.setCoin === "function") { WB.setCoin(0); return true; } } catch {}
-    try { if (WB && ("coins" in WB)) { WB.coins = 0; return true; } } catch {}
-    try { localStorage.setItem("wb_coins_v6", "0"); } catch {}
+    __latestCoins = v;
+    __lastCoinForEarn = v;
+
+    try { if (WB && typeof WB.setCoin === "function") { WB.setCoin(v); } } catch {}
+    try { if (WB && ("coins" in WB)) { WB.coins = v; } } catch {}
+
+    try { localStorage.setItem("wb_coins_v6", String(v)); } catch {}
     const el = document.getElementById("coinValue");
-    if (el) el.textContent = "0";
+    if (el) el.textContent = String(v);
+
+    try { WB?.emit?.("coinChanged", v); } catch {}
     return true;
   }
 
   function removeAllBunnies(WB) {
+    // v1.5.4 では「現状維持」なので通常は呼ばないが、残しておく（外部API用）
     try { if (WB && typeof WB.removeAllBunnies === "function") { WB.removeAllBunnies(); return true; } } catch {}
     try {
       if (WB && typeof WB.removeBunnyInstance === "function" && Array.isArray(WB.bunnies)) {
@@ -324,7 +363,7 @@
     for (const b of list) {
       const w = b?.wrap;
       if (w?.getAttribute?.(CFG.TENNSHI.WRAP_MARK) === "1") return b;
-      if (b?.kind === CFG.TENNSHI.KIND) return b;         // ★kindで判定
+      if (b?.kind === CFG.TENNSHI.KIND) return b;
       if (b?.isTennshi === true) return b;
     }
     return null;
@@ -332,7 +371,7 @@
 
   function markTennshi(b) {
     try { b.isTennshi = true; } catch {}
-    try { b.kind = CFG.TENNSHI.KIND; } catch {} // ★できる環境は確実にkind化
+    try { b.kind = CFG.TENNSHI.KIND; } catch {}
     try {
       const w = b?.wrap;
       if (w?.setAttribute) {
@@ -345,10 +384,10 @@
   function skinToTennshi(b) {
     if (!b) return false;
 
-    // まず kind を揃える（app.jsが対応していればこれだけでspriteが切り替わる）
+    // まず kind を揃える
     markTennshi(b);
 
-    // それでも反映されない環境向けに「img差し替え」を保険でやる
+    // 未対応環境向けに img 差し替え保険
     const img = b.img || b?.wrap?.querySelector?.("img") || null;
     if (img && img.tagName === "IMG") {
       try { img.src = CFG.TENNSHI.IMG; } catch {}
@@ -366,17 +405,13 @@
       } catch {}
     }
 
-    // app.jsのBunnyにsyncSpriteがある場合は明示更新
     try { if (typeof b.syncSprite === "function") b.syncSprite(); } catch {}
-
-    // 位置の救出
     try { if (typeof b.hardClamp === "function") b.hardClamp(true); } catch {}
     try { if (typeof b.applyPos === "function") b.applyPos(); } catch {}
 
     return true;
   }
 
-  // ✅ spawnBunny が Bunny を返す環境なら「戻り値」を最優先で使う
   function spawnOneBunnyPreferTennshi(WB) {
     const calls = [
       () => WB?.spawnBunny?.(CFG.TENNSHI.KIND),
@@ -385,7 +420,7 @@
       () => WB?.omukae?.spawn?.(CFG.TENNSHI.KIND),
       () => WB?.omukae?.add?.(CFG.TENNSHI.KIND),
 
-      // fallback（環境がtennshi未対応ならbunny4→skin差し替え）
+      // fallback
       () => WB?.spawnBunny?.("bunny4"),
       () => WB?.createBunny?.("bunny4"),
       () => WB?.addBunny?.("bunny4"),
@@ -432,7 +467,6 @@
     if (!WB) return null;
     if (!isTennshiActive()) return null;
 
-    // 既に居るなら再適用
     const exists = findTennshiBunny(WB);
     if (exists) {
       skinToTennshi(exists);
@@ -444,7 +478,6 @@
 
     const sp = spawnOneBunnyPreferTennshi(WB);
 
-    // DOM反映待ち
     await new Promise(r => setTimeout(r, 90));
 
     let b = sp.bunny || pickNewestBunny(WB, prevIds);
@@ -470,10 +503,7 @@
     const b = findTennshiBunny(WB);
     if (!b) return;
 
-    try {
-      if (WB?.removeBunnyInstance) { WB.removeBunnyInstance(b); return; }
-    } catch {}
-
+    try { if (WB?.removeBunnyInstance) { WB.removeBunnyInstance(b); return; } } catch {}
     try { b?.wrap?.remove?.(); } catch {}
     try {
       if (Array.isArray(WB?.bunnies)) {
@@ -555,34 +585,54 @@
     if (!body) return;
 
     const st = loadPrestige();
+
     const coinsNow = getCoins(WB);
-
     const earnedNow = Math.max(earnedCoins, 0);
-    const gainStars = calcStarsFromCoins(earnedNow);
 
+    // ✅ コスト：転生ゲージに必要
+    const times = loadTimes();
+    const cost = prestigeCostByTimes(times);
+    const canPrestige = earnedNow >= cost;
+
+    // 星は従来通り「ゲージ総量」から算出（コストに満たないと転生できない）
+    const gainStars = calcStarsFromCoins(earnedNow);
     const available = Math.max(0, (st.stars - st.spent));
 
     const nextStar = Math.max(1, gainStars + 1);
     const needCoins = nextCoinsForStar(nextStar);
     const pct = (needCoins > 0) ? clamp((earnedNow / needCoins) * 100, 0, 100) : 0;
 
+    const costPct = (cost > 0) ? clamp((earnedNow / cost) * 100, 0, 100) : 0;
+
     const top = `
       <div class="row">
         <span class="pill">現在コイン：<b>🪙 ${format(coinsNow)}</b></span>
         <span class="pill">${escapeHtml(CFG.LABEL.earned)}：<b>🪙 ${format(earnedNow)}</b></span>
+        <span class="pill">${escapeHtml(CFG.LABEL.cost)}：<b>🪙 ${format(cost)}</b></span>
+        <span class="pill">${escapeHtml(CFG.LABEL.times)}：<b>🔁 ${format(times)}</b></span>
         <span class="pill">牧場の星：<b>🌟 ${format(st.stars)}</b></span>
         <span class="pill">使用可能：<b>✨ ${format(available)}</b></span>
       </div>
+
       <div class="row">
         <div style="flex:1; min-width:240px;">
+          <div class="pill">転生可能度：<b>${canPrestige ? "✅OK" : "❌不足"}</b>（${costPct.toFixed(1)}%）</div>
+          <div class="bar"><i style="width:${costPct.toFixed(1)}%"></i></div>
+          <div class="hint">必要ゲージ：🪙 ${format(cost)}（いま ${costPct.toFixed(1)}%）</div>
+
+          <div style="height:8px"></div>
+
           <div class="pill">この状態で転生すると：<b>🌟 +${format(gainStars)}</b></div>
           <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
           <div class="hint">次の星（${nextStar}）目安：🪙 ${format(needCoins)}（いま ${pct.toFixed(1)}%）</div>
+
           <div class="hint">※ 転生ゲージは「稼いだ総量」です（使って減っても戻りません）。</div>
+          <div class="hint">※ v1.5.4：転生には「必要ゲージ」を満たす必要があります（所持コインではありません）。</div>
+          <div class="hint">※ 転生後：所持コインは 🪙 ${format(CFG.COINS_AFTER_PRESTIGE)} にセット、うさぎは維持、ゲージは0。</div>
         </div>
 
         <div style="display:flex; gap:10px; align-items:center;">
-          <button class="btn danger hold" type="button" data-prestige="1" ${gainStars <= 0 ? "disabled" : ""}>
+          <button class="btn danger hold" type="button" data-prestige="1" ${canPrestige ? "" : "disabled"}>
             <span>${escapeHtml(CFG.LABEL.prestigeBtn)}（長押し）</span>
             <i class="fill"></i>
           </button>
@@ -616,7 +666,9 @@
     const history = (st.history || []).slice(-8).reverse().map(h => {
       const t = new Date(h.t || Date.now());
       const dt = `${t.getFullYear()}/${String(t.getMonth()+1).padStart(2,"0")}/${String(t.getDate()).padStart(2,"0")} ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
-      return `<div class="pill">🗓 ${escapeHtml(dt)}：🪙${format(h.earned ?? h.coins ?? 0)} → 🌟+${format(h.stars)}</div>`;
+      const costStr = (h.cost != null) ? ` / cost🪙${format(h.cost)}` : "";
+      const timesStr = (h.times != null) ? ` / 🔁${format(h.times)}` : "";
+      return `<div class="pill">🗓 ${escapeHtml(dt)}：earned🪙${format(h.earned ?? 0)}${costStr}${timesStr} → 🌟+${format(h.stars ?? 0)}</div>`;
     }).join(" ");
 
     body.innerHTML = `
@@ -700,30 +752,53 @@
     async function doPrestige() {
       const WB = window.WB || null;
 
-      const st = loadPrestige();
+      const st0 = loadPrestige();
+      const times0 = loadTimes();
+      const cost0 = prestigeCostByTimes(times0);
 
       const earned = Math.max(0, loadEarned());
+      if (earned < cost0) return; // ✅ ゲージ不足は不可
+
+      // 星は従来通り「ゲージ総量」から
       const gain = calcStarsFromCoins(earned);
-      if (gain <= 0) return;
+      if (gain <= 0) {
+        // 星が増えない転生は許可しないならここでreturn
+        // ただし「コスト満たしてるなら転生だけしたい」ならこのifを外してOK
+        return;
+      }
 
-      st.stars += gain;
-      st.history = Array.isArray(st.history) ? st.history : [];
-      st.history.push({ t: Date.now(), earned, coins: getCoins(WB), stars: gain });
-      if (st.history.length > 80) st.history = st.history.slice(-80);
-      savePrestige(st);
+      // ✅ 星付与
+      st0.stars += gain;
+      st0.history = Array.isArray(st0.history) ? st0.history : [];
+      st0.history.push({
+        t: Date.now(),
+        earned,
+        cost: cost0,
+        times: times0 + 1,
+        coinsBefore: getCoins(WB),
+        stars: gain
+      });
+      if (st0.history.length > 80) st0.history = st0.history.slice(-80);
+      savePrestige(st0);
 
-      // リセット
-      setCoinsZero(WB);
-      removeAllBunnies(WB);
-      deepWipeLocalStorage();
+      // ✅ 転生回数を進める（次回コストが上がる）
+      saveTimes(times0 + 1);
 
+      // ✅ ゲージだけリセット
       resetEarned();
 
-      // ✅ 転生天使（kind=tennshi）を確実生成
+      // ✅ 所持コインは 50,000 にセット（固定）
+      setCoinsTo(WB, CFG.COINS_AFTER_PRESTIGE);
+
+      // ✅ うさぎは現状維持：削除もワイプもしない
+      // removeAllBunnies(WB); // ←しない
+      // deepWipeLocalStorage(); // ←しない
+
+      // ✅ 転生天使（kind=tennshi）を確実生成（1体のみ）
       await spawnTennshiOnPrestige(WB);
 
       // 通知（reincarnation_pet.js のトリガーにもなる）
-      try { WB?.emit?.("prestige", { stars: gain, total: st.stars }); } catch {}
+      try { WB?.emit?.("prestige", { stars: gain, total: st0.stars }); } catch {}
       try { WB?.emit?.("sy:add", { key: "prestige", delta: 1 }); } catch {}
 
       render();
@@ -737,9 +812,8 @@
     let hooked = false;
 
     try {
-      if (WB?.on && !WB.__prestigeCoinHookedV153) {
+      if (WB?.on && !WB.__prestigeCoinHookedV154) {
         WB.on("coinChanged", (payload) => {
-          // payload: number または {coins: number}
           const cur = (() => {
             if (typeof payload === "number") return payload;
             if (payload && typeof payload === "object" && payload.coins != null) return Number(payload.coins);
@@ -763,7 +837,7 @@
           } catch {}
         });
 
-        WB.__prestigeCoinHookedV153 = true;
+        WB.__prestigeCoinHookedV154 = true;
         hooked = true;
       }
     } catch {}
@@ -815,6 +889,14 @@
 
       getCoins: () => getCoins(window.WB || WB || null),
 
+      // ✅ 転生回数 & コスト
+      getTimes: () => loadTimes(),
+      getCost: () => prestigeCostByTimes(loadTimes()),
+      calcCost: (times) => prestigeCostByTimes(times),
+
+      // ✅ 外部から「うさぎを消したい」場合の保険
+      removeAllBunnies: () => removeAllBunnies(window.WB || WB || null),
+
       tennshi: {
         isActive: () => isTennshiActive(),
         ensure: () => ensureTennshiExists(window.WB || null),
@@ -833,13 +915,17 @@
       }
     } catch {}
 
-    console.log("[prestige] ready v1.5.3", {
+    console.log("[prestige] ready v1.5.4", {
       LS_PRESTIGE,
       earned: CFG.LS_EARNED,
-      hookCoinChanged: !!(WB?.__prestigeCoinHookedV153),
+      timesLS: CFG.LS_TIMES,
+      hookCoinChanged: !!(WB?.__prestigeCoinHookedV154),
       fallbackWatchMs: CFG.COIN_WATCH_MS,
       tennshi: CFG.TENNSHI.IMG,
       kind: CFG.TENNSHI.KIND,
+      costBase: CFG.PRESTIGE_COST_BASE,
+      costGrow: CFG.PRESTIGE_COST_GROW,
+      coinsAfter: CFG.COINS_AFTER_PRESTIGE,
     });
   });
 })();
