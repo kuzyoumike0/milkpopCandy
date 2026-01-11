@@ -1,8 +1,10 @@
-// gameMenu.js（非module）V2.5
-// ✅ 利用規約：kiyaku.js を「未読込なら自動で読み込む」→ その後必ず KIYAKU.open()
-// ✅ 予約キュー + イベント + 動的script注入の三段構え
-// ✅ 追加：🌟 転生（牧場の星）メニュー項目
-//    - WB.prestige.open() / window.WB_PRESTIGE.open() / #prestigeBtn click の順でベストエフォート
+// gameMenu.js（非module）V2.6
+// ✅ 追加：🔥 完全リセット（牧場を完全初期化）
+// - localStorage 全消去
+// - IndexedDB 全削除
+// - ServiceWorker 解除
+// - ページ強制リロード
+// ⚠️ 取り消し不可（長押し1.5秒）
 
 (() => {
   "use strict";
@@ -15,14 +17,10 @@
 
   const $ = (q, p = document) => p.querySelector(q);
 
-  const X_HANDLE = "Soni_complaint";
-  const X_URL = `https://x.com/${encodeURIComponent(X_HANDLE)}`;
-
-  // 共通予約キュー（BGM/規約など全部ここ）
-  window.__milkpopOpenModalQueue = window.__milkpopOpenModalQueue || [];
+  const HOLD_RESET_MS = 1500;
 
   /* =========================
-   * Utils
+   * Style
    * ========================= */
   function ensureStyle() {
     if (document.getElementById(UI.style)) return;
@@ -51,20 +49,15 @@
 #${UI.panel}{
   position:fixed; top:62px; right:10px;
   z-index:2147483101;
-  width:min(280px, 92vw);
+  width:min(300px, 94vw);
   background:rgba(255,255,255,.98);
   border-radius:16px;
   box-shadow:0 18px 44px rgba(0,0,0,.22);
   padding:10px;
   display:none;
 }
-#${UI.panel} .ttl{
-  font-weight:1000; letter-spacing:.02em;
-  padding:6px 8px 10px;
-}
-#${UI.panel} .list{
-  display:flex; flex-direction:column; gap:8px;
-}
+#${UI.panel} .ttl{ font-weight:1000; padding:6px 8px 10px; }
+#${UI.panel} .list{ display:flex; flex-direction:column; gap:8px; }
 #${UI.panel} .item{
   border:none; border-radius:14px;
   padding:10px 12px;
@@ -73,32 +66,23 @@
   cursor:pointer;
   text-align:left;
 }
+#${UI.panel} .item.danger{ background:#ffe0e0; }
 #${UI.panel} .item:hover{ background:rgba(0,0,0,.06); }
-#${UI.panel} .note{
-  margin-top:8px;
-  font-size:12px;
-  opacity:.75;
-  padding:6px 8px 2px;
-  line-height:1.35;
+#${UI.panel} .hold{
+  position:relative; overflow:hidden;
 }
-#${UI.panel} .smallrow{
-  display:flex; gap:8px; margin-top:8px; padding:0 4px;
+#${UI.panel} .hold .fill{
+  position:absolute; inset:0;
+  width:0%;
+  background:rgba(0,0,0,.08);
 }
-#${UI.panel} .pill{
-  flex:1;
-  border:none;
-  border-radius:999px;
-  padding:8px 10px;
-  font-weight:1000;
-  cursor:pointer;
-  background:#fff;
-  box-shadow:0 10px 24px rgba(0,0,0,.08);
-}
-#${UI.panel} .pill:hover{ transform:translateY(-1px); }
 `;
     document.head.appendChild(s);
   }
 
+  /* =========================
+   * UI
+   * ========================= */
   function ensureUI() {
     ensureStyle();
 
@@ -108,9 +92,7 @@
     if (!btn) {
       btn = document.createElement("button");
       btn.id = UI.btn;
-      btn.type = "button";
-      btn.innerHTML = `<span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>`;
-      btn.title = "メニュー";
+      btn.innerHTML = `<span class="bars"><i></i><i></i><i></i></span>`;
       document.body.appendChild(btn);
     }
 
@@ -120,27 +102,17 @@
       panel.innerHTML = `
         <div class="ttl">🐰 Milkpop メニュー</div>
         <div class="list">
-          <button class="item" type="button" data-act="shop">🛒 ショップ</button>
-          <button class="item" type="button" data-act="isyou">🎀 お洒落</button>
-          <button class="item" type="button" data-act="itemplace">🧸 アイテム配置</button>
-          <button class="item" type="button" data-act="slot">🎰 スロット</button>
-          <button class="item" type="button" data-act="zukan">📖 図鑑</button>
-          <button class="item" type="button" data-act="bgm">🎵 BGM</button>
+          <button class="item" data-act="shop">🛒 ショップ</button>
+          <button class="item" data-act="itemplace">🧸 アイテム配置</button>
+          <button class="item" data-act="zukan">📖 図鑑</button>
+          <button class="item" data-act="bgm">🎵 BGM</button>
+          <button class="item" data-act="prestige">🌟 転生</button>
 
-          <!-- ✅ 追加：転生 -->
-          <button class="item" type="button" data-act="prestige">🌟 転生（牧場の星）</button>
-        </div>
-
-        <div class="smallrow">
-          <button class="pill" type="button" data-act="xlink">X（@${X_HANDLE}）</button>
-          <button class="pill" type="button" data-act="kiyaku">利用規約</button>
-        </div>
-
-        <div class="note">
-          ※ BGMは一度クリックが必要です。<br>
-          ※ アイテム配置：選んだアイテムが透明赤枠で出ます → 置きたい場所をクリックで確定。<br>
-          ※ スロット：コイン消費に注意。<br>
-          ※ 転生：コイン/うさぎをリセットして「牧場の星」を得ます（恒久解放に使用）。
+          <!-- 🔥 完全リセット -->
+          <button class="item danger hold" data-act="reset">
+            🔥 牧場を完全リセット（長押し）
+            <i class="fill"></i>
+          </button>
         </div>
       `;
       document.body.appendChild(panel);
@@ -149,187 +121,40 @@
     return { btn, panel };
   }
 
-  function closePanel(panel) { panel.style.display = "none"; }
-  function togglePanel(panel) {
-    panel.style.display = (panel.style.display === "block") ? "none" : "block";
-  }
-
-  function safeCall(fn, retryMs = 140) {
-    try { fn(); return; } catch {}
-    setTimeout(() => { try { fn(); } catch {} }, retryMs);
-  }
-
   /* =========================
-   * Slot best effort
+   * Complete Reset
    * ========================= */
-  function openSlotBestEffort() {
-    try { if (window.WB?.slot?.open) { window.WB.slot.open(); return true; } } catch {}
-    try { if (window.SLOT?.open) { window.SLOT.open(); return true; } } catch {}
+  async function completeReset() {
+    console.warn("[RESET] full reset start");
 
-    const btn = document.getElementById("slotBtn");
-    if (btn) {
-      try { btn.click(); return true; } catch {}
-      try {
-        btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-        return true;
-      } catch {}
+    // 1) WBに止めさせる
+    try { window.WB?.mirrorballDance?.stop?.(); } catch {}
+    try { window.WB?.bgm?.stop?.(); } catch {}
+    try { window.WB?.emit?.("core:reset_all"); } catch {}
+
+    // 2) localStorage 全消去
+    try { localStorage.clear(); } catch {}
+
+    // 3) IndexedDB 全削除
+    if (window.indexedDB?.databases) {
+      const dbs = await indexedDB.databases();
+      for (const db of dbs) {
+        if (db.name) {
+          try { indexedDB.deleteDatabase(db.name); } catch {}
+        }
+      }
     }
 
-    try { if (window.WB?.openSlot) { window.WB.openSlot(); return true; } } catch {}
-    return false;
-  }
-
-  /* =========================
-   * ✅ Prestige best effort
-   * ========================= */
-  function openPrestigeBestEffort() {
-    // 1) WB.prestige.open()
-    try { if (window.WB?.prestige?.open) { window.WB.prestige.open(); return true; } } catch {}
-
-    // 2) WB_PRESTIGE.open()（WB無い/遅い環境）
-    try { if (window.WB_PRESTIGE?.open) { window.WB_PRESTIGE.open(); return true; } } catch {}
-
-    // 3) 互換ボタン click
-    const btn = document.getElementById("prestigeBtn");
-    if (btn) {
-      try { btn.click(); return true; } catch {}
-      try {
-        btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-        return true;
-      } catch {}
-    }
-
-    // 4) 互換関数
-    try { if (window.WB?.openPrestige) { window.WB.openPrestige(); return true; } } catch {}
-    return false;
-  }
-
-  /* =========================
-   * ✅ BGM open (WAIT + QUEUE)
-   * ========================= */
-  function queueOpenBgmModal() {
-    try { window.__milkpopOpenModalQueue.push({ type: "bgm", at: Date.now() }); } catch {}
-  }
-
-  async function waitForBgmOpenModal(maxMs = 8000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < maxMs) {
-      if (window.WB?.bgm?.openModal) return true;
-      await new Promise(r => setTimeout(r, 50));
-    }
-    return false;
-  }
-
-  async function openBgmModalGuaranteed() {
-    queueOpenBgmModal();
-    try { window.WB?.unlockAudioOnce?.(); } catch {}
-
+    // 4) Service Worker 解除
     try {
-      if (window.WB?.bgm?.openModal) { window.WB.bgm.openModal(); return true; }
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) await r.unregister();
     } catch {}
 
-    const ok = await waitForBgmOpenModal(8000);
-    if (ok) {
-      try { window.WB.bgm.openModal(); return true; } catch {}
-    }
-
-    console.warn("[gameMenu] BGM modal not ready: BGM.js not loaded or WB.bgm not patched");
-    return false;
-  }
-
-  /* =========================
-   * ✅ 利用規約 open（QUEUE + script注入 + WAIT）
-   * ========================= */
-  const KIYAKU_SCRIPT_ID = "milkpopKiyakuScriptV1";
-  const KIYAKU_SRC = "./kiyaku.js"; // ✅ ここがパスの本命（同階層に置く）
-
-  function queueOpenKiyaku() {
-    try { window.__milkpopOpenModalQueue.push({ type: "kiyaku", at: Date.now() }); } catch {}
-  }
-
-  function ensureKiyakuScriptInjected() {
-    if (document.getElementById(KIYAKU_SCRIPT_ID)) return;
-    const s = document.createElement("script");
-    s.id = KIYAKU_SCRIPT_ID;
-    s.src = KIYAKU_SRC;
-    s.async = true;
-    s.onload = () => console.log("[gameMenu] kiyaku.js loaded");
-    s.onerror = () => console.warn("[gameMenu] failed to load kiyaku.js:", KIYAKU_SRC);
-    document.head.appendChild(s);
-  }
-
-  async function waitForKiyaku(maxMs = 6000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < maxMs) {
-      if (window.KIYAKU?.open) return true;
-      await new Promise(r => setTimeout(r, 50));
-    }
-    return false;
-  }
-
-  async function openKiyakuGuaranteed() {
-    // ✅ 1) まず予約（後読みでも kiyaku.js が吸収して open する）
-    queueOpenKiyaku();
-
-    // ✅ 2) すでにあるなら即 open
-    try { if (window.KIYAKU?.open) { window.KIYAKU.open(); return true; } } catch {}
-
-    // ✅ 3) そもそも読まれてない可能性が高いので script を注入
-    ensureKiyakuScriptInjected();
-
-    // ✅ 4) イベント保険（kiyaku.js側が拾う）
-    try { window.dispatchEvent(new Event("milkpop:openKiyaku")); } catch {}
-
-    // ✅ 5) それでも待つ
-    const ok = await waitForKiyaku(6000);
-    if (ok) {
-      try { window.KIYAKU.open(); return true; } catch {}
-    }
-
-    console.warn("[gameMenu] KIYAKU.open not ready: kiyaku.js not loaded");
-    return false;
-  }
-
-  /* =========================
-   * Action handler
-   * ========================= */
-  function handleAction(act) {
-    if (act === "shop")   { safeCall(() => window.WB?.shop?.open?.()); return; }
-    if (act === "isyou")  { safeCall(() => window.ISYOU?.openModal?.()); return; }
-
-    if (act === "itemplace") {
-      safeCall(() => window.ITEMPLACE?.open?.());
-      setTimeout(() => {
-        if (window.ITEMPLACE?.open) return;
-        try { window.ITEMPLACE?.openModal?.(); } catch {}
-      }, 0);
-      setTimeout(() => {
-        try { window.WB?.itemplace?.open?.(); } catch {}
-        try { window.WB?.itemplace?.openModal?.(); } catch {}
-      }, 0);
-      return;
-    }
-
-    if (act === "slot")  { safeCall(() => openSlotBestEffort()); setTimeout(() => openSlotBestEffort(), 120); return; }
-    if (act === "zukan") { safeCall(() => window.WB?.zukan?.open?.("bunny")); return; }
-    if (act === "bgm")   { openBgmModalGuaranteed(); return; }
-
-    // ✅ 追加：転生
-    if (act === "prestige") {
-      safeCall(() => openPrestigeBestEffort());
-      setTimeout(() => openPrestigeBestEffort(), 120);
-      return;
-    }
-
-    if (act === "xlink") {
-      try { window.open(X_URL, "_blank", "noopener,noreferrer"); } catch {}
-      return;
-    }
-
-    if (act === "kiyaku") {
-      openKiyakuGuaranteed();
-      return;
-    }
+    // 5) 強制リロード（キャッシュ無視）
+    setTimeout(() => {
+      location.href = location.pathname + "?reset=" + Date.now();
+    }, 300);
   }
 
   /* =========================
@@ -338,30 +163,49 @@
   function boot() {
     const { btn, panel } = ensureUI();
 
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      togglePanel(panel);
-    });
+    btn.onclick = () => {
+      panel.style.display = panel.style.display === "block" ? "none" : "block";
+    };
 
-    panel.addEventListener("click", (e) => {
-      const b = e.target?.closest?.("[data-act]");
+    let holdAt = 0;
+    let raf = 0;
+    let holding = false;
+
+    panel.addEventListener("pointerdown", (e) => {
+      const b = e.target.closest("[data-act]");
       if (!b) return;
-      e.preventDefault();
-      e.stopPropagation();
 
-      const act = b.getAttribute("data-act");
-      closePanel(panel);
-      handleAction(act);
+      const act = b.dataset.act;
+      if (act !== "reset") return;
+
+      holding = true;
+      holdAt = Date.now();
+      const fill = b.querySelector(".fill");
+
+      const step = () => {
+        if (!holding) return;
+        const p = Math.min(1, (Date.now() - holdAt) / HOLD_RESET_MS);
+        if (fill) fill.style.width = `${p * 100}%`;
+        if (p >= 1) {
+          holding = false;
+          completeReset();
+          return;
+        }
+        raf = requestAnimationFrame(step);
+      };
+      step();
     });
 
-    document.addEventListener("pointerdown", (e) => {
-      if (panel.style.display !== "block") return;
-      if (panel.contains(e.target) || btn.contains(e.target)) return;
-      closePanel(panel);
-    }, { passive: true });
+    ["pointerup","pointerleave","pointercancel"].forEach(ev => {
+      panel.addEventListener(ev, () => {
+        holding = false;
+        const fill = panel.querySelector(".fill");
+        if (fill) fill.style.width = "0%";
+        if (raf) cancelAnimationFrame(raf);
+      });
+    });
 
-    console.log("[gameMenu] ready v2.5");
+    console.log("[gameMenu] ready v2.6 (FULL RESET)");
   }
 
   if (document.readyState === "loading") {
