@@ -1,20 +1,19 @@
-// prestige.js（転生：✅転生ゲージにコインが必要 → 星獲得 → 恒久解放） v1.5.5
+// prestige.js（転生：✅転生ゲージにコインが必要 → 星獲得 → 恒久解放） v1.5.6
 // ✅ FIX: getCoins が 0 固定になる問題修正（__latestCoins を null に）
 // ✅ coinChanged が number / {coins} どちらでも拾う
 // ✅ app.js が emit("coinChanged") すればスロット/回収/放置すべてゲージ反映
 //
-// ★ v1.5.5 変更点（今回の要望）
-// ✅ 「転生する度に tennshi.png を 1体ずつ増やす」（累計=転生回数ぶん）
-//    - 旧：1体のみ（LS_ACTIVE boolean）
-//    - 新：LS_COUNTで累計管理し、足りない分を生成
+// ★ v1.5.6 変更点（今回の要望）
+// ✅ 転生の条件に「所持コイン >= 転生コスト」を追加（足りないと転生不可）
+// ✅ 転生時：所持コインは「転生コスト分だけ差し引き」（固定セットしない）
+// ✅ 転生時：ゲージリセット / うさぎ現状維持 / 天使+1体（累計）
 // ✅ 転生天使：assets/tennshi.png を “bunny種(kind=tennshi)” として生成（app.js側の強化が効く）
 // ✅ 転生天使の「自動ドロップ」は完全に無し（クリックで稼ぐだけ）※app.js側が対応している想定
-// ✅ 転生実行：コインは 50,000 にセット / うさぎ現状維持 / ゲージリセット / 天使+1体
 
 (() => {
   "use strict";
-  if (window.__WB_PRESTIGE_V155__) return;
-  window.__WB_PRESTIGE_V155__ = true;
+  if (window.__WB_PRESTIGE_V156__) return;
+  window.__WB_PRESTIGE_V156__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -27,9 +26,6 @@
     COIN_WATCH_MS: 250,
 
     LS_EARNED: "wb_prestige_earned_v1",
-
-    // ✅ 転生後の所持コイン（固定）
-    COINS_AFTER_PRESTIGE: 50000,
 
     // ✅ 転生コスト（転生ゲージに必要）
     //    cost(t) = BASE * GROW^t
@@ -56,19 +52,16 @@
       unlock: "解放",
       unlocked: "解放済",
       earned: "転生ゲージ（累計獲得）",
-      cost: "転生コスト（必要ゲージ）",
+      cost: "転生コスト（必要ゲージ＆必要コイン）",
       times: "転生回数",
       tennshi: "転生天使",
     },
 
-    // ✅ 転生天使（tennshi）
+    // ✅ 転生天使（tennshi）：転生回数ぶん増える
     TENNSHI: {
-      // 旧：LS_ACTIVE boolean
-      // 新：累計数（転生回数ぶん）を保存
       LS_COUNT: "wb_tennshi_count_v1",
-
       WRAP_MARK: "data-tennshi",
-      WRAP_ID: "data-tennshi-id", // 個体識別（任意）
+      WRAP_ID: "data-tennshi-id",
       KIND: "tennshi",
       IMG: "./assets/tennshi.png",
       className: "wbTennshiBunny",
@@ -383,6 +376,7 @@
   function markTennshi(b, idStr = "") {
     try { b.isTennshi = true; } catch {}
     try { b.kind = CFG.TENNSHI.KIND; } catch {}
+
     // ✅ 自動ドロップ禁止フラグ（app.js側が見てくれる想定）
     try { b.noIdleDrop = true; } catch {}
     try { b.disableAutoDrop = true; } catch {}
@@ -513,7 +507,6 @@
       const idStr = String(existing.length + made.length + 1);
       const b = await spawnOneTennshi(WB, idStr);
       if (b) made.push(b);
-      // 連続生成で重くなるのを避ける
       await new Promise(r => setTimeout(r, 30));
     }
     return existing.concat(made);
@@ -603,12 +596,14 @@
     const coinsNow = getCoins(WB);
     const earnedNow = Math.max(earnedCoins, 0);
 
-    // ✅ コスト：転生ゲージに必要
+    // ✅ コスト：転生ゲージにも所持コインにも必要
     const times = loadTimes();
     const cost = prestigeCostByTimes(times);
-    const canPrestige = earnedNow >= cost;
 
-    // 星は従来通り「ゲージ総量」から算出（コストに満たないと転生できない）
+    // ✅ 転生条件：ゲージ & 所持コイン
+    const canPrestige = (earnedNow >= cost) && (coinsNow >= cost);
+
+    // 星は従来通り「ゲージ総量」から算出
     const gainStars = calcStarsFromCoins(earnedNow);
     const available = Math.max(0, (st.stars - st.spent));
 
@@ -633,9 +628,11 @@
 
       <div class="row">
         <div style="flex:1; min-width:240px;">
-          <div class="pill">転生可能度：<b>${canPrestige ? "✅OK" : "❌不足"}</b>（${costPct.toFixed(1)}%）</div>
+          <div class="pill">転生可能度：<b>${canPrestige ? "✅OK" : "❌不足"}</b>（ゲージ ${costPct.toFixed(1)}%）</div>
           <div class="bar"><i style="width:${costPct.toFixed(1)}%"></i></div>
-          <div class="hint">必要ゲージ：🪙 ${format(cost)}（いま ${costPct.toFixed(1)}%）</div>
+
+          <div class="hint">必要ゲージ：🪙 ${format(cost)}（いま 🪙 ${format(earnedNow)}）</div>
+          <div class="hint">必要コイン：🪙 ${format(cost)}（所持 🪙 ${format(coinsNow)}）</div>
 
           <div style="height:8px"></div>
 
@@ -644,8 +641,8 @@
           <div class="hint">次の星（${nextStar}）目安：🪙 ${format(needCoins)}（いま ${pct.toFixed(1)}%）</div>
 
           <div class="hint">※ 転生ゲージは「稼いだ総量」です。</div>
-          <div class="hint">※ v1.5.5：転生には「必要ゲージ」を満たす必要があります（所持コインではありません）。</div>
-          <div class="hint">※ 転生後：所持コインは 🪙 ${format(CFG.COINS_AFTER_PRESTIGE)} にセット、うさぎは維持、ゲージは0。</div>
+          <div class="hint">※ v1.5.6：転生には「必要ゲージ」と「必要コイン」の両方を満たす必要があります。</div>
+          <div class="hint">※ 転生後：所持コインはコスト分だけ減少、うさぎは維持、ゲージは0。</div>
           <div class="hint">※ 転生する度に 🪽天使が +1 体増えます（累計保存）。</div>
         </div>
 
@@ -687,7 +684,9 @@
       const costStr = (h.cost != null) ? ` / cost🪙${format(h.cost)}` : "";
       const timesStr = (h.times != null) ? ` / 🔁${format(h.times)}` : "";
       const tnStr = (h.tennshi != null) ? ` / 🪽${format(h.tennshi)}` : "";
-      return `<div class="pill">🗓 ${escapeHtml(dt)}：earned🪙${format(h.earned ?? 0)}${costStr}${timesStr}${tnStr} → 🌟+${format(h.stars ?? 0)}</div>`;
+      const cbStr = (h.coinsBefore != null) ? ` / coin🪙${format(h.coinsBefore)}→` : "";
+      const caStr = (h.coinsAfter != null) ? `🪙${format(h.coinsAfter)}` : "";
+      return `<div class="pill">🗓 ${escapeHtml(dt)}：earned🪙${format(h.earned ?? 0)}${costStr}${timesStr}${tnStr}${cbStr}${caStr} → 🌟+${format(h.stars ?? 0)}</div>`;
     }).join(" ");
 
     body.innerHTML = `
@@ -776,14 +775,14 @@
       const cost0 = prestigeCostByTimes(times0);
 
       const earned = Math.max(0, loadEarned());
-      if (earned < cost0) return; // ✅ ゲージ不足は不可
+      if (earned < cost0) return; // ✅ ゲージ不足
+
+      const coinsBefore = getCoins(WB);
+      if (coinsBefore < cost0) return; // ✅ 所持コイン不足（今回追加）
 
       // 星は従来通り「ゲージ総量」から
       const gain = calcStarsFromCoins(earned);
-      if (gain <= 0) {
-        // 星が増えない転生は許可しないならここでreturn
-        return;
-      }
+      if (gain <= 0) return;
 
       // ✅ 星付与
       st0.stars += gain;
@@ -794,12 +793,9 @@
       // ✅ ゲージだけリセット
       resetEarned();
 
-      // ✅ 所持コインは 50,000 にセット（固定）
-      setCoinsTo(WB, CFG.COINS_AFTER_PRESTIGE);
-
-      // ✅ うさぎは現状維持：削除もワイプもしない
-      // removeAllBunnies(WB); // ←しない
-      // deepWipeLocalStorage(); // ←しない
+      // ✅ 所持コインを転生コスト分だけ減算（固定セットはしない）
+      const coinsAfter = Math.max(0, coinsBefore - cost0);
+      setCoinsTo(WB, coinsAfter);
 
       // ✅ 転生天使：転生する度に +1体（累計）
       const newCount = await addOneTennshi(WB);
@@ -811,14 +807,15 @@
         earned,
         cost: cost0,
         times: times0 + 1,
-        coinsBefore: getCoins(WB),
+        coinsBefore,
+        coinsAfter,
         stars: gain,
         tennshi: newCount,
       });
       if (st0.history.length > 80) st0.history = st0.history.slice(-80);
       savePrestige(st0);
 
-      // 通知（reincarnation_pet.js のトリガーにもなる）
+      // 通知
       try { WB?.emit?.("prestige", { stars: gain, total: st0.stars, tennshi: newCount }); } catch {}
       try { WB?.emit?.("sy:add", { key: "prestige", delta: 1 }); } catch {}
 
@@ -833,7 +830,7 @@
     let hooked = false;
 
     try {
-      if (WB?.on && !WB.__prestigeCoinHookedV155) {
+      if (WB?.on && !WB.__prestigeCoinHookedV156) {
         WB.on("coinChanged", (payload) => {
           const cur = (() => {
             if (typeof payload === "number") return payload;
@@ -858,7 +855,7 @@
           } catch {}
         });
 
-        WB.__prestigeCoinHookedV155 = true;
+        WB.__prestigeCoinHookedV156 = true;
         hooked = true;
       }
     } catch {}
@@ -946,18 +943,17 @@
     if (WB) WB.prestige = api;
     else window.WB_PRESTIGE = api;
 
-    console.log("[prestige] ready v1.5.5", {
+    console.log("[prestige] ready v1.5.6", {
       LS_PRESTIGE,
       earned: CFG.LS_EARNED,
       timesLS: CFG.LS_TIMES,
-      hookCoinChanged: !!(WB?.__prestigeCoinHookedV155),
+      hookCoinChanged: !!(WB?.__prestigeCoinHookedV156),
       fallbackWatchMs: CFG.COIN_WATCH_MS,
       tennshiImg: CFG.TENNSHI.IMG,
       tennshiKind: CFG.TENNSHI.KIND,
       tennshiCount: loadTennshiCount(),
       costBase: CFG.PRESTIGE_COST_BASE,
       costGrow: CFG.PRESTIGE_COST_GROW,
-      coinsAfter: CFG.COINS_AFTER_PRESTIGE,
     });
   });
 })();
