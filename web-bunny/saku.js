@@ -1,84 +1,87 @@
-// saku.js（画面左右に saku.png を固定表示 + 風に揺れるCSSアニメ）
-// - pointer-events:none（操作の邪魔をしない）
-// - fixed配置（スクロール無しでも安定）
-// - 右側は反転して左右対称
-// - アニメは transform だけ（軽量・GPU合成寄り）
-// - z-index: 背景より上 / HUDより下 くらい
+// saku.js（うさぎの足元に saku.png を配置 + 風に揺れる）
+// - 各 bunnyWrap の「足元」に追従
+// - pointer-events:none（操作を邪魔しない）
+// - transformのみ更新（軽量）
+// - 風揺れはCSS（GPU合成寄り）
 
 (() => {
   "use strict";
-
-  if (window.__SAKU_V1__) return;
-  window.__SAKU_V1__ = true;
+  if (window.__SAKU_FOOT_V1__) return;
+  window.__SAKU_FOOT_V1__ = true;
 
   const SRC = "./assets/saku.png";
+  const STYLE_ID = "sakuFootCssV1";
+  const CLASS_SAKU = "milkpopSakuFootV1";
 
-  const ID_L = "sakuLeftV1";
-  const ID_R = "sakuRightV1";
-  const STYLE_ID = "sakuCssV1";
-
+  /* =========================
+   * CSS（風に揺れる：軽量）
+   * ========================= */
   function ensureCss() {
     if (document.getElementById(STYLE_ID)) return;
-
     const s = document.createElement("style");
     s.id = STYLE_ID;
     s.textContent = `
-@keyframes milkpopSakuSwayV1{
-  0%   { transform: translate3d(0, -50%, 0) rotate(-1.2deg); }
-  50%  { transform: translate3d(0, -50%, 0) rotate( 1.2deg); }
-  100% { transform: translate3d(0, -50%, 0) rotate(-1.2deg); }
+@keyframes milkpopSakuFootSwayV1{
+  0%   { transform: translate3d(-50%, 0, 0) rotate(-1.4deg); }
+  50%  { transform: translate3d(-50%, 0, 0) rotate( 1.4deg); }
+  100% { transform: translate3d(-50%, 0, 0) rotate(-1.4deg); }
 }
-.milkpopSakuV1{
-  position: fixed;
-  top: 50%;
-  width: 72px;            /* ←好みで調整 */
+.${CLASS_SAKU}{
+  position: absolute;
+  left: 50%;
+  bottom: -6px;              /* ← 足元ちょい下 */
+  width: 28px;               /* ← さりげないサイズ */
   height: auto;
   pointer-events: none;
   user-select: none;
-  z-index: 5;             /* 背景より上、HUDより下 */
   opacity: 0.95;
-  will-change: transform; /* 軽量化 */
-  transform: translate3d(0, -50%, 0);
-  animation: milkpopSakuSwayV1 5.8s ease-in-out infinite;
-}
-.milkpopSakuV1.right{
-  transform: translate3d(0, -50%, 0) scaleX(-1);
-}
-@media (max-width: 420px){
-  .milkpopSakuV1{ width: 58px; }
+  z-index: 3;                /* うさぎより下・地面感 */
+  transform: translate3d(-50%, 0, 0);
+  will-change: transform;
+  animation: milkpopSakuFootSwayV1 6.2s ease-in-out infinite;
 }
 `;
     document.head.appendChild(s);
   }
 
-  function create(side) {
+  /* =========================
+   * 生成 / 追従
+   * ========================= */
+  function attachToBunnyWrap(wrap) {
+    if (!wrap || !wrap.isConnected) return;
+    if (wrap.querySelector(`.${CLASS_SAKU}`)) return;
+
+    // bunnyWrap を基準にする
+    const cs = getComputedStyle(wrap);
+    if (cs.position === "static") {
+      wrap.style.position = "relative";
+    }
+
     const img = document.createElement("img");
     img.src = SRC;
     img.alt = "saku";
     img.decoding = "async";
-    img.loading = "eager";
+    img.loading = "lazy";
     img.draggable = false;
+    img.className = CLASS_SAKU;
 
-    img.className = "milkpopSakuV1" + (side === "right" ? " right" : "");
-
-    if (side === "left") {
-      img.id = ID_L;
-      img.style.left = "6px";
-    } else {
-      img.id = ID_R;
-      img.style.right = "6px";
-    }
-
-    document.body.appendChild(img);
-    return img;
+    wrap.appendChild(img);
   }
 
+  function scanAndAttach() {
+    const wraps = document.querySelectorAll(".bunnyWrap");
+    wraps.forEach(attachToBunnyWrap);
+  }
+
+  /* =========================
+   * 初期化 & 監視
+   * ========================= */
   function init() {
     ensureCss();
+    scanAndAttach();
 
-    // 二重生成防止
-    if (!document.getElementById(ID_L)) create("left");
-    if (!document.getElementById(ID_R)) create("right");
+    // うさぎ増減・再生成対策（軽量ポーリング）
+    setInterval(scanAndAttach, 1200);
   }
 
   if (document.readyState === "loading") {
@@ -86,4 +89,6 @@
   } else {
     init();
   }
+
+  console.log("[saku] attached to bunny feet");
 })();
