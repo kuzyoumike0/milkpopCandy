@@ -1,27 +1,43 @@
-// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放）
-// ✅ Milkpop対応版（WB.coins 正式対応）
-// ✅ zisseki/zukan 非依存・単体完結
+// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.3
+// ✅ zisseki/zukan に依存しない単体完結（WBがあれば連携）
 // ✅ 星の保存：localStorage wb_prestige_v1
-// ✅ 誤爆防止：長押し 1.2秒
+// ✅ 恒久解放(perks)を保存＆WB.prestige.hasPerk()で参照可能
+// ✅ 誤爆防止：転生ボタンは「長押し 1.2秒」
+// ✅ FIX: app.js の WB.coins が getter でも「現在コイン」を正しく拾う
+// ✅ 追加: 転生したら assets/tennchi.png の兎を1体出現（1体のみ・常駐）
+// ✅ 追加: tennchi は bunny4 より多くコインを落とす（高tier + 高頻度）
 
 (() => {
   "use strict";
-  if (window.__WB_PRESTIGE_V1__) return;
-  window.__WB_PRESTIGE_V1__ = true;
+  if (window.__WB_PRESTIGE_V13__) return;
+  window.__WB_PRESTIGE_V13__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
 
   const CFG = {
+    // 星計算：減衰（おすすめ）
+    // coins → stars = floor( sqrt(coins / BASE) )
     STAR_BASE_COINS: 50000,
+
+    // 転生最低条件（0で無条件）
     MIN_COINS_TO_PRESTIGE: 50000,
+
+    // 長押し時間
     HOLD_MS: 1200,
 
+    // “深めのLSリセット” をしたいなら true（基本は false 推奨）
     DEEP_LOCALSTORAGE_WIPE: false,
+
+    // 深めリセットで消す候補キー（あなたの環境に合わせて追記OK）
     WIPE_KEYS: [
       "wb_coins_v6",
       "wb_bunnies_v6",
+      "wb_bunnies_v5",
       "wb_state_v1",
+      "wb_state_v2",
+      "milkpop_bunnies_v1",
+      "milkpop_coins_v1",
     ],
 
     LABEL: {
@@ -31,18 +47,35 @@
       unlock: "解放",
       unlocked: "解放済",
     },
+
+    // ===== 転生兎（tennchi）設定 =====
+    TENNCHI: {
+      LS_ACTIVE: "wb_tennchi_active_v1",
+      ID: "wbTennchiBunnyV1",
+      STYLE_ID: "wbTennchiBunnyStyleV1",
+      IMG: "./assets/tennchi.png",
+
+      size: 90,
+      z: 140, // bunnyLayerより上に見える
+
+      // bunny4より多く：tier高め(=coin4率↑) + 出す頻度↑ + 出す枚数↑
+      dropEveryMs: 2600,     // 放置で落とす間隔（短いほど多い）
+      dropCount: 3,          // 1回に落とす枚数
+      tierMin: 2,            // 0..3（2=coin3, 3=coin4）
+      tierMax: 3,
+      speed: 52,
+      bobSpeed: 0.0013,
+      pad: 14,
+    },
   };
 
-  const LS_PRESTIGE = "wb_prestige_v1";
+  const LS_PRESTIGE = "wb_prestige_v1"; // { ver:1, stars:0, spent:0, perks:{id:true}, history:[...] }
 
-  /* =========================
-   * WB wait
-   * ========================= */
   function waitForWB() {
     const start = Date.now();
     return new Promise((resolve) => {
       const t = setInterval(() => {
-        if (window.WB) {
+        if (window.WB && typeof window.WB === "object") {
           clearInterval(t);
           resolve(window.WB);
           return;
@@ -55,23 +88,21 @@
     });
   }
 
-  /* =========================
-   * Utils
-   * ========================= */
   function loadJson(key, def) {
     try {
-      const v = JSON.parse(localStorage.getItem(key));
-      return v ?? def;
+      const v = JSON.parse(localStorage.getItem(key) || "null");
+      return (v ?? def);
     } catch {
       return def;
     }
   }
-
   function saveJson(key, v) {
     localStorage.setItem(key, JSON.stringify(v));
   }
 
   function clamp(n, a, b) {
+    n = Number(n);
+    if (!Number.isFinite(n)) n = 0;
     return Math.max(a, Math.min(b, n));
   }
 
@@ -84,141 +115,358 @@
       .replaceAll("'", "&#039;");
   }
 
-  /* =========================
-   * ✅ Milkpop 正式コイン取得
-   * ========================= */
+  function ensureStyle() {
+    if (document.getElementById("wbPrestigeStyleV1")) return;
+    const s = document.createElement("style");
+    s.id = "wbPrestigeStyleV1";
+    s.textContent = `
+#wbPrestigePanelV1{position:fixed; inset:0; z-index:2147483647; display:none; user-select:none;}
+#wbPrestigePanelV1 .bg{position:absolute; inset:0; background:rgba(0,0,0,.38);}
+#wbPrestigePanelV1 .card{
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(860px, 94vw); max-height:min(84vh, 900px);
+  background:rgba(255,255,255,.97);
+  border-radius:18px;
+  box-shadow:0 20px 60px rgba(0,0,0,.24);
+  overflow:hidden;
+  display:flex; flex-direction:column;
+}
+#wbPrestigePanelV1 .head{display:flex; align-items:center; justify-content:space-between; padding:14px 14px 10px; border-bottom:1px solid rgba(0,0,0,.08);}
+#wbPrestigePanelV1 .title{font-weight:1000; letter-spacing:.02em; display:flex; gap:10px; align-items:center;}
+#wbPrestigePanelV1 .close{border:none; background:rgba(0,0,0,.06); border-radius:12px; padding:8px 12px; font-weight:1000; cursor:pointer;}
+#wbPrestigePanelV1 .body{padding:12px 14px 16px; overflow:auto;}
+#wbPrestigePanelV1 .row{display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:10px;}
+#wbPrestigePanelV1 .pill{display:inline-flex; align-items:center; gap:8px; background:rgba(0,0,0,.05); border-radius:999px; padding:8px 10px; font-weight:1000;}
+#wbPrestigePanelV1 .btn{border:none; border-radius:12px; padding:10px 12px; font-weight:1000; cursor:pointer; background:#fff; box-shadow:0 10px 22px rgba(0,0,0,.10);}
+#wbPrestigePanelV1 .btn.primary{background:#ffd6e7;}
+#wbPrestigePanelV1 .btn.danger{background:#ffe0e0;}
+#wbPrestigePanelV1 .btn[disabled]{opacity:.55; cursor:not-allowed; box-shadow:none;}
+#wbPrestigePanelV1 .grid{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px;}
+@media (max-width:760px){ #wbPrestigePanelV1 .grid{grid-template-columns:1fr;} }
+#wbPrestigePanelV1 .perk{
+  background:rgba(255,255,255,.94);
+  border-radius:14px;
+  padding:12px;
+  box-shadow:0 10px 22px rgba(0,0,0,.08);
+}
+#wbPrestigePanelV1 .perk .name{font-weight:1000;}
+#wbPrestigePanelV1 .perk .desc{margin-top:4px; font-size:12px; opacity:.8; font-weight:900; line-height:1.35; white-space:pre-line;}
+#wbPrestigePanelV1 .perk .foot{display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:10px; flex-wrap:wrap;}
+#wbPrestigePanelV1 .badge{display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:6px 10px; font-weight:1000; font-size:12px; background:rgba(120,210,255,.22);}
+#wbPrestigePanelV1 .badge.lock{background:rgba(255,120,120,.18);}
+#wbPrestigePanelV1 .bar{height:10px; border-radius:999px; background:rgba(0,0,0,.08); overflow:hidden; margin-top:8px;}
+#wbPrestigePanelV1 .bar > i{display:block; height:100%; width:0%; background:rgba(120,210,255,.55);}
+#wbPrestigePanelV1 .hint{font-size:12px; opacity:.78; font-weight:900; line-height:1.35;}
+#wbPrestigePanelV1 .hold{position:relative; overflow:hidden;}
+#wbPrestigePanelV1 .hold > .fill{position:absolute; inset:0; width:0%; background:rgba(0,0,0,.06);}
+`;
+    document.head.appendChild(s);
+  }
+
+  // 星計算（減衰）
+  function calcStarsFromCoins(coins) {
+    const c = Math.max(0, Math.floor(Number(coins) || 0));
+    if (c < CFG.MIN_COINS_TO_PRESTIGE) return 0;
+    const stars = Math.floor(Math.sqrt(c / Math.max(1, CFG.STAR_BASE_COINS)));
+    return Math.max(0, stars);
+  }
+
+  function nextCoinsForStar(targetStars) {
+    const s = Math.max(0, Math.floor(targetStars));
+    return Math.max(0, Math.floor(CFG.STAR_BASE_COINS * (s * s)));
+  }
+
+  // ✅ FIX: WB.coins が getter でも読む
   function getCoins(WB) {
+    // 1) WB.getCoin()
+    try { if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
+
+    // 2) WB.coins (getter含む)
     try {
-      if (WB && typeof WB.coins === "number") {
-        return Math.floor(WB.coins);
+      if (WB && ("coins" in WB)) {
+        const v = Number(WB.coins);
+        if (Number.isFinite(v)) return v;
       }
     } catch {}
 
+    // 3) coinValue
     const el = document.getElementById("coinValue");
-    if (el) {
-      const n = Number(el.textContent.replace(/[^\d]/g, ""));
-      return Number.isFinite(n) ? n : 0;
-    }
-    return 0;
+    return el ? (Number(el.textContent) || 0) : 0;
   }
 
   function setCoinsZero(WB) {
+    // 1) WB.setCoin
     try {
-      if (WB && typeof WB.coins === "number") {
+      if (WB && typeof WB.setCoin === "function") { WB.setCoin(0); return true; }
+    } catch {}
+
+    // 2) WB.coins setter (getter/setter想定)
+    try {
+      if (WB && ("coins" in WB)) {
         WB.coins = 0;
-        WB.updateHud?.();
-        WB.emit?.("coinsChanged", { coins: 0 });
         return true;
       }
     } catch {}
 
+    // 3) localStorage fallback
+    try { localStorage.setItem("wb_coins_v6", "0"); } catch {}
     const el = document.getElementById("coinValue");
     if (el) el.textContent = "0";
     return true;
   }
 
   function removeAllBunnies(WB) {
-    try { WB?.removeAllBunnies?.(); } catch {}
-
+    // 1) removeAllBunnies
     try {
-      document.querySelectorAll(".bunnyWrap,.bunny-wrap").forEach(el => el.remove());
+      if (WB && typeof WB.removeAllBunnies === "function") { WB.removeAllBunnies(); return true; }
     } catch {}
 
+    // 2) WB.removeBunnyInstance を回す（ある場合）
     try {
-      const bl = document.getElementById("bunnyLayer");
-      if (bl) bl.replaceChildren();
+      if (WB && typeof WB.removeBunnyInstance === "function" && Array.isArray(WB.bunnies)) {
+        const copy = WB.bunnies.slice();
+        copy.forEach(b => { try { WB.removeBunnyInstance(b); } catch {} });
+      }
     } catch {}
+
+    // 3) WB.bunnies 配列があるなら空にする
+    try { if (WB && Array.isArray(WB.bunnies)) WB.bunnies.length = 0; } catch {}
+
+    // 4) DOMから消す
+    try { document.querySelectorAll(".bunnyWrap, .bunny-wrap").forEach(el => { try { el.remove(); } catch {} }); } catch {}
+
+    // 5) ハートも掃除（app.jsの wbChargeHart）
+    try { document.querySelectorAll(".wbChargeHart").forEach(el => { try { el.remove(); } catch {} }); } catch {}
+
+    try { WB?.emit?.("bunnyCountChanged", { count: 0 }); } catch {}
+    return true;
   }
 
   function deepWipeLocalStorage() {
     if (!CFG.DEEP_LOCALSTORAGE_WIPE) return;
-    CFG.WIPE_KEYS.forEach(k => {
+    for (const k of CFG.WIPE_KEYS) {
       try { localStorage.removeItem(k); } catch {}
-    });
+    }
   }
 
-  /* =========================
-   * 星計算
-   * ========================= */
-  function calcStarsFromCoins(coins) {
-    if (coins < CFG.MIN_COINS_TO_PRESTIGE) return 0;
-    return Math.floor(Math.sqrt(coins / CFG.STAR_BASE_COINS));
-  }
+  // 恒久解放（例：演出中心）
+  const PERK_MASTER = [
+    { id: "coin_sparkle", cost: 1, name: "コイン回収キラッ", desc: "コイン回収時に小さな✨演出を追加（演出のみ）" },
+    { id: "mirrorball_plus", cost: 2, name: "ミラーボール増し", desc: "ミラーボール範囲内の✨演出を少し増やす（演出のみ）" },
+    { id: "hanabi_glow", cost: 2, name: "花火発光ブースト", desc: "花火GIFの発光感を少し強化（演出のみ）" },
+    { id: "bunny_aura", cost: 3, name: "うさぎの輪郭光", desc: "うさぎにうっすら輪郭の光（演出のみ）" },
+    { id: "bg_soft", cost: 3, name: "背景ふわっと", desc: "背景に柔らかいビネットを追加（演出のみ）" },
 
-  /* =========================
-   * Prestige State
-   * ========================= */
+    { id: "coin_bonus_1", cost: 6, name: "収入+1%", desc: "放置のコイン量を+1%（控えめ）", gameplay: true },
+    { id: "coin_bonus_3", cost: 12, name: "収入+3%", desc: "放置のコイン量を+3%（控えめ）", gameplay: true },
+  ];
+
   function defaultPrestigeState() {
-    return { ver:1, stars:0, spent:0, perks:{}, history:[] };
+    return { ver: 1, stars: 0, spent: 0, perks: {}, history: [] };
   }
 
   function loadPrestige() {
-    return loadJson(LS_PRESTIGE, defaultPrestigeState());
+    const st = loadJson(LS_PRESTIGE, defaultPrestigeState());
+    if (!st || typeof st !== "object") return defaultPrestigeState();
+    st.ver = 1;
+    st.stars = Number(st.stars || 0) || 0;
+    st.spent = Number(st.spent || 0) || 0;
+    st.perks = (st.perks && typeof st.perks === "object") ? st.perks : {};
+    st.history = Array.isArray(st.history) ? st.history : [];
+    return st;
   }
 
   function savePrestige(st) {
     saveJson(LS_PRESTIGE, st);
   }
 
-  /* =========================
-   * UI
-   * ========================= */
-  const PANEL_ID = "wbPrestigePanelV1";
+  function format(n) {
+    return (Number(n) || 0).toLocaleString();
+  }
 
-  function ensureStyle() {
-    if (document.getElementById("wbPrestigeStyleV1")) return;
+  /* =========================
+   * ✅ 転生兎（tennchi）実装
+   * ========================= */
+  function ensureTennchiStyle() {
+    if (document.getElementById(CFG.TENNCHI.STYLE_ID)) return;
     const s = document.createElement("style");
-    s.id = "wbPrestigeStyleV1";
+    s.id = CFG.TENNCHI.STYLE_ID;
     s.textContent = `
-#${PANEL_ID}{position:fixed; inset:0; z-index:2147483647; display:none;}
-#${PANEL_ID} .bg{position:absolute; inset:0; background:rgba(0,0,0,.4);}
-#${PANEL_ID} .card{
-  position:absolute; left:50%; top:50%;
+#${CFG.TENNCHI.ID}{
+  position:absolute;
+  width:${CFG.TENNCHI.size}px;
+  height:${CFG.TENNCHI.size}px;
+  pointer-events:none;
+  z-index:${CFG.TENNCHI.z};
+  will-change:transform;
+  filter: drop-shadow(0 18px 28px rgba(255,255,255,.22));
+}
+#${CFG.TENNCHI.ID} .aura{
+  position:absolute; inset:-6px;
+  border-radius:24px;
+  background:radial-gradient(circle at 35% 35%,
+    rgba(255,255,255,.95) 0%,
+    rgba(255,220,250,.65) 28%,
+    rgba(120,220,255,.40) 55%,
+    rgba(0,0,0,0) 70%
+  );
+}
+#${CFG.TENNCHI.ID} img{
+  position:absolute;
+  left:50%; top:50%;
+  width:${CFG.TENNCHI.size}px;
+  height:${CFG.TENNCHI.size}px;
   transform:translate(-50%,-50%);
-  width:min(860px,94vw);
-  max-height:84vh;
-  background:#fff;
-  border-radius:18px;
-  display:flex; flex-direction:column;
+  object-fit:contain;
+  user-select:none;
+  -webkit-user-drag:none;
 }
-#${PANEL_ID} .head{
-  display:flex; justify-content:space-between;
-  padding:12px; border-bottom:1px solid #ddd;
+#${CFG.TENNCHI.ID} .spark{
+  position:absolute;
+  left:50%; top:-10px;
+  transform:translateX(-50%);
+  font-weight:1000;
+  opacity:.9;
+  animation: wbTennchiSpark 1.25s ease-in-out infinite;
 }
-#${PANEL_ID} .body{ padding:14px; overflow:auto; }
-#${PANEL_ID} .btn{
-  border:none; border-radius:12px;
-  padding:10px 14px; font-weight:1000;
-  cursor:pointer;
+@keyframes wbTennchiSpark{
+  0%{ transform:translateX(-50%) translateY(0); opacity:.6; }
+  50%{ transform:translateX(-50%) translateY(-8px); opacity:1; }
+  100%{ transform:translateX(-50%) translateY(0); opacity:.6; }
 }
-#${PANEL_ID} .danger{ background:#ffd6e7; }
-.hold{ position:relative; overflow:hidden; }
-.hold .fill{ position:absolute; inset:0; width:0%; background:rgba(0,0,0,.1); }
 `;
     document.head.appendChild(s);
   }
 
+  function isTennchiActive() {
+    return localStorage.getItem(CFG.TENNCHI.LS_ACTIVE) === "true";
+  }
+  function setTennchiActive(on) {
+    try { localStorage.setItem(CFG.TENNCHI.LS_ACTIVE, on ? "true" : "false"); } catch {}
+  }
+
+  function ensureTennchiDom(WB) {
+    ensureTennchiStyle();
+    const field = WB?.field || document.getElementById("field") || document.body;
+
+    let el = document.getElementById(CFG.TENNCHI.ID);
+    if (el && el.isConnected) return el;
+
+    el = document.createElement("div");
+    el.id = CFG.TENNCHI.ID;
+    el.innerHTML = `
+      <div class="aura"></div>
+      <div class="spark">✨</div>
+      <img src="${CFG.TENNCHI.IMG}" alt="tennchi">
+    `;
+    field.appendChild(el);
+    return el;
+  }
+
+  let __tennchiLoopStarted = false;
+  function startTennchiLoop(WB) {
+    if (__tennchiLoopStarted) return;
+    __tennchiLoopStarted = true;
+
+    let x = 40, y = 120;
+    let vx = 1, vy = 0.55;
+    let last = performance.now();
+    let lastDrop = 0;
+
+    const pickTier = () => {
+      const a = CFG.TENNCHI.tierMin, b = CFG.TENNCHI.tierMax;
+      const t = Math.floor(a + Math.random() * (b - a + 1));
+      return clamp(t, 0, 3);
+    };
+
+    const dropCoins = () => {
+      if (!WB?.spawnCoinDropAt) return;
+      const count = Math.max(1, CFG.TENNCHI.dropCount | 0);
+      for (let i = 0; i < count; i++) {
+        const tier = pickTier();
+        WB.spawnCoinDropAt(x + CFG.TENNCHI.size * 0.55 + (Math.random()*20-10), y + CFG.TENNCHI.size * 0.9, tier);
+      }
+    };
+
+    function raf(now) {
+      if (!isTennchiActive()) {
+        try { document.getElementById(CFG.TENNCHI.ID)?.remove(); } catch {}
+        __tennchiLoopStarted = false;
+        return;
+      }
+
+      const el = ensureTennchiDom(WB);
+      const field = WB?.field || document.getElementById("field") || document.body;
+      const r = field.getBoundingClientRect();
+
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+
+      x += vx * CFG.TENNCHI.speed * dt;
+      y += vy * CFG.TENNCHI.speed * dt;
+
+      const bob = Math.sin(now * CFG.TENNCHI.bobSpeed) * 10;
+
+      const minX = CFG.TENNCHI.pad;
+      const maxX = Math.max(minX, r.width - CFG.TENNCHI.size - CFG.TENNCHI.pad);
+      const minY = CFG.TENNCHI.pad;
+      const maxY = Math.max(minY, r.height - CFG.TENNCHI.size - CFG.TENNCHI.pad);
+
+      if (x <= minX) { x = minX; vx = Math.abs(vx); }
+      if (x >= maxX) { x = maxX; vx = -Math.abs(vx); }
+      if (y <= minY) { y = minY; vy = Math.abs(vy); }
+      if (y >= maxY) { y = maxY; vy = -Math.abs(vy); }
+
+      el.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y + bob)}px, 0)`;
+
+      // コイン排出（bunny4より多い）
+      if (now - lastDrop >= CFG.TENNCHI.dropEveryMs) {
+        lastDrop = now;
+        dropCoins();
+      }
+
+      requestAnimationFrame(raf);
+    }
+
+    requestAnimationFrame(raf);
+  }
+
+  function spawnTennchiOnPrestige(WB) {
+    setTennchiActive(true);
+    startTennchiLoop(WB);
+  }
+
+  /* =========================
+   * UI
+   * ========================= */
+  const PANEL_ID = "wbPrestigePanelV1";
+  let panelEl = null;
+
   function buildPanel() {
     ensureStyle();
     let p = document.getElementById(PANEL_ID);
-    if (p) return p;
+    if (!p) {
+      p = document.createElement("div");
+      p.id = PANEL_ID;
+      document.body.appendChild(p);
+    }
+    panelEl = p;
+    if (p.querySelector(".card")) return p;
 
-    p = document.createElement("div");
-    p.id = PANEL_ID;
     p.innerHTML = `
       <div class="bg"></div>
-      <div class="card">
+      <div class="card" role="dialog" aria-modal="true">
         <div class="head">
-          <b>${CFG.LABEL.title}</b>
-          <button class="btn close">${CFG.LABEL.close}</button>
+          <div class="title">${escapeHtml(CFG.LABEL.title)}</div>
+          <button class="close" type="button">${escapeHtml(CFG.LABEL.close)}</button>
         </div>
         <div class="body"></div>
       </div>
     `;
-    document.body.appendChild(p);
 
-    p.querySelector(".bg").onclick =
-    p.querySelector(".close").onclick = () => p.style.display = "none";
+    p.querySelector(".bg")?.addEventListener("click", (e) => { e.preventDefault(); close(); });
+    p.querySelector(".close")?.addEventListener("click", (e) => { e.preventDefault(); close(); });
+    p.querySelector(".card")?.addEventListener("click", (e) => e.stopPropagation());
 
     return p;
   }
@@ -227,89 +475,258 @@
     const p = buildPanel();
     p.style.display = "block";
     render();
+
+    // ✅ 開いてる間は「現在コイン」を追従（0.25sごと）
+    startLiveCoins();
   }
 
+  function close() {
+    const p = panelEl || document.getElementById(PANEL_ID);
+    if (!p) return;
+    p.style.display = "none";
+    stopLiveCoins();
+  }
+
+  let __liveTimer = 0;
+  function startLiveCoins() {
+    stopLiveCoins();
+    __liveTimer = window.setInterval(() => {
+      const p = panelEl || document.getElementById(PANEL_ID);
+      if (!p || p.style.display !== "block") return;
+      render(); // コイン表示の同期目的（軽い）
+    }, 250);
+  }
+  function stopLiveCoins() {
+    if (__liveTimer) clearInterval(__liveTimer);
+    __liveTimer = 0;
+  }
+
+  function declared(x) { return !!x; }
+
   function render() {
-    const WB = window.WB;
+    const WB = window.WB || null;
     const p = buildPanel();
     const body = p.querySelector(".body");
+    if (!body) return;
 
     const st = loadPrestige();
-    const coins = getCoins(WB);
-    const gain = calcStarsFromCoins(coins);
+    const coinsNow = getCoins(WB);
+    const gainStars = calcStarsFromCoins(coinsNow);
 
-    body.innerHTML = `
-      <p>現在コイン：🪙 <b>${coins.toLocaleString()}</b></p>
-      <p>現在の星：🌟 <b>${st.stars}</b></p>
-      <p>今回の転生で獲得：🌟 <b>+${gain}</b></p>
+    const available = Math.max(0, (st.stars - st.spent));
 
-      <button class="btn danger hold" ${gain<=0?"disabled":""}>
-        ${CFG.LABEL.prestigeBtn}（長押し）
-        <i class="fill"></i>
-      </button>
+    const nextStar = Math.max(1, gainStars + 1);
+    const needCoins = nextCoinsForStar(nextStar);
+    const pct = (needCoins > 0) ? clamp((coinsNow / needCoins) * 100, 0, 100) : 0;
+
+    const top = `
+      <div class="row">
+        <span class="pill">現在コイン：<b>🪙 ${format(coinsNow)}</b></span>
+        <span class="pill">牧場の星：<b>🌟 ${format(st.stars)}</b></span>
+        <span class="pill">使用可能：<b>✨ ${format(available)}</b></span>
+      </div>
+      <div class="row">
+        <div style="flex:1; min-width:240px;">
+          <div class="pill">この状態で転生すると：<b>🌟 +${format(gainStars)}</b></div>
+          <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+          <div class="hint">次の星（${nextStar}）目安：🪙 ${format(needCoins)}（いま ${pct.toFixed(1)}%）</div>
+          <div class="hint">※ 星は減衰で増えるため、コインが多いほど“伸びが緩やか”になります。</div>
+        </div>
+
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button class="btn danger hold" type="button" data-prestige="1" ${gainStars <= 0 ? "disabled" : ""}>
+            <span>${escapeHtml(CFG.LABEL.prestigeBtn)}（長押し）</span>
+            <i class="fill"></i>
+          </button>
+        </div>
+      </div>
+      <div style="height:10px"></div>
     `;
 
-    const btn = body.querySelector(".hold");
-    if (!btn) return;
+    const perkCards = PERK_MASTER.map(pk => {
+      const owned = !!st.perks[pk.id];
+      const canBuy = !owned && available >= pk.cost;
+      const badge = owned ? `<span class="badge">${escapeHtml(CFG.LABEL.unlocked)}</span>` : `<span class="badge lock">未解放</span>`;
+      const btn = owned
+        ? `<button class="btn" type="button" disabled>${escapeHtml(CFG.LABEL.unlocked)}</button>`
+        : `<button class="btn primary" type="button" data-buy="${escapeHtml(pk.id)}" ${canBuy ? "" : "disabled"}>${escapeHtml(CFG.LABEL.unlock)}（-${pk.cost}）</button>`;
 
-    let downAt = 0, raf = 0, holding = false;
-    const fill = btn.querySelector(".fill");
+      return `
+        <div class="perk">
+          <div class="name">🌟 ${escapeHtml(pk.name)} <span style="opacity:.75; font-weight:900;">(cost ${pk.cost})</span></div>
+          <div class="desc">${escapeHtml(pk.desc)}${pk.gameplay ? "\n※バランス影響あり" : ""}</div>
+          <div class="foot">
+            <div>${badge}</div>
+            <div style="display:flex; gap:10px; align-items:center;">
+              ${btn}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
 
-    const step = () => {
-      if (!holding) return;
-      const p = clamp((Date.now()-downAt)/CFG.HOLD_MS,0,1);
-      fill.style.width = `${p*100}%`;
-      if (p>=1) {
-        holding=false;
-        doPrestige();
-        return;
-      }
-      raf=requestAnimationFrame(step);
-    };
+    const history = (st.history || []).slice(-8).reverse().map(h => {
+      const t = new Date(h.t || Date.now());
+      const dt = `${t.getFullYear()}/${String(t.getMonth()+1).padStart(2,"0")}/${String(t.getDate()).padStart(2,"0")} ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
+      return `<div class="pill">🗓 ${escapeHtml(dt)}：🪙${format(h.coins)} → 🌟+${format(h.stars)}</div>`;
+    }).join(" ");
 
-    btn.onpointerdown = e => {
-      if (btn.disabled) return;
-      holding=true; downAt=Date.now(); step();
-    };
-    ["pointerup","pointerleave","pointercancel"].forEach(ev=>{
-      btn.addEventListener(ev,()=>{
-        holding=false; fill.style.width="0%";
-        if(raf) cancelAnimationFrame(raf);
+    body.innerHTML = `
+      ${top}
+      <div class="row">
+        <div class="pill">恒久解放（星で購入）</div>
+        <div class="hint">他モジュールからは <b>WB.prestige.hasPerk("perkId")</b> で参照できます。</div>
+      </div>
+      <div class="grid">${perkCards}</div>
+
+      <div style="height:14px"></div>
+      <div class="row">
+        <div class="pill">転生履歴</div>
+        <div class="hint">${history || "（まだ転生していません）"}</div>
+      </div>
+    `;
+
+    // 購入
+    body.querySelectorAll("[data-buy]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-buy") || "";
+        const pk = PERK_MASTER.find(x => x.id === id);
+        if (!declared(pk)) return;
+
+        const st2 = loadPrestige();
+        const avail2 = Math.max(0, st2.stars - st2.spent);
+        if (st2.perks[id]) { render(); return; }
+        if (avail2 < pk.cost) { render(); return; }
+
+        st2.perks[id] = true;
+        st2.spent += pk.cost;
+        savePrestige(st2);
+
+        try { (window.WB || null)?.emit?.("prestige:perk", { id, on: true }); } catch {}
+        render();
       });
     });
 
-    function doPrestige() {
-      const coins = getCoins(WB);
-      const stars = calcStarsFromCoins(coins);
-      if (stars<=0) return;
+    // 転生（長押し）
+    const btnPrestige = body.querySelector("[data-prestige]");
+    if (btnPrestige) {
+      const fill = btnPrestige.querySelector(".fill");
+      let downAt = 0;
+      let raf = 0;
+      let holding = false;
 
-      st.stars += stars;
-      st.history.push({ t:Date.now(), coins, stars });
+      const stopHold = () => {
+        holding = false;
+        downAt = 0;
+        if (raf) cancelAnimationFrame(raf);
+        raf = 0;
+        if (fill) fill.style.width = "0%";
+      };
+
+      const step = () => {
+        if (!holding) return;
+        const now = Date.now();
+        const p = clamp((now - downAt) / CFG.HOLD_MS, 0, 1);
+        if (fill) fill.style.width = `${(p * 100).toFixed(1)}%`;
+
+        if (p >= 1) {
+          stopHold();
+          doPrestige();
+          return;
+        }
+        raf = requestAnimationFrame(step);
+      };
+
+      const startHold = (e) => {
+        if (btnPrestige.disabled) return;
+        e.preventDefault();
+        holding = true;
+        downAt = Date.now();
+        step();
+      };
+
+      btnPrestige.addEventListener("pointerdown", startHold);
+      btnPrestige.addEventListener("pointerup", stopHold);
+      btnPrestige.addEventListener("pointercancel", stopHold);
+      btnPrestige.addEventListener("pointerleave", stopHold);
+    }
+
+    function doPrestige() {
+      const WB = window.WB || null;
+      const st = loadPrestige();
+      const coins = getCoins(WB);
+      const gain = calcStarsFromCoins(coins);
+      if (gain <= 0) return;
+
+      // 1) 星加算
+      st.stars += gain;
+      st.history = Array.isArray(st.history) ? st.history : [];
+      st.history.push({ t: Date.now(), coins, stars: gain });
+      if (st.history.length > 80) st.history = st.history.slice(-80);
       savePrestige(st);
 
+      // 2) リセット
       setCoinsZero(WB);
       removeAllBunnies(WB);
       deepWipeLocalStorage();
 
+      // 3) ✅ 転生兎を1体出す（常駐）
+      spawnTennchiOnPrestige(WB);
+
+      // 4) 通知
+      try { WB?.emit?.("prestige", { stars: gain, total: st.stars }); } catch {}
+      try { WB?.emit?.("sy:add", { key: "prestige", delta: 1 }); } catch {}
+
+      // 5) UI更新
       render();
     }
   }
 
-  /* =========================
-   * Public API
-   * ========================= */
-  waitForWB().then(WB=>{
+  // Public API
+  waitForWB().then((WB) => {
     const api = {
       open,
+      close,
       load: loadPrestige,
-      hasPerk: id => !!loadPrestige().perks?.[id],
-      getStars: () => loadPrestige().stars,
+      save: savePrestige,
+      hasPerk: (id) => {
+        const st = loadPrestige();
+        return !!st.perks?.[String(id || "")];
+      },
+      getStars: () => {
+        const st = loadPrestige();
+        return Number(st.stars || 0) || 0;
+      },
+      getAvailable: () => {
+        const st = loadPrestige();
+        return Math.max(0, (Number(st.stars || 0) || 0) - (Number(st.spent || 0) || 0));
+      },
+      calcStarsFromCoins,
+      config: CFG,
+      PERK_MASTER,
+
+      // 追加公開：転生兎
+      tennchi: {
+        isActive: () => isTennchiActive(),
+        spawn: () => spawnTennchiOnPrestige(window.WB || null),
+        remove: () => {
+          setTennchiActive(false);
+          try { document.getElementById(CFG.TENNCHI.ID)?.remove(); } catch {}
+        },
+      },
     };
 
-    if (WB) WB.prestige = api;
-    else window.WB_PRESTIGE = api;
+    if (WB) {
+      WB.prestige = api;
+    } else {
+      window.WB_PRESTIGE = api;
+    }
 
-    console.log("[prestige] ready (Milkpop compatible)");
+    // ✅ すでに転生兎が有効なら起動（リロード後も常駐）
+    try {
+      if (WB && isTennchiActive()) startTennchiLoop(WB);
+    } catch {}
+
+    console.log("[prestige] ready v1.3", { LS_PRESTIGE, tennchi: CFG.TENNCHI.ID });
   });
-
 })();
