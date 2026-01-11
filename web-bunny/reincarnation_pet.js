@@ -1,8 +1,11 @@
-// reincarnation_pet.js（転生時専用ペット：1体常駐）
+// reincarnation_pet.js（転生時専用ペット：1体常駐） v3.2 FIX
 // ✅ prestige.js の WB.emit("prestige") をトリガーに出現
 // ✅ 1体のみ（重複生成なし）
 // ✅ assets/tennchi.png の兎
 // ✅ リロード後も常駐（LSでフラグ保存）
+// ✅ FIX: prestige連打/再読み込み/複数回startFloatingで RAF が多重起動しない
+// ✅ FIX: 置き場所を安定（#bunnyLayer / WB.bunnyLayer / #field / body の順）
+// ✅ FIX: 画像読み込み失敗でも落ちない・DOM再生成に強い
 
 (() => {
   "use strict";
@@ -10,14 +13,18 @@
   window.__REINC_PET_V3__ = true;
 
   const CFG = {
-    LS_FLAG: "milkpop_reinc_pet_unlocked_v1", // 転生済みフラグ
+    LS_FLAG: "milkpop_reinc_pet_unlocked_v1",
     ID: "reincarnationPetV3",
+    STYLE_ID: "reincPetStyleV3",
+
     IMG: "./assets/tennchi.png",
 
     size: 72,
     speed: 34,
     bobSpeed: 0.0012,
     boundsPad: 14,
+
+    zIndex: 140, // ちょい上げ（見えない問題を避ける）
   };
 
   const $ = (q, p = document) => p.querySelector(q);
@@ -53,17 +60,19 @@
    * Style
    * ========================= */
   function ensureStyle() {
-    if (document.getElementById("reincPetStyleV3")) return;
+    if (document.getElementById(CFG.STYLE_ID)) return;
+
     const s = document.createElement("style");
-    s.id = "reincPetStyleV3";
+    s.id = CFG.STYLE_ID;
     s.textContent = `
 #${CFG.ID}{
   position:absolute;
   width:${CFG.size}px;
   height:${CFG.size}px;
   pointer-events:none;
-  z-index:80;
+  z-index:${CFG.zIndex};
   will-change:transform;
+  transform:translate3d(60px,80px,0);
 }
 #${CFG.ID} .aura{
   position:absolute;
@@ -81,6 +90,7 @@
   position:absolute;
   left:50%; top:50%;
   width:${CFG.size}px;
+  height:${CFG.size}px;
   transform:translate(-50%,-50%);
   user-select:none;
   -webkit-user-drag:none;
@@ -122,16 +132,29 @@
   /* =========================
    * DOM
    * ========================= */
-  function getField(WB) {
-    return WB?.field || $("#field") || document.body;
+  function getHost(WB) {
+    // 置き場所の優先順位：bunnyLayer > field > body
+    return (
+      WB?.bunnyLayer ||
+      $("#bunnyLayer") ||
+      WB?.field ||
+      $("#field") ||
+      document.body
+    );
   }
 
   function ensurePet(WB) {
     ensureStyle();
-    const field = getField(WB);
+    const host = getHost(WB);
 
     let el = document.getElementById(CFG.ID);
-    if (el && el.isConnected) return el;
+    if (el && el.isConnected) {
+      // host が変わった/消えた時に備えて付け直し
+      if (el.parentElement !== host) {
+        try { host.appendChild(el); } catch {}
+      }
+      return el;
+    }
 
     el = document.createElement("div");
     el.id = CFG.ID;
@@ -141,77 +164,134 @@
       <div class="spark">✨</div>
       <img src="${CFG.IMG}" alt="転生兎">
     `;
-    field.appendChild(el);
+
+    // 画像が 404 等でも落ちないように
+    const img = el.querySelector("img");
+    if (img) {
+      img.addEventListener("error", () => {
+        // 透明にして存在だけ維持（落下や例外防止）
+        img.style.opacity = "0";
+        img.style.filter = "grayscale(1)";
+      });
+    }
+
+    host.appendChild(el);
     return el;
   }
 
+  function getBoundsRect(WB) {
+    const host = getHost(WB);
+    if (!host) return { width: window.innerWidth, height: window.innerHeight };
+    const r = host.getBoundingClientRect();
+    return { width: r.width || window.innerWidth, height: r.height || window.innerHeight };
+  }
+
   /* =========================
-   * Motion
+   * Motion（多重起動防止）
    * ========================= */
+  const STATE = {
+    running: false,
+    raf: 0,
+    WB: null,
+    x: 60,
+    y: 80,
+    vx: 1,
+    vy: 0.7,
+    last: 0,
+  };
+
+  function stopFloating() {
+    STATE.running = false;
+    try { if (STATE.raf) cancelAnimationFrame(STATE.raf); } catch {}
+    STATE.raf = 0;
+  }
+
   function startFloating(WB) {
-    let x = 60, y = 80;
-    let vx = 1, vy = 0.7;
-    let last = performance.now();
+    STATE.WB = WB || STATE.WB;
 
-    function tick(now) {
-      if (!isUnlocked()) return;
+    // 既に動いてるなら二重起動しない（ここが最大のFIX）
+    if (STATE.running) return;
 
-      const pet = ensurePet(WB);
-      const field = getField(WB);
-      const r = field.getBoundingClientRect();
+    // 未解放なら動かさない
+    if (!isUnlocked()) return;
 
-      const dt = Math.min(0.033, (now - last) / 1000);
-      last = now;
+    STATE.running = true;
+    STATE.last = performance.now();
 
-      x += vx * CFG.speed * dt;
-      y += vy * CFG.speed * dt;
+    const tick = (now) => {
+      if (!STATE.running) return;
+
+      // LSが消された等で解放が解除されたら止める
+      if (!isUnlocked()) {
+        stopFloating();
+        return;
+      }
+
+      const wb = STATE.WB;
+      const pet = ensurePet(wb);
+
+      const dt = Math.min(0.033, (now - (STATE.last || now)) / 1000);
+      STATE.last = now;
+
+      STATE.x += STATE.vx * CFG.speed * dt;
+      STATE.y += STATE.vy * CFG.speed * dt;
 
       const bob = Math.sin(now * CFG.bobSpeed) * 10;
 
+      const b = getBoundsRect(wb);
       const minX = CFG.boundsPad;
-      const maxX = Math.max(minX, r.width - CFG.size - CFG.boundsPad);
+      const maxX = Math.max(minX, b.width - CFG.size - CFG.boundsPad);
       const minY = CFG.boundsPad;
-      const maxY = Math.max(minY, r.height - CFG.size - CFG.boundsPad);
+      const maxY = Math.max(minY, b.height - CFG.size - CFG.boundsPad);
 
-      if (x <= minX) { x = minX; vx = Math.abs(vx); }
-      if (x >= maxX) { x = maxX; vx = -Math.abs(vx); }
-      if (y <= minY) { y = minY; vy = Math.abs(vy); }
-      if (y >= maxY) { y = maxY; vy = -Math.abs(vy); }
+      if (STATE.x <= minX) { STATE.x = minX; STATE.vx = Math.abs(STATE.vx) || 1; }
+      if (STATE.x >= maxX) { STATE.x = maxX; STATE.vx = -Math.abs(STATE.vx) || -1; }
+      if (STATE.y <= minY) { STATE.y = minY; STATE.vy = Math.abs(STATE.vy) || 1; }
+      if (STATE.y >= maxY) { STATE.y = maxY; STATE.vy = -Math.abs(STATE.vy) || -1; }
 
       pet.style.transform =
-        `translate3d(${Math.round(x)}px, ${Math.round(y + bob)}px, 0)`;
+        `translate3d(${Math.round(STATE.x)}px, ${Math.round(STATE.y + bob)}px, 0)`;
 
-      requestAnimationFrame(tick);
-    }
+      STATE.raf = requestAnimationFrame(tick);
+    };
 
-    requestAnimationFrame(tick);
+    STATE.raf = requestAnimationFrame(tick);
   }
 
   /* =========================
    * Boot
    * ========================= */
   waitForWB().then((WB) => {
+    // 既に転生済みなら常駐
     if (isUnlocked()) startFloating(WB);
 
-    // ✅ 転生イベントを正式トリガーに
+    // prestigeトリガー（多重購読も避ける）
     try {
-      WB?.on?.("prestige", () => {
-        unlock();
-        startFloating(WB);
-      });
+      if (WB?.on && !WB.__reincPetPrestigeHooked__) {
+        WB.__reincPetPrestigeHooked__ = true;
+        WB.on("prestige", () => {
+          unlock();
+          startFloating(WB); // runningガードがあるので安全
+        });
+      }
     } catch {}
 
     // API
     if (WB) {
       WB.reincPet = {
         isActive: () => isUnlocked(),
+        ensure: () => { unlock(); startFloating(WB); },
         remove: () => {
+          stopFloating();
           try { document.getElementById(CFG.ID)?.remove(); } catch {}
           localStorage.removeItem(CFG.LS_FLAG);
         },
       };
+    } else {
+      // WBが無くても、LS解放済みなら body で動かす（保険）
+      if (isUnlocked()) startFloating(null);
     }
 
-    console.log("[reincarnation_pet] ready (prestige-triggered tennchi bunny)");
+    console.log("[reincarnation_pet] ready (prestige-triggered tennchi bunny) v3.2");
   });
 })();
