@@ -1,4 +1,4 @@
-// oyatu.js（HUD追加：モーダルで選択 + 連打で落とす + 落とす時SE + 60msクール + 拾うと「次のクリック2倍」）v1.3.0
+// oyatu.js（HUD追加：モーダルで選択 + 連打で落とす + 落とす時SE + 60msクール + 拾うと「次のクリック2倍」）v1.3.1
 // ✅ HUDに #oyatuBtn があれば押してモーダルを開く
 // ✅ モーダルでおやつ画像を選択（ランダムも可）
 // ✅ 「落とす」ボタンを連打で複数個落とせる（同時最大数あり）
@@ -7,6 +7,10 @@
 // ✅ 落ちたおやつをクリックで拾う → 30秒以内に“1回だけ”うさぎクリック獲得2倍
 // ✅ coinChanged / 監視フォールバック両対応
 // ✅ LS：バフ状態のみ保存（ドロップは多重なので保存しない＝軽量）
+//
+// ✅ v1.3.1 変更点
+// - 地面まで落とす：field下端に固定して落下
+// - サイズを小さく：SIZE を 56 → 40 に
 //
 // 画像は assets/oyatu/ に置いてください（このパスで参照）
 // - ./assets/oyatu/candy_candycane_halloween_orange.png
@@ -23,8 +27,8 @@
 
 (() => {
   "use strict";
-  if (window.__OYATU_V130__) return;
-  window.__OYATU_V130__ = true;
+  if (window.__OYATU_V131__) return;
+  window.__OYATU_V131__ = true;
 
   const CFG = {
     FIELD_ID: "field",
@@ -44,8 +48,9 @@
     // 落下演出
     FALL_MS: 820,
 
-    // 表示
-    SIZE: 56,
+    // ✅ 表示（小さくする）
+    SIZE: 40,
+
     Z: 260000,
 
     // ✅ 落とした瞬間のSE（添付SE）
@@ -54,6 +59,9 @@
 
     // ✅ SE最短間隔（ms）
     DROP_SE_COOLDOWN_MS: 60,
+
+    // ✅ 地面（field下端）に落とすための余白
+    GROUND_MARGIN_PX: 8,
 
     // バフ
     BUFF_WINDOW_MS: 30_000,      // 30秒
@@ -168,21 +176,21 @@
    * CSS
    * ========================= */
   function ensureCss() {
-    if (document.getElementById("oyatuCssV13")) return;
+    if (document.getElementById("oyatuCssV131")) return;
     const s = document.createElement("style");
-    s.id = "oyatuCssV13";
+    s.id = "oyatuCssV131";
     s.textContent = `
-@keyframes oyatuFallV13{
+@keyframes oyatuFallV131{
   0%{ transform:translate3d(var(--x), -90px, 0) rotate(-10deg); opacity:0; }
   12%{ opacity:1; }
   100%{ transform:translate3d(var(--x), var(--y), 0) rotate(8deg); opacity:1; }
 }
-@keyframes oyatuBobV13{
-  0%{ transform:translate3d(var(--x), var(--y), 0) rotate(-3deg); }
-  50%{ transform:translate3d(var(--x), calc(var(--y) - 5px), 0) rotate(3deg); }
-  100%{ transform:translate3d(var(--x), var(--y), 0) rotate(-3deg); }
+@keyframes oyatuBobV131{
+  0%{ transform:translate3d(var(--x), var(--y), 0) rotate(-2deg); }
+  50%{ transform:translate3d(var(--x), calc(var(--y) - 3px), 0) rotate(2deg); }
+  100%{ transform:translate3d(var(--x), var(--y), 0) rotate(-2deg); }
 }
-.oyatuDropV13{
+.oyatuDropV131{
   position:absolute;
   left:0; top:0;
   width:${CFG.SIZE}px;
@@ -195,9 +203,9 @@
   will-change: transform, opacity;
   opacity:0;
 }
-.oyatuDropV13.show{ opacity:1; transition:opacity ${CFG.FADE_MS}ms ease; }
-.oyatuDropV13.hide{ opacity:0; transition:opacity ${CFG.FADE_MS}ms ease; }
-.oyatuDropV13 img{
+.oyatuDropV131.show{ opacity:1; transition:opacity ${CFG.FADE_MS}ms ease; }
+.oyatuDropV131.hide{ opacity:0; transition:opacity ${CFG.FADE_MS}ms ease; }
+.oyatuDropV131 img{
   width:100%; height:100%; display:block;
   pointer-events:none;
   image-rendering: pixelated;
@@ -205,7 +213,7 @@
 }
 
 /* バフ表示（右下） */
-#oyatuBuffBadgeV13{
+#oyatuBuffBadgeV131{
   position:fixed;
   right:10px;
   bottom:10px;
@@ -222,9 +230,9 @@
 }
 
 /* モーダル */
-#oyatuModalV13{ position:fixed; inset:0; z-index:2147483647; display:none; }
-#oyatuModalV13 .bg{ position:absolute; inset:0; background:rgba(0,0,0,.38); }
-#oyatuModalV13 .card{
+#oyatuModalV131{ position:fixed; inset:0; z-index:2147483647; display:none; }
+#oyatuModalV131 .bg{ position:absolute; inset:0; background:rgba(0,0,0,.38); }
+#oyatuModalV131 .card{
   position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
   width:min(520px, 92vw);
   max-height:min(82vh, 900px);
@@ -234,18 +242,18 @@
   overflow:hidden;
   display:flex; flex-direction:column;
 }
-#oyatuModalV13 .head{
+#oyatuModalV131 .head{
   display:flex; align-items:center; justify-content:space-between;
   padding:12px 14px 10px; border-bottom:1px solid rgba(0,0,0,.08);
 }
-#oyatuModalV13 .title{ font-weight:1000; letter-spacing:.02em; }
-#oyatuModalV13 .close{
+#oyatuModalV131 .title{ font-weight:1000; letter-spacing:.02em; }
+#oyatuModalV131 .close{
   border:none; background:rgba(0,0,0,.06);
   border-radius:12px; padding:8px 12px; font-weight:1000; cursor:pointer;
 }
-#oyatuModalV13 .body{ padding:12px 14px 14px; overflow:auto; }
-#oyatuModalV13 .grid{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
-#oyatuModalV13 .pick{
+#oyatuModalV131 .body{ padding:12px 14px 14px; overflow:auto; }
+#oyatuModalV131 .grid{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+#oyatuModalV131 .pick{
   border:2px solid rgba(0,0,0,.10);
   border-radius:14px; padding:10px;
   display:flex; align-items:center; gap:10px;
@@ -253,17 +261,17 @@
   cursor:pointer;
   user-select:none;
 }
-#oyatuModalV13 .pick.on{ border-color: rgba(255,120,180,.65); box-shadow:0 10px 22px rgba(0,0,0,.08); }
-#oyatuModalV13 .pick img{ width:40px; height:40px; image-rendering:pixelated; }
-#oyatuModalV13 .pick .name{ font-weight:1000; font-size:12px; opacity:.9; }
-#oyatuModalV13 .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:12px; flex-wrap:wrap; }
-#oyatuModalV13 .btn{
+#oyatuModalV131 .pick.on{ border-color: rgba(255,120,180,.65); box-shadow:0 10px 22px rgba(0,0,0,.08); }
+#oyatuModalV131 .pick img{ width:40px; height:40px; image-rendering:pixelated; }
+#oyatuModalV131 .pick .name{ font-weight:1000; font-size:12px; opacity:.9; }
+#oyatuModalV131 .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:12px; flex-wrap:wrap; }
+#oyatuModalV131 .btn{
   border:none; border-radius:12px;
   padding:10px 12px; font-weight:1000; cursor:pointer;
   background:#fff; box-shadow:0 10px 22px rgba(0,0,0,.10);
 }
-#oyatuModalV13 .btn.primary{ background:#ffd6e7; }
-#oyatuModalV13 .hint{ font-size:12px; opacity:.78; font-weight:900; line-height:1.35; }
+#oyatuModalV131 .btn.primary{ background:#ffd6e7; }
+#oyatuModalV131 .hint{ font-size:12px; opacity:.78; font-weight:900; line-height:1.35; }
 `;
     document.head.appendChild(s);
   }
@@ -289,7 +297,7 @@
   function ensureBadge() {
     if (badgeEl && badgeEl.isConnected) return badgeEl;
     const d = document.createElement("div");
-    d.id = "oyatuBuffBadgeV13";
+    d.id = "oyatuBuffBadgeV131";
     document.body.appendChild(d);
     badgeEl = d;
     return d;
@@ -328,7 +336,7 @@
   let dropSeq = 0;
 
   function dropsOnFieldCount() {
-    return $$(".oyatuDropV13", field).length;
+    return $$(".oyatuDropV131", field).length;
   }
 
   function pickById(id) {
@@ -352,16 +360,27 @@
     const fr = field.getBoundingClientRect();
     const size = CFG.SIZE;
 
-    const x = clamp(30 + Math.random() * (fr.width - 60), 6, Math.max(6, fr.width - size - 6));
-    const y = clamp(fr.height * (0.55 + Math.random() * 0.30), 6, Math.max(6, fr.height - size - 6));
+    // ✅ Xはランダム、Yは「地面（下端）」固定
+    const x = clamp(
+      30 + Math.random() * (fr.width - 60),
+      6,
+      Math.max(6, fr.width - size - 6)
+    );
+
+    const groundY = clamp(
+      fr.height - size - CFG.GROUND_MARGIN_PX,
+      6,
+      Math.max(6, fr.height - size - 6)
+    );
+
     const src = pickSrc(selectedId);
 
     const d = document.createElement("div");
-    d.className = "oyatuDropV13";
+    d.className = "oyatuDropV131";
     d.dataset.oyatu = "1";
-    d.id = `oyatuDropV13_${++dropSeq}`;
+    d.id = `oyatuDropV131_${++dropSeq}`;
     d.style.setProperty("--x", `${Math.round(x)}px`);
-    d.style.setProperty("--y", `${Math.round(y)}px`);
+    d.style.setProperty("--y", `${Math.round(groundY)}px`);
     d.innerHTML = `<img alt="おやつ">`;
 
     const img = d.querySelector("img");
@@ -388,10 +407,10 @@
 
     requestAnimationFrame(() => {
       d.classList.add("show");
-      d.style.animation = `oyatuFallV13 ${CFG.FALL_MS}ms ease-out forwards`;
+      d.style.animation = `oyatuFallV131 ${CFG.FALL_MS}ms ease-out forwards`;
       setTimeout(() => {
         if (!d.isConnected) return;
-        d.style.animation = `oyatuBobV13 1.8s ease-in-out infinite`;
+        d.style.animation = `oyatuBobV131 1.8s ease-in-out infinite`;
       }, CFG.FALL_MS + 10);
     });
 
@@ -449,8 +468,8 @@
 
   function hookCoinChangedIfPossible(WB) {
     try {
-      if (WB?.on && !WB.__oyatuCoinHookedV13) {
-        WB.__oyatuCoinHookedV13 = true;
+      if (WB?.on && !WB.__oyatuCoinHookedV131) {
+        WB.__oyatuCoinHookedV131 = true;
         WB.on("coinChanged", (payload) => {
           const cur = (() => {
             if (typeof payload === "number") return payload;
@@ -476,7 +495,7 @@
   /* =========================
    * Modal（選択 + 連打ドロップ）
    * ========================= */
-  const MODAL_ID = "oyatuModalV13";
+  const MODAL_ID = "oyatuModalV131";
   let selectedId = "random";
 
   function ensureModal() {
@@ -554,7 +573,7 @@
     });
 
     m.querySelector("[data-clear]")?.addEventListener("click", () => {
-      $$(".oyatuDropV13", field).forEach(el => { try { el.remove(); } catch {} });
+      $$(".oyatuDropV131", field).forEach(el => { try { el.remove(); } catch {} });
       renderModalMeta();
     });
 
@@ -650,11 +669,13 @@
   window.OYATU.dropNow = (id = "random") => spawnDrop(String(id));
   window.OYATU.clearBuff = () => { clearBuff(); updateBadge(); };
 
-  console.log("[oyatu] ready v1.3.0", {
+  console.log("[oyatu] ready v1.3.1", {
     btn: CFG.HUD_BTN_ID,
     maxDrops: CFG.MAX_DROPS_ON_FIELD,
     buffMs: CFG.BUFF_WINDOW_MS,
     seCooldownMs: CFG.DROP_SE_COOLDOWN_MS,
+    size: CFG.SIZE,
+    groundMargin: CFG.GROUND_MARGIN_PX,
     se: CFG.OYATU_DROP_SE_SRC,
   });
 })();
