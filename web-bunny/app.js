@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.3p (anti-overlay 유지 + coinChanged emit)", Date.now());
+  console.log("[app.js] LOADED v16.7.4 (baby coin1 only + no baby heart)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -92,9 +92,9 @@
    * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1673")) return;
+    if (document.getElementById("wbAppCoreCssV1674")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1673";
+    st.id = "wbAppCoreCssV1674";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -131,7 +131,7 @@
         height:${WRAP_H}px !important;
         will-change: transform;
         touch-action: manipulation;
-        pointer-events:auto !important; /* ✅ ここが超重要：wrapがイベント受ける */
+        pointer-events:auto !important; /* ✅ wrapがイベント受ける */
       }
       .bunnyWrap .bunny{
         width:100% !important;
@@ -324,20 +324,7 @@
   })();
 
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
-
-  // ✅ v16.7.3の仕様を維持しつつ「転生ゲージ用イベント」を追加
-  function updateHud() {
-    coinValueEl.textContent = String(coins);
-
-    // 既存
-    emit("hudUpdated", { coins });
-
-    // ✅ 追加：prestigeが購読する統一イベント（ゲージが増えない問題の根治）
-    emit("coinChanged", coins);
-    try { window.dispatchEvent(new CustomEvent("wb:coinChanged", { detail: { coins } })); } catch {}
-    try { window.dispatchEvent(new CustomEvent("milkpop:coinChanged", { detail: { coins } })); } catch {}
-  }
-
+  function updateHud() { coinValueEl.textContent = String(coins); emit("hudUpdated", { coins }); }
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
   function loadBunnyMeta() {
@@ -494,7 +481,14 @@
       this.hartEl = el;
       return el;
     }
-    showHeart(){ const el = this.ensureHeartEl(); el.style.display="block"; this.positionHeart(); }
+
+    // ✅ baby はハートを出さない
+    showHeart(){
+      if (this.isBaby) return; // ★追加
+      const el = this.ensureHeartEl();
+      el.style.display="block";
+      this.positionHeart();
+    }
     hideHeart(){ if (this.hartEl) this.hartEl.style.display="none"; }
 
     positionHeart() {
@@ -514,7 +508,10 @@
       if (this.charge >= CHARGE_MAX) {
         this.charge = CHARGE_MAX;
         this.chargeReady = true;
-        this.showHeart();
+
+        // ✅ baby はハート表示しない（ready 状態は内部で維持）
+        if (!this.isBaby) this.showHeart();
+
         emit("bunnyChargeReady", { bornAt: this.bornAt });
       }
     }
@@ -530,6 +527,16 @@
 
     getDropPlanFromOwnCharge() {
       const r = this.getChargeRatio();
+
+      // ✅ babybunny は coin1（tier0）しか出さない
+      if (this.isBaby) {
+        const count = 3 + Math.floor(r * 15);
+        return {
+          count,
+          pickTier: () => 0, // ★常にcoin1
+        };
+      }
+
       const count = 3 + Math.floor(r * 15);
       const maxTier = Math.floor(r * 3 + 1e-9);
 
@@ -555,6 +562,10 @@
 
       this.syncSprite();
       this.hardClamp(true);
+
+      // ✅ baby -> adult に変わった瞬間に、もしchargeReadyだったらハートを出せるようにする
+      if (this.chargeReady) this.showHeart();
+
       if (isInit) saveBunnyMeta();
     }
 
@@ -591,7 +602,7 @@
       this.hardClamp(false);
 
       this.applyPos();
-      if (this.chargeReady) this.positionHeart();
+      if (this.chargeReady && !this.isBaby) this.positionHeart(); // ✅ babyは位置更新もしない
     }
   }
 
@@ -691,11 +702,7 @@
     shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
     get coins() { return coins; },
-    set coins(v) {
-      coins = Math.max(0, Math.floor(Number(v) || 0));
-      saveCoins();
-      updateHud(); // ✅ coinChangedも出る
-    },
+    set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
 
     getCoin: () => coins,
     spendCoin: (n) => {
@@ -703,8 +710,7 @@
       if (n <= 0) return true;
       if (coins < n) return false;
       coins -= n;
-      saveCoins();
-      updateHud(); // ✅ coinChangedも出る
+      saveCoins(); updateHud();
       return true;
     },
 
@@ -768,7 +774,7 @@
     await initBunnies();
     scheduleRescueAll();
 
-    updateHud(); // ✅ 起動直後も coinChanged を出す（prestige初期同期）
+    updateHud();
     emit("bunnyCountChanged", { count: bunnies.length });
 
     requestAnimationFrame(tick);
