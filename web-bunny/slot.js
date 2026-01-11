@@ -6,6 +6,8 @@
 // ✅ 当たり時：称号加算(slot_win) / 花火特大（HANABI.jackpot） / WB.emit("slotWin") / window event
 // ✅ syougou.js未ロードでもキューして後で反映
 // ✅ 追加：うさぎティアで払戻UP（babybunny < bunny1 < bunny3 < bunny4 < bunny5 < reabunny）
+// ✅ FIX：スロットの増減も coinChanged を必ず emit → prestige.js のゲージに反映
+// ✅ FIX：当たり（totalPay）確定時に WB.prestige.onCoinsGained(totalPay,"slot") を明示的に呼ぶ（保険）
 
 (() => {
   const PANEL_ID = "slotStarMachinePanel3x3";
@@ -194,22 +196,48 @@
    * ========================= */
   function getCoin() {
     try {
+      // app.js には getCoin() がある
+      if (window.WB && typeof window.WB.getCoin === "function") return Number(window.WB.getCoin()) || 0;
+    } catch {}
+    try {
       if (window.WB && typeof window.WB.coins === "number") return window.WB.coins;
     } catch {}
     const el = $("#coinValue");
     return el ? Number(el.textContent) || 0 : 0;
   }
-  function setCoin(v) {
-    const nv = Math.max(0, Math.floor(v));
+
+  // ✅ FIX：setCoin したら必ず coinChanged を emit（prestige.js がこれを購読）
+  function setCoin(v, source = "slot") {
+    const nv = Math.max(0, Math.floor(Number(v) || 0));
+    let setOK = false;
+
+    // 1) できれば app.js の setCoin を使う（あれば）
     try {
-      if (window.WB) {
-        window.WB.coins = nv;
-        window.WB.saveCoins?.();
-        window.WB.updateHud?.();
+      if (window.WB && typeof window.WB.setCoin === "function") {
+        window.WB.setCoin(nv, source);
+        setOK = true;
       }
     } catch {}
+
+    // 2) fallback：WB.coins に入れて保存＆HUD
+    if (!setOK) {
+      try {
+        if (window.WB) {
+          // app.js の coins setter が saveCoins/updateHud をやる
+          window.WB.coins = nv;
+          window.WB.saveCoins?.();
+          window.WB.updateHud?.();
+          setOK = true;
+        }
+      } catch {}
+    }
+
+    // 3) DOM fallback
     const el = $("#coinValue");
     if (el) el.textContent = String(nv);
+
+    // ✅ 重要：必ず coinChanged を流す（減算でもOK。prestige側は増加分だけ加算する）
+    try { window.WB?.emit?.("coinChanged", nv); } catch {}
   }
 
   /* =========================
@@ -1133,6 +1161,13 @@
     try { window.HANABI?.jackpot?.(); } catch {}
   }
 
+  // ✅ prestigeゲージへ「確実に」加算（slot専用）
+  function addPrestigeEarned(delta) {
+    const d = Math.max(0, Math.floor(Number(delta) || 0));
+    if (!d) return;
+    try { window.WB?.prestige?.onCoinsGained?.(d, "slot"); } catch {}
+  }
+
   async function spin(panel, count) {
     if (spinning) return;
 
@@ -1155,7 +1190,8 @@
 
     clearWinHighlights(panel);
 
-    setCoin(have - cost);
+    // 掛け金支払い（ここでも coinChanged が出る）
+    setCoin(have - cost, "slot:bet");
     syncHave(panel);
     updateBetUI(panel);
 
@@ -1222,7 +1258,14 @@
       spinning = false;
     }
 
-    if (totalPay > 0) setCoin(getCoin() + totalPay);
+    // ✅ 払戻（ここが「稼いだ分」：ゲージに反映させたいのはココ）
+    if (totalPay > 0) {
+      const cur = getCoin();
+      setCoin(cur + totalPay, "slot:pay");
+
+      // ✅ 保険：prestige.js にも直接「稼いだ分」を通知（coinChanged未対応環境でもゲージが増える）
+      addPrestigeEarned(totalPay);
+    }
 
     const bestTier = getBestTierFromWins(lastWinLines, lastNames);
     drawPaylinesAlways(panel, lastWinLines, bestTier);
