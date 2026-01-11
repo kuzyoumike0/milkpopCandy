@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.3 (bunny click fix + anti-overlay)", Date.now());
+  console.log("[app.js] LOADED v16.7.4 (coinChanged emit fix for prestige)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -324,7 +324,37 @@
   })();
 
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
-  function updateHud() { coinValueEl.textContent = String(coins); emit("hudUpdated", { coins }); }
+
+  // ✅ coinChanged を必ず出す（prestige.js 同期用）
+  function setCoinsWithEmit(next, source = "") {
+    const prev = coins;
+    next = Math.max(0, Math.floor(Number(next) || 0));
+    coins = next;
+
+    saveCoins();
+    coinValueEl.textContent = String(coins);
+
+    // HUD更新（既存互換）
+    emit("hudUpdated", { coins });
+
+    // prestige が拾うイベント（オブジェクト推奨）
+    const delta = coins - prev;
+    emit("coinChanged", { coins, delta, source: String(source || "") });
+  }
+
+  // 互換：他モジュールが setCoin を探してる（prestige.js が使う）
+  function setCoin(v, source = "setCoin") {
+    setCoinsWithEmit(v, source);
+  }
+
+  // 既存互換：HUDの描画更新（coins値は変更しない）
+  function updateHud() {
+    coinValueEl.textContent = String(coins);
+    emit("hudUpdated", { coins });
+    // “今の値” を一応通知（delta=0）
+    emit("coinChanged", { coins, delta: 0, source: "updateHud" });
+  }
+
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
   function loadBunnyMeta() {
@@ -384,8 +414,11 @@
     }
     collect(){
       if (!this.el || !this.el.isConnected) return;
-      coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
-      saveCoins(); updateHud(); playSE(seCoin);
+
+      const gain = (this.tier + 1) * COIN_VALUE_MULTIPLIER;
+      setCoinsWithEmit(coins + gain, "coinCollect");
+
+      playSE(seCoin);
       try { this.el.remove(); } catch {}
       const idx = dropsOnField.indexOf(this);
       if (idx >= 0) dropsOnField.splice(idx, 1);
@@ -441,7 +474,6 @@
 
       // ✅ クリックでコイン（“確実”版）
       const tap = (e) => {
-        // ここが passive だと preventDefault が効かないので、リスナー側で passive:false にしている
         try { e?.preventDefault?.(); } catch {}
         try { e?.stopPropagation?.(); } catch {}
 
@@ -680,15 +712,16 @@
     shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
     get coins() { return coins; },
-    set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
+    set coins(v) { setCoinsWithEmit(v, "WB.coins=set"); },
 
     getCoin: () => coins,
+    setCoin, // ✅ prestige.js 互換
+
     spendCoin: (n) => {
       n = Math.floor(Number(n) || 0);
       if (n <= 0) return true;
       if (coins < n) return false;
-      coins -= n;
-      saveCoins(); updateHud();
+      setCoinsWithEmit(coins - n, "spendCoin");
       return true;
     },
 
@@ -754,6 +787,9 @@
 
     updateHud();
     emit("bunnyCountChanged", { count: bunnies.length });
+
+    // ✅ 起動直後に現在コインを通知（prestige.js の初期同期）
+    emit("coinChanged", { coins, delta: 0, source: "boot" });
 
     requestAnimationFrame(tick);
   }
