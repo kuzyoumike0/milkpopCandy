@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.5 (baby coin1 only + no baby heart + disable idle coins)", Date.now());
+  console.log("[app.js] LOADED v16.7.6 (disable ALL idle drops incl tennshi)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -92,9 +92,9 @@
    * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1675")) return;
+    if (document.getElementById("wbAppCoreCssV1676")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1675";
+    st.id = "wbAppCoreCssV1676";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -324,7 +324,7 @@
   function updateHud() {
     coinValueEl.textContent = String(coins);
     emit("hudUpdated", { coins });
-    emit("coinChanged", coins); // ✅ prestige.js が拾えるように（numberで統一）
+    emit("coinChanged", coins); // ✅ prestige.js が拾えるように（number）
   }
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
@@ -340,9 +340,9 @@
   }
 
   /* =========================
-   * ✅ 放置（自動）コインを出さないガード
-   * - クリック生成は許可
-   * - prestige の tennshi 自動ドロップは「tennshi activeなら許可」
+   * ✅ 放置（自動）コインは「完全停止」
+   * - クリック生成だけ許可
+   * - 転生tennshiの自動ドロップもここで止まる
    * ========================= */
   const DISABLE_IDLE_COINS = true;
   let __allowCoinSpawn = false;
@@ -350,9 +350,6 @@
     __allowCoinSpawn = true;
     try { return fn(); }
     finally { __allowCoinSpawn = false; }
-  }
-  function isTennshiActive() {
-    try { return window.WB?.prestige?.tennchi?.isActive?.() === true; } catch { return false; }
   }
 
   /* =========================
@@ -410,9 +407,8 @@
   }
 
   function spawnCoinDropAt(x, y, tier = 0) {
-    // ✅ 放置（自動）コイン禁止：クリック時だけ許可
-    // ✅ ただし転生tennshiがアクティブならその自動ドロップは許可
-    if (DISABLE_IDLE_COINS && !__allowCoinSpawn && !isTennshiActive()) {
+    // ✅ 自動（放置）発生は全部禁止。クリック生成だけ許可。
+    if (DISABLE_IDLE_COINS && !__allowCoinSpawn) {
       return null;
     }
     const c = new CoinDrop(x, y, tier);
@@ -532,9 +528,7 @@
         this.charge = CHARGE_MAX;
         this.chargeReady = true;
 
-        // ✅ baby はハート表示しない（ready状態は内部維持）
         if (!this.isBaby) this.showHeart();
-
         emit("bunnyChargeReady", { bornAt: this.bornAt });
       }
     }
@@ -583,7 +577,6 @@
       this.syncSprite();
       this.hardClamp(true);
 
-      // ✅ baby -> adult 直後、readyならハート出す
       if (this.chargeReady) this.showHeart();
 
       if (isInit) saveBunnyMeta();
@@ -739,7 +732,7 @@
     spawnBunny,
     removeBunnyInstance,
 
-    spawnCoinDropAt, // prestige.js が呼べる（ただし idle guard あり）
+    spawnCoinDropAt, // ✅ これを呼んでも idle は出ない（クリック許可時のみ）
 
     saveCoins,
     saveBunnyMeta,
