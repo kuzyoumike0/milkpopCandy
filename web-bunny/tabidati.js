@@ -1,7 +1,8 @@
-// tabidati.js（v14.2：✅既存 #departBtn 優先 + 旅立ちクリックを“確実に勝たせる” + 赤帯 + 選択赤枠）
+// tabidati.js（v14.3：✅既存 #departBtn 優先 + 旅立ちボタンの二重toggle根絶 + 赤帯 + 選択赤枠）
 // - index.html に #departBtn があれば必ずそれを使う（＝二重UI根絶）
 // - 旅立ちモード中：HUD下に赤帯ヒント固定
 // - 旅立ちモード中：hover赤枠 + 選択したうさぎは赤枠保持 → 旅立ち完了で解除
+// - ✅ 旅立ちボタンは capture click で “app.js の click” を止める（ui:depart二重トグル根絶）
 // - 旅立ちクリックは capture+stopImmediatePropagation で “app.js のコイン生成クリック” より優先
 // - WBがまだ無い場合は待機して確実に初期化
 
@@ -88,9 +89,9 @@
      * Styles / UI
      * ========================= */
     function ensureStyles() {
-      if (document.getElementById("tabidatiUIStyleV142")) return;
+      if (document.getElementById("tabidatiUIStyleV143")) return;
       const s = document.createElement("style");
-      s.id = "tabidatiUIStyleV142";
+      s.id = "tabidatiUIStyleV143";
       s.textContent = `
 /* ===== Toast ===== */
 .tabidatiToast{
@@ -214,14 +215,19 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
       // ✅ 既存 #departBtn を最優先
       const legacy = document.getElementById(LEGACY_BTN_ID);
       if (legacy) {
-        if (!legacy.__tabidatiBoundV142) {
-          legacy.__tabidatiBoundV142 = true;
+        if (!legacy.__tabidatiBoundV143) {
+          legacy.__tabidatiBoundV143 = true;
+
+          // ✅ 重要：capture click で “app.js の click（bubble）” を止める
           legacy.addEventListener("click", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
+            // ここで止めると app.js の click → emit("ui:depart") が走らない
+            try { e.preventDefault(); } catch {}
+            try { e.stopPropagation(); } catch {}
+            try { e.stopImmediatePropagation?.(); } catch {}
+
             try { WB.unlockAudioOnce?.(); } catch {}
             toggleDepartMode();
-          }, { passive: false });
+          }, { capture: true, passive: false });
         }
         return legacy;
       }
@@ -243,6 +249,7 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
+        try { e.stopImmediatePropagation?.(); } catch {}
         try { WB.unlockAudioOnce?.(); } catch {}
         toggleDepartMode();
       }, { passive: false });
@@ -374,10 +381,10 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
     ensureBanner();
     setBannerVisible(false);
 
-    // ✅ app.js の emit("ui:depart") でもトグル
+    // ✅ app.js 以外の場所から emit("ui:depart") が来た場合の保険（通常は発火しない想定）
     try {
-      if (typeof WB.on === "function" && !WB.__tabidatiUiDepartBoundV142) {
-        WB.__tabidatiUiDepartBoundV142 = true;
+      if (typeof WB.on === "function" && !WB.__tabidatiUiDepartBoundV143) {
+        WB.__tabidatiUiDepartBoundV143 = true;
         WB.on("ui:depart", () => {
           try { WB.unlockAudioOnce?.(); } catch {}
           toggleDepartMode();
@@ -390,7 +397,7 @@ body.departModeOn .bunnyWrap.${TARGET_CLASS}{
 
     WB.tabidati = { setDepartMode, toggleDepartMode, departBunny, get departMode(){ return departMode; } };
 
-    console.log("[tabidati] ready v14.2", {
+    console.log("[tabidati] ready v14.3", {
       usingBtn: (document.getElementById(LEGACY_BTN_ID) ? LEGACY_BTN_ID : AUTO_BTN_ID),
     });
   }).catch((e) => {
