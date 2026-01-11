@@ -59,7 +59,6 @@
   <script src="./wb_boot.js?v=20260111_2"></script>
 
   <!-- ===== コア（WBを作る）===== -->
-  <!-- ✅ クリック不具合対策を入れた app.js（v16.7.3等）を先に -->
   <script src="./app.js?v=20260111_2"></script>
 
   <!-- ✅ BGM（モーダル版：WB.bgm.openModal() 提供） -->
@@ -100,11 +99,12 @@
   <script src="./farewell_messages.js?v=20260111_2"></script>
   <script src="./tabidati.js?v=20260111_2"></script>
   <script src="./slot.js?v=20260111_2"></script>
-  <script src="./mirrorball_dance.js?v=20260111_2"></script>
 
-
-  <!-- ✅ 右上ハンバーガーメニュー（最後に読み込む） -->
+  <!-- ✅ 右上ハンバーガーメニュー -->
   <script src="./gameMenu.js?v=20260111_2"></script>
+
+  <!-- ✅ mirrorball_dance は「絶対に一番最後」 -->
+  <script src="./mirrorball_dance.js?v=20260111_2"></script>
 
   <!-- Service Worker（安全版：復旧用に ?nosw=1 で無効化） -->
   <script>
