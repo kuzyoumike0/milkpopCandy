@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.4 (baby coin1 only + no baby heart)", Date.now());
+  console.log("[app.js] LOADED v16.7.5 (baby coin1 only + no baby heart + disable idle coins)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -92,9 +92,9 @@
    * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1674")) return;
+    if (document.getElementById("wbAppCoreCssV1675")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1674";
+    st.id = "wbAppCoreCssV1675";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -131,7 +131,7 @@
         height:${WRAP_H}px !important;
         will-change: transform;
         touch-action: manipulation;
-        pointer-events:auto !important; /* ✅ wrapがイベント受ける */
+        pointer-events:auto !important;
       }
       .bunnyWrap .bunny{
         width:100% !important;
@@ -142,7 +142,6 @@
         pointer-events:auto !important;
       }
 
-      /* ✅ コイン小さめ（コイン自体だけクリック可） */
       .coin{
         position:absolute;
         width:34px !important;
@@ -282,7 +281,6 @@
     if (audioUnlocked) return;
     audioUnlocked = true;
 
-    // ✅ SE unlock
     try {
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
@@ -291,7 +289,6 @@
         .catch(() => (sePoyo.muted = false));
     } catch {}
 
-    // ✅ BGMもユーザー操作内で開始を試す（ブロック対策）
     try {
       window.WB?.bgm?.start?.();
       window.WB?.bgm?.play?.();
@@ -324,7 +321,11 @@
   })();
 
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
-  function updateHud() { coinValueEl.textContent = String(coins); emit("hudUpdated", { coins }); }
+  function updateHud() {
+    coinValueEl.textContent = String(coins);
+    emit("hudUpdated", { coins });
+    emit("coinChanged", coins); // ✅ prestige.js が拾えるように（numberで統一）
+  }
   function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
 
   function loadBunnyMeta() {
@@ -336,6 +337,22 @@
   }
   function saveBunnyMeta() {
     localStorage.setItem(LS.bunnies, JSON.stringify(bunnies.map(b => ({ bornAt: b.bornAt, kind: b.kind }))));
+  }
+
+  /* =========================
+   * ✅ 放置（自動）コインを出さないガード
+   * - クリック生成は許可
+   * - prestige の tennshi 自動ドロップは「tennshi activeなら許可」
+   * ========================= */
+  const DISABLE_IDLE_COINS = true;
+  let __allowCoinSpawn = false;
+  function withCoinSpawnAllowed(fn) {
+    __allowCoinSpawn = true;
+    try { return fn(); }
+    finally { __allowCoinSpawn = false; }
+  }
+  function isTennshiActive() {
+    try { return window.WB?.prestige?.tennchi?.isActive?.() === true; } catch { return false; }
   }
 
   /* =========================
@@ -393,17 +410,24 @@
   }
 
   function spawnCoinDropAt(x, y, tier = 0) {
+    // ✅ 放置（自動）コイン禁止：クリック時だけ許可
+    // ✅ ただし転生tennshiがアクティブならその自動ドロップは許可
+    if (DISABLE_IDLE_COINS && !__allowCoinSpawn && !isTennshiActive()) {
+      return null;
+    }
     const c = new CoinDrop(x, y, tier);
     dropsOnField.push(c);
     return c;
   }
 
   function spawnClickCoins(bunny, count = 1, tierPicker = () => 0) {
-    const baseX = bunny.x + WRAP_W * 0.55;
-    const baseY = bunny.y + WRAP_H * 0.82;
-    for (let i = 0; i < count; i++) {
-      spawnCoinDropAt(baseX + rand(-14, 14), baseY + rand(-6, 6), tierPicker());
-    }
+    return withCoinSpawnAllowed(() => {
+      const baseX = bunny.x + WRAP_W * 0.55;
+      const baseY = bunny.y + WRAP_H * 0.82;
+      for (let i = 0; i < count; i++) {
+        spawnCoinDropAt(baseX + rand(-14, 14), baseY + rand(-6, 6), tierPicker());
+      }
+    });
   }
 
   /* =========================
@@ -439,7 +463,6 @@
       this.evolveIfNeeded(true);
       this.syncSprite();
 
-      // ✅ クリックでコイン（“確実”版）
       const tap = (e) => {
         try { e?.preventDefault?.(); } catch {}
         try { e?.stopPropagation?.(); } catch {}
@@ -484,7 +507,7 @@
 
     // ✅ baby はハートを出さない
     showHeart(){
-      if (this.isBaby) return; // ★追加
+      if (this.isBaby) return;
       const el = this.ensureHeartEl();
       el.style.display="block";
       this.positionHeart();
@@ -509,7 +532,7 @@
         this.charge = CHARGE_MAX;
         this.chargeReady = true;
 
-        // ✅ baby はハート表示しない（ready 状態は内部で維持）
+        // ✅ baby はハート表示しない（ready状態は内部維持）
         if (!this.isBaby) this.showHeart();
 
         emit("bunnyChargeReady", { bornAt: this.bornAt });
@@ -531,10 +554,7 @@
       // ✅ babybunny は coin1（tier0）しか出さない
       if (this.isBaby) {
         const count = 3 + Math.floor(r * 15);
-        return {
-          count,
-          pickTier: () => 0, // ★常にcoin1
-        };
+        return { count, pickTier: () => 0 };
       }
 
       const count = 3 + Math.floor(r * 15);
@@ -563,7 +583,7 @@
       this.syncSprite();
       this.hardClamp(true);
 
-      // ✅ baby -> adult に変わった瞬間に、もしchargeReadyだったらハートを出せるようにする
+      // ✅ baby -> adult 直後、readyならハート出す
       if (this.chargeReady) this.showHeart();
 
       if (isInit) saveBunnyMeta();
@@ -602,7 +622,7 @@
       this.hardClamp(false);
 
       this.applyPos();
-      if (this.chargeReady && !this.isBaby) this.positionHeart(); // ✅ babyは位置更新もしない
+      if (this.chargeReady && !this.isBaby) this.positionHeart();
     }
   }
 
@@ -719,7 +739,7 @@
     spawnBunny,
     removeBunnyInstance,
 
-    spawnCoinDropAt,
+    spawnCoinDropAt, // prestige.js が呼べる（ただし idle guard あり）
 
     saveCoins,
     saveBunnyMeta,
