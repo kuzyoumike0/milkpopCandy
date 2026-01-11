@@ -1,18 +1,20 @@
-// bed_rest_bonus.js (V4.3 - DOM bed not found fallback: read itemPlace(WB/LS) bed position)
+// bed_rest_bonus.js (V4.4 - bed coord auto-normalize + percent/client detect + better bunny-speed mapping)
 // ✅ ベッド付近で「ランダムに寝る/起きる」 + ✅ 速度も実際に落とす + ✅ コイン微増
 // ✅ ベッド検出：
 //    (A) DOM: img/src + computed background-image（レイヤー配下優先）
-//    (B) ✅ fallback: WB.itemPlace / localStorage の配置データから "bed" 座標を取得（DOM無しでも動く）
+//    (B) fallback: WB.itemPlace / window.ITEMPLACE の配置データから "bed" 座標を取得（DOM無しでも動く）
+//    (C) fallback: localStorage の itemPlace 系キーから配置を拾う（キー探索強化）
+// ✅ 座標系：px / 0..1 / 0..100(%) / client座標 を自動判定して client座標に変換
 // ✅ うさぎ検出：.bunnyWrap（app.js準拠）
-// ✅ 速度減衰：WB.getBunnies() の各bunny.baseSpeed を退避して slowMul 倍（解除で復帰）
+// ✅ 速度減衰：WB.getBunnies() の bunny.el/wrapEl 等と .bunnyWrap を対応付けして slowMul 倍（解除で復帰）
 // ✅ コイン加算：WB.addCoin / WB.setCoin / WB.coins / #coinValue
 //
 // 読み込み順：app.js / itemPlace.js の後（最後の方）推奨
 
 (() => {
   "use strict";
-  if (window.__BED_REST_BONUS_V43__) return;
-  window.__BED_REST_BONUS_V43__ = true;
+  if (window.__BED_REST_BONUS_V44__) return;
+  window.__BED_REST_BONUS_V44__ = true;
 
   const CFG = {
     bedSrcNeedle: "assets/bg/bed.png",
@@ -40,11 +42,14 @@
 
     slowMul: 0.15,
 
-    // ✅ 寝ない時は true（consoleで原因が一発で分かる）
+    // ✅ 重要：原因追跡（true推奨、ログ量を抑える工夫済み）
     debug: true,
 
     // ✅ LSフォールバック探索の最大キー数（localStorage走査の上限）
-    lsScanMaxKeys: 80,
+    lsScanMaxKeys: 140,
+
+    // ✅ “寝ない”切り分け用：一定間隔でだけログ
+    debugEveryMs: 2200,
   };
 
   const $ = (q, p = document) => p.querySelector(q);
@@ -67,15 +72,15 @@
   }
 
   function ensureStyle() {
-    if (document.getElementById("wbBedRestStyleV43")) return;
+    if (document.getElementById("wbBedRestStyleV44")) return;
     const s = document.createElement("style");
-    s.id = "wbBedRestStyleV43";
+    s.id = "wbBedRestStyleV44";
     s.textContent = `
 .wbResting{ filter:saturate(0.92) brightness(1.02); opacity:0.98; }
 .bunnyWrap.wbResting{ overflow: visible !important; }
 .wbRestInner{ width:100%; height:100%; }
-.wbResting .wbRestInner{ ${CFG.breathing ? "animation: wbBreathV43 1.45s ease-in-out infinite;" : ""} }
-@keyframes wbBreathV43{
+.wbResting .wbRestInner{ ${CFG.breathing ? "animation: wbBreathV44 1.45s ease-in-out infinite;" : ""} }
+@keyframes wbBreathV44{
   0%{ transform: translateY(0px) scale(1.00); }
   50%{ transform: translateY(-1.2px) scale(0.985); }
   100%{ transform: translateY(0px) scale(1.00); }
@@ -89,13 +94,13 @@
 .wbZzz{
   font-weight:1000; font-size:${CFG.zzzBig ? "16px" : "14px"};
   opacity:.95; text-shadow:0 8px 18px rgba(0,0,0,.20);
-  animation: wbZzzFloatV43 1.15s ease-in-out infinite;
+  animation: wbZzzFloatV44 1.15s ease-in-out infinite;
 }
 .wbSleepIcon{
   font-weight:1000; font-size:${CFG.zzzBig ? "16px" : "14px"};
-  opacity:.92; animation: wbZzzFloatV43 1.15s ease-in-out infinite;
+  opacity:.92; animation: wbZzzFloatV44 1.15s ease-in-out infinite;
 }
-@keyframes wbZzzFloatV43{
+@keyframes wbZzzFloatV44{
   0%{ transform: translateY(0); opacity:.85; }
   50%{ transform: translateY(-7px); opacity:1; }
   100%{ transform: translateY(0); opacity:.85; }
@@ -178,7 +183,7 @@
     return Array.from(new Set(out)).filter(Boolean);
   }
 
-  // ========= (B) ✅ WB/itemPlace/LSから配置ベッド座標を拾う =========
+  // ========= (B/C) WB/itemPlace/LSから配置ベッド座標を拾う =========
   function fieldRect() {
     const f = document.getElementById("field");
     if (!f) return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
@@ -186,7 +191,7 @@
     return { left: r.left, top: r.top, width: r.width || window.innerWidth, height: r.height || window.innerHeight };
   }
 
-  // いろんな形の itemPlace を雑に吸収して bed 配列を返す
+  // itemPlace を雑に吸収（配列を返してくれる関数を総当たり）
   function getPlacedItemsFromWB(WB) {
     if (!WB) return null;
 
@@ -200,11 +205,15 @@
       () => window.ITEMPLACE?.getPlacedItems?.(),
       () => window.ITEMPLACE?.getItems?.(),
       () => window.ITEMPLACE?.items?.(),
+      () => window.ITEMPLACE?.placedItems?.,
+      () => window.ITEMPLACE?.placed?.,
+      () => WB.itemPlace?.placedItems?.,
+      () => WB.itemPlace?.placed?.,
     ];
 
     for (const f of candidates) {
       try {
-        const v = f();
+        const v = (typeof f === "function") ? f() : f;
         if (Array.isArray(v)) return v;
       } catch {}
     }
@@ -213,52 +222,91 @@
 
   function extractBedsFromItems(items) {
     if (!Array.isArray(items)) return [];
-    // itemPlaceはだいたい {id/kind/item, x, y} の配列
     const beds = [];
     for (const it of items) {
-      const kind = String(it?.kind ?? it?.id ?? it?.item ?? it?.type ?? "").toLowerCase();
+      const kind = String(it?.kind ?? it?.id ?? it?.item ?? it?.type ?? it?.name ?? "").toLowerCase();
       if (!kind) continue;
       if (kind === "bed" || kind.includes("bed")) beds.push(it);
     }
     return beds;
   }
 
+  // ★座標系を推測して client 座標に変換（px / 0..1 / 0..100(%) / client）
+  function toClientPointFromAny(b, fr) {
+    let x = Number(b?.x ?? b?.left ?? b?.posX ?? b?.px ?? b?.cx ?? NaN);
+    let y = Number(b?.y ?? b?.top  ?? b?.posY ?? b?.py ?? b?.cy ?? NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+    // サイズが取れれば中心寄せ補正
+    const w = Number(b?.w ?? b?.width  ?? b?.size ?? b?.s ?? NaN);
+    const h = Number(b?.h ?? b?.height ?? b?.size ?? b?.s ?? NaN);
+
+    // 1) すでに client 座標っぽい（画面サイズ級の値）
+    //    例：x=600,y=420 で fr.left/top を足すとズレるタイプ
+    const looksClient =
+      (x > fr.left - 10 && x < fr.left + fr.width + 10) &&
+      (y > fr.top  - 10 && y < fr.top  + fr.height + 10) &&
+      // かつ fr.left/top がそこそこ離れてる時に誤判定しないため
+      (x > fr.left + 2 || y > fr.top + 2);
+
+    if (looksClient) {
+      let cx = x;
+      let cy = y;
+      // top-leftっぽいなら中心補正
+      if (Number.isFinite(w)) cx += w / 2;
+      if (Number.isFinite(h)) cy += h / 2;
+      return { x: cx, y: cy, mode: "client" };
+    }
+
+    // 2) 0..1 正規化
+    if (x >= 0 && x <= 1.01 && fr.width) x = x * fr.width;
+    if (y >= 0 && y <= 1.01 && fr.height) y = y * fr.height;
+
+    // 3) 0..100 (%) の可能性（座標が小さく、かつ 100以内）
+    if (x >= 0 && x <= 100.1 && fr.width > 150) x = (x / 100) * fr.width;
+    if (y >= 0 && y <= 100.1 && fr.height > 150) y = (y / 100) * fr.height;
+
+    // 4) field基準(px) → client基準
+    let cx = fr.left + x;
+    let cy = fr.top + y;
+
+    // 5) top-leftっぽいなら中心補正（サイズがあれば）
+    if (Number.isFinite(w)) cx += w / 2;
+    if (Number.isFinite(h)) cy += h / 2;
+
+    return { x: cx, y: cy, mode: "field" };
+  }
+
   function bedsToCentersClient(beds) {
     const fr = fieldRect();
-
-    // x,y が 0..1 の正規化の可能性もあるので雑対応
     const centers = [];
     for (const b of beds) {
-      let x = Number(b?.x ?? b?.left ?? b?.posX ?? b?.px ?? NaN);
-      let y = Number(b?.y ?? b?.top  ?? b?.posY ?? b?.py ?? NaN);
-
-      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-
-      // 正規化っぽいなら拡大
-      if (x > 0 && x <= 1.01 && fr.width) x = x * fr.width;
-      if (y > 0 && y <= 1.01 && fr.height) y = y * fr.height;
-
-      // field基準 -> client基準
-      const cx = fr.left + x;
-      const cy = fr.top + y;
-
-      centers.push({ x: cx, y: cy });
+      const p = toClientPointFromAny(b, fr);
+      if (!p) continue;
+      centers.push({ x: p.x, y: p.y, __mode: p.mode });
     }
     return centers;
   }
 
   function readBedsFromLocalStorageFallback() {
-    // localStorageの中から "bed" を含むJSONっぽいものを探す（上限あり）
+    // localStorage から itemPlace っぽい JSON を広く拾う
     try {
       const keys = [];
       const max = Math.min(localStorage.length, Math.max(0, CFG.lsScanMaxKeys | 0));
       for (let i = 0; i < max; i++) keys.push(String(localStorage.key(i) || ""));
-      // itemplaceっぽいキー優先
-      keys.sort((a, b) => {
-        const aa = a.toLowerCase().includes("itemplace") ? -1 : 0;
-        const bb = b.toLowerCase().includes("itemplace") ? -1 : 0;
-        return aa - bb;
-      });
+
+      // それっぽいキー優先
+      const scoreKey = (k) => {
+        const s = k.toLowerCase();
+        let sc = 0;
+        if (s.includes("itemplace")) sc += 50;
+        if (s.includes("placed")) sc += 25;
+        if (s.includes("state")) sc += 12;
+        if (s.includes("shop")) sc += 6;
+        if (s.includes("milkpop")) sc += 4;
+        return -sc; // sort asc
+      };
+      keys.sort((a, b) => scoreKey(a) - scoreKey(b));
 
       for (const k of keys) {
         let raw = "";
@@ -274,14 +322,16 @@
           Array.isArray(v) ? v :
           Array.isArray(v?.items) ? v.items :
           Array.isArray(v?.placed) ? v.placed :
+          Array.isArray(v?.placedItems) ? v.placedItems :
           Array.isArray(v?.list) ? v.list :
+          Array.isArray(v?.data) ? v.data :
           null;
 
         if (!arr) continue;
 
         const beds = extractBedsFromItems(arr);
         if (beds.length) {
-          if (CFG.debug) console.log("[bed_rest_bonus V4.3] beds from LS:", { key: k, beds: beds.length });
+          if (CFG.debug) console.log("[bed_rest_bonus V4.4] beds from LS:", { key: k, beds: beds.length });
           return beds;
         }
       }
@@ -290,7 +340,7 @@
   }
 
   function getBedCentersSmart(WB) {
-    // 1) DOMで取れるならそれが最強
+    // 1) DOM
     const domBeds = findBedElementsDOM();
     const domCenters = domBeds.map(centerOfEl).filter(Boolean);
     if (domCenters.length) return { centers: domCenters, source: "DOM" };
@@ -301,7 +351,7 @@
     const wbCenters = bedsToCentersClient(wbBeds);
     if (wbCenters.length) return { centers: wbCenters, source: "WB.itemPlace" };
 
-    // 3) localStorage fallback
+    // 3) LS
     const lsBeds = readBedsFromLocalStorageFallback();
     const lsCenters = bedsToCentersClient(lsBeds);
     if (lsCenters.length) return { centers: lsCenters, source: "localStorage" };
@@ -396,7 +446,7 @@
     return s;
   }
 
-  // ========= 速度制御 =========
+  // ========= 速度制御（DOM⇔WBうさぎを対応付け） =========
   const speedBackup = new WeakMap(); // bunnyObj -> originalBaseSpeed
 
   function getWBunnies(WB) {
@@ -410,27 +460,57 @@
     return [];
   }
 
-  function applySpeedSlow(WB, sleepingFlags) {
-    const list = getWBunnies(WB);
-    if (!list.length) return;
+  function bunnyDomFromObj(b) {
+    // いろんな実装に対応
+    const cands = [
+      b?.wrapEl,
+      b?.wrap,
+      b?.el,
+      b?.node,
+      b?.dom,
+      b?.element,
+      b?.root,
+    ];
+    for (const el of cands) {
+      if (el && el.nodeType === 1) return el;
+    }
+    return null;
+  }
 
-    const n = Math.min(list.length, sleepingFlags.length);
-    for (let i = 0; i < n; i++) {
-      const b = list[i];
-      if (!b) continue;
-      const sleep = !!sleepingFlags[i];
-      if (!("baseSpeed" in b)) continue;
+  function buildWrapToBunnyMap(WB) {
+    const map = new Map(); // wrapEl -> bunnyObj
+    const list = getWBunnies(WB);
+    for (const b of list) {
+      const el = bunnyDomFromObj(b);
+      if (!el) continue;
+      // el が img の場合があるので親を辿る
+      let w = el;
+      if (w && !w.classList?.contains("bunnyWrap")) {
+        w = w.closest?.(".bunnyWrap") || w.parentElement?.closest?.(".bunnyWrap") || null;
+      }
+      if (w && w.classList?.contains("bunnyWrap")) map.set(w, b);
+    }
+    return map;
+  }
+
+  function applySpeedSlowByWrap(WB, wrapSleepingMap) {
+    const map = buildWrapToBunnyMap(WB);
+    if (!map.size) return;
+
+    for (const [wrap, bunny] of map.entries()) {
+      const sleep = !!wrapSleepingMap.get(wrap);
+      if (!bunny || !("baseSpeed" in bunny)) continue;
 
       if (sleep) {
-        if (!speedBackup.has(b)) speedBackup.set(b, Number(b.baseSpeed) || 0);
-        const orig = speedBackup.get(b);
+        if (!speedBackup.has(bunny)) speedBackup.set(bunny, Number(bunny.baseSpeed) || 0);
+        const orig = speedBackup.get(bunny);
         const slowed = Math.max(6, (Number(orig) || 40) * CFG.slowMul);
-        try { b.baseSpeed = slowed; } catch {}
+        try { bunny.baseSpeed = slowed; } catch {}
       } else {
-        if (speedBackup.has(b)) {
-          const orig = speedBackup.get(b);
-          try { b.baseSpeed = orig; } catch {}
-          speedBackup.delete(b);
+        if (speedBackup.has(bunny)) {
+          const orig = speedBackup.get(bunny);
+          try { bunny.baseSpeed = orig; } catch {}
+          speedBackup.delete(bunny);
         }
       }
     }
@@ -475,33 +555,41 @@
     ensureStyle();
 
     let lastBonusAt = 0;
+    let lastDbgAt = 0;
 
     function tick() {
       const wraps = findBunnyWraps();
       const bed = getBedCentersSmart(WB);
       const bedCenters = bed.centers;
 
+      const now = Date.now();
+      const doDbg = CFG.debug && (now - lastDbgAt >= CFG.debugEveryMs);
+      if (doDbg) lastDbgAt = now;
+
       if (!wraps.length || !bedCenters.length) {
         wraps.forEach(w => setRestingVisual(w, false));
-        applySpeedSlow(WB, wraps.map(() => false));
 
-        if (CFG.debug) {
-          console.log("[bed_rest_bonus V4.3] no target", {
+        // 速度復帰（sleepMap空）
+        applySpeedSlowByWrap(WB, new Map());
+
+        if (doDbg) {
+          console.log("[bed_rest_bonus V4.4] no target", {
             wraps: wraps.length,
             bedCenters: bedCenters.length,
             source: bed.source,
-            hint: "背景に描かれてるベッドはDOMに無いので、itemPlace配置ベッドで判定します（WB/LS fallback）。",
+            hint: "ベッドは itemPlace で“bed”を配置してる？（DOM背景ベッドは拾えない場合あり）",
           });
         }
         return;
       }
 
-      const now = Date.now();
       const thresh = (Number(CFG.radiusPx) || 0) + (Number(CFG.fatPx) || 0);
 
       let sleepingCount = 0;
       let nearCount = 0;
-      const sleepingFlags = new Array(wraps.length).fill(false);
+
+      // wrap -> sleeping の対応を持つ（速度にも使う）
+      const wrapSleepingMap = new Map();
 
       for (let i = 0; i < wraps.length; i++) {
         const w = wraps[i];
@@ -511,6 +599,7 @@
           st.sleeping = false;
           st.since = 0;
           setRestingVisual(w, false);
+          wrapSleepingMap.set(w, false);
           continue;
         }
 
@@ -521,9 +610,9 @@
         if (near) nearCount++;
 
         const st = getState(w);
-
         if (near) st.lastNear = now;
 
+        // 離れたら猶予後に起床
         if (!near && st.sleeping) {
           if (now - st.lastNear > CFG.awayGraceMs) {
             st.sleeping = false;
@@ -531,6 +620,7 @@
           }
         }
 
+        // 近い＆起きてる → 寝る抽選
         if (near && !st.sleeping) {
           if (Math.random() < CFG.sleepChancePerTick) {
             st.sleeping = true;
@@ -538,6 +628,7 @@
           }
         }
 
+        // 寝てる → 最低睡眠時間後に起床抽選（近い時だけ）
         if (st.sleeping) {
           const slept = now - (st.since || now);
           if (near && slept >= CFG.minSleepMs) {
@@ -549,12 +640,14 @@
         }
 
         setRestingVisual(w, st.sleeping);
-        sleepingFlags[i] = st.sleeping;
+        wrapSleepingMap.set(w, st.sleeping);
         if (st.sleeping) sleepingCount++;
       }
 
-      applySpeedSlow(WB, sleepingFlags);
+      // 速度制御（DOMとWBうさぎの対応で適用）
+      applySpeedSlowByWrap(WB, wrapSleepingMap);
 
+      // コイン微増
       if (sleepingCount > 0 && now - lastBonusAt >= CFG.bonusEveryMs) {
         lastBonusAt = now;
         const bonus = sleepingCount * CFG.bonusPerBunny;
@@ -562,14 +655,16 @@
         try { WB?.emit?.("sy:add", { key: "bed_sleep_bonus", delta: bonus }); } catch {}
       }
 
-      if (CFG.debug) {
-        console.log("[bed_rest_bonus V4.3] tick", {
+      if (doDbg) {
+        console.log("[bed_rest_bonus V4.4] tick", {
           source: bed.source,
           wraps: wraps.length,
           bedCenters: bedCenters.length,
           nearCount,
           sleepingCount,
           thresh,
+          // ベッド座標がどのモードで解釈されたか（WB/LS時のみ意味あり）
+          bedModes: bedCenters.slice(0, 4).map(b => b.__mode).filter(Boolean),
         });
       }
     }
@@ -590,7 +685,7 @@
       };
     }
 
-    console.log("[bed_rest_bonus] ready V4.3", {
+    console.log("[bed_rest_bonus] ready V4.4", {
       needle: CFG.bedSrcNeedle,
       radius: CFG.radiusPx,
       sleepChancePerTick: CFG.sleepChancePerTick,
