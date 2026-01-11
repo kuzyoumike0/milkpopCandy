@@ -1,36 +1,62 @@
-// hoshinokakera.js（流れ星 → 星のかけらドロップ → クリックで拾って +50,000コイン）v1.0.2
-// ✅ window.HOSHI を“必ず”最初に生やす（fieldが無くても HOSHI is not defined にならない）
-// ✅ 実行確認ログを最初に出す（読み込みできてるか即わかる）
-// ✅ field が後から出るケースにも対応（見つかるまで待機）
-// ✅ 画像URL解決 / LS復元 / 404検知は v1.0.1 同等
+// hoshinokakera.js（流れ星 → 星のかけらドロップ → クリックで拾って +50,000コイン）v1.0.3
+// ✅ たまに流れ星が横切る（軽量：CSSアニメ中心）
+// ✅ 流れ星の終点あたりに assets/tenki/hoshinokakera.png を1個ドロップ
+// ✅ 出現した瞬間に assets/tenki/kira.mp3 を鳴らす（拾う時は鳴らさない）
+// ✅ かけらをクリックで拾うと「+50,000コイン」
+// ✅ WB.se / WB.addCoin / WB.setCoin / WB.coins / #coinValue に自動追従
+// ✅ 1個だけ（重複ドロップしない）・リロード後も残る（LS保存）
+// ✅ デバッグ：window.HOSHI.dropNow() / window.HOSHI.clear() / window.HOSHI.debug()
 
 (() => {
   "use strict";
 
-  // ===== 必ず最初に作る：これで「HOSHI is not defined」は消える =====
+  // ===== 必ず最初に作る（読み込み確認 & HOSHI is not defined 対策）=====
   window.HOSHI = window.HOSHI || {};
-  window.HOSHI.__ver = "1.0.2";
+  window.HOSHI.__ver = "1.0.3";
+  console.log("[hoshinokakera] BOOT v1.0.3", { baseURI: document.baseURI });
 
-  // “このファイルが実行されているか” を確実に判定できるログ
-  console.log("[hoshinokakera] BOOT v1.0.2", { baseURI: document.baseURI });
-
-  if (window.__HOSHINOKAKERA_V102__) {
-    console.warn("[hoshinokakera] already inited v1.0.2; skip");
+  if (window.__HOSHINOKAKERA_V103__) {
+    console.warn("[hoshinokakera] already inited v1.0.3; skip");
     return;
   }
-  window.__HOSHINOKAKERA_V102__ = true;
+  window.__HOSHINOKAKERA_V103__ = true;
 
   const CFG = {
+    // 置き場所
     FIELD_ID: "field",
+
+    // 画像
     SHARD_SRC: "./assets/tenki/hoshinokakera.png",
+
+    // ★出現SE（出現時だけ鳴らす）
+    KIRA_SE_SRC: "./assets/tenki/kira.mp3",
+    KIRA_SE_KEY: "hoshi_kira",
+
+    // 報酬
     REWARD_COINS: 50000,
+
+    // 出現率（1秒あたり）
+    // 例：0.005556 => 平均約3分に1回
     STAR_CHANCE_PER_SEC: 0.005556,
+
+    // かけらが落ちるまでの演出時間（流れ星アニメ）
     STAR_ANIM_MS: 1300,
+
+    // かけら表示
     SHARD_SIZE: 54,
     SHARD_Z: 260000,
+
+    // LS
     LS_SHARD: "milkpop_hoshinokakera_state_v1",
+
+    // クリック判定を取りやすく
     HIT_PAD: 10,
+
+    // フェード
     FADE_MS: 180,
+
+    // ★SE 連打防止（念のため）
+    SE_COOLDOWN_MS: 80,
   };
 
   function clamp(n, a, b) {
@@ -42,7 +68,9 @@
   function resolveUrl(src) {
     try { return new URL(src, document.baseURI).href; } catch { return src; }
   }
+
   const SHARD_URL = resolveUrl(CFG.SHARD_SRC);
+  const KIRA_URL  = resolveUrl(CFG.KIRA_SE_SRC);
 
   function loadState() {
     try {
@@ -75,22 +103,66 @@
 
   function setCoinsDirect(WB, v) {
     const val = Math.max(0, Math.floor(Number(v) || 0));
+
     try { if (WB && typeof WB.setCoin === "function") WB.setCoin(val); } catch {}
     try { if (WB && ("coins" in WB)) WB.coins = val; } catch {}
+
     try { localStorage.setItem("wb_coins_v6", String(val)); } catch {}
     const el = document.getElementById("coinValue");
     if (el) el.textContent = String(val);
+
     try { WB?.emit?.("coinChanged", val); } catch {}
   }
 
   function addCoins(WB, delta) {
     const d = Math.max(0, Math.floor(Number(delta) || 0));
     if (!d) return;
+
     try {
-      if (WB && typeof WB.addCoin === "function") { WB.addCoin(d); return; }
+      if (WB && typeof WB.addCoin === "function") {
+        WB.addCoin(d);
+        return;
+      }
     } catch {}
+
     const cur = readCoinsDirect(WB);
     setCoinsDirect(WB, cur + d);
+  }
+
+  /* =========================
+   * SE helper（出現時だけ）
+   * ========================= */
+  let lastSeAt = 0;
+
+  function registerKiraIfPossible() {
+    try {
+      const WB = window.WB;
+      if (WB?.se?.register) {
+        WB.se.register(CFG.KIRA_SE_KEY, KIRA_URL);
+      }
+    } catch {}
+  }
+
+  function playKiraOnSpawnOnly() {
+    const now = Date.now();
+    if (now - lastSeAt < CFG.SE_COOLDOWN_MS) return;
+    lastSeAt = now;
+
+    // WB.se が使えればそれ優先
+    try {
+      const WB = window.WB;
+      if (WB?.se?.play) {
+        WB.se.play(CFG.KIRA_SE_KEY);
+        return;
+      }
+    } catch {}
+
+    // フォールバック：Audio直叩き
+    try {
+      const a = new Audio(KIRA_URL);
+      a.volume = 0.8;
+      a.play().catch(() => {});
+    } catch {}
   }
 
   /* =========================
@@ -137,16 +209,27 @@
   will-change: transform, opacity;
   opacity:0;
 }
-#hoshiShardV1.show{ opacity:1; transition: opacity ${CFG.FADE_MS}ms ease; }
-#hoshiShardV1.hide{ opacity:0; transition: opacity ${CFG.FADE_MS}ms ease; }
-#hoshiShardV1 img{ width:100%; height:100%; display:block; pointer-events:none; }
+#hoshiShardV1.show{
+  opacity:1;
+  transition: opacity ${CFG.FADE_MS}ms ease;
+}
+#hoshiShardV1.hide{
+  opacity:0;
+  transition: opacity ${CFG.FADE_MS}ms ease;
+}
+#hoshiShardV1 img{
+  width:100%;
+  height:100%;
+  display:block;
+  pointer-events:none;
+}
 `;
     document.head.appendChild(s);
   }
   ensureCss();
 
   /* =========================
-   * Field wait (重要)
+   * Field wait
    * ========================= */
   let field = null;
 
@@ -178,7 +261,10 @@
   let shardEl = null;
 
   function removeShardDom() {
-    if (shardEl) { try { shardEl.remove(); } catch {} shardEl = null; }
+    if (shardEl) {
+      try { shardEl.remove(); } catch {}
+      shardEl = null;
+    }
   }
 
   function ensureShardDom() {
@@ -188,12 +274,14 @@
     d.id = "hoshiShardV1";
     d.innerHTML = `<img src="${SHARD_URL}" alt="星のかけら">`;
 
+    // クリックで拾う（※拾う時はSE鳴らさない）
     d.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       pickupShard();
     });
 
+    // 画像404でも落ちない（代替の光にする）
     const img = d.querySelector("img");
     if (img) {
       img.addEventListener("error", () => {
@@ -240,7 +328,10 @@
     setShardPos(xx, yy);
     requestAnimationFrame(() => el.classList.add("show"));
 
-    console.log("[hoshinokakera] spawned", { x: xx, y: yy, img: SHARD_URL });
+    // ★出現時だけSE
+    playKiraOnSpawnOnly();
+
+    console.log("[hoshinokakera] spawned", { x: xx, y: yy, img: SHARD_URL, se: KIRA_URL });
     return true;
   }
 
@@ -256,6 +347,7 @@
     setShardPos(st.x || 60, st.y || 120);
     requestAnimationFrame(() => el.classList.add("show"));
 
+    // 復元は“出現じゃない”扱い → SEは鳴らさない（仕様どおり）
     console.log("[hoshinokakera] restored from LS", { x: st.x, y: st.y, t: st.t, img: SHARD_URL });
     return true;
   }
@@ -265,20 +357,24 @@
     if (!st || !st.active) return;
 
     const WB = window.WB || null;
+
+    // 報酬
     addCoins(WB, CFG.REWARD_COINS);
 
+    // 消す（演出）
     const el = ensureShardDom();
     el.classList.remove("show");
     el.classList.add("hide");
 
     clearState();
+
     setTimeout(() => removeShardDom(), CFG.FADE_MS + 40);
 
     try { WB?.emit?.("hoshi:kakera", { coins: CFG.REWARD_COINS }); } catch {}
   }
 
   /* =========================
-   * Shooting Star
+   * Shooting Star (visual)
    * ========================= */
   let starBusy = false;
 
@@ -290,6 +386,8 @@
     starBusy = true;
 
     const fr = field.getBoundingClientRect();
+
+    // 開始点：右上寄り → 終点：左下寄り
     const x0 = fr.width + 120;
     const y0 = 20 + Math.random() * (fr.height * 0.25);
     const x1 = -180;
@@ -303,6 +401,7 @@
     star.style.setProperty("--y1", `${Math.round(y1)}px`);
     field.appendChild(star);
 
+    // 終点付近に落とす（画面内に調整）
     const dropX = clamp(x1 + 220, 40, fr.width - CFG.SHARD_SIZE - 40);
     const dropY = clamp(y1 - 40, 60, fr.height - CFG.SHARD_SIZE - 30);
 
@@ -315,7 +414,7 @@
   }
 
   /* =========================
-   * Loop
+   * Main loop
    * ========================= */
   let lastT = performance.now();
   let restoreCool = 0;
@@ -324,12 +423,14 @@
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
 
+    // たまに「LS activeなのにDOM無し」を自動復元
     restoreCool += dt;
     if (restoreCool >= 1.0) {
       restoreCool = 0;
       if (shardExists()) restoreShardIfNeeded(false);
     }
 
+    // ランダム発生（かけらが無い時だけ）
     if (!shardExists() && !starBusy) {
       const p = 1 - Math.pow(1 - CFG.STAR_CHANCE_PER_SEC, dt);
       if (Math.random() < p) flyShootingStarAndDrop();
@@ -339,7 +440,7 @@
   }
 
   /* =========================
-   * Public API（最初から存在してる）
+   * Public API
    * ========================= */
   window.HOSHI.dropNow = () => flyShootingStarAndDrop();
   window.HOSHI.spawnShard = (x, y) => spawnShardAt(Number(x) || 80, Number(y) || 120);
@@ -350,6 +451,8 @@
       baseURI: document.baseURI,
       shardSrc: CFG.SHARD_SRC,
       shardUrl: SHARD_URL,
+      kiraSrc: CFG.KIRA_SE_SRC,
+      kiraUrl: KIRA_URL,
       field: !!field,
       state: loadState(),
       dom: !!(shardEl && shardEl.isConnected),
@@ -357,22 +460,26 @@
     });
   };
 
-  // ===== init（fieldが取れるまで待つ） =====
+  /* =========================
+   * init（fieldが取れるまで待つ）
+   * ========================= */
   waitForField(8000).then((el) => {
     field = el;
-    console.log("[hoshinokakera] field ready", field);
+
+    // WB.se に登録（あれば）
+    registerKiraIfPossible();
 
     // 起動
     restoreShardIfNeeded(true);
     requestAnimationFrame(tick);
 
-    console.log("[hoshinokakera] ready v1.0.2", {
+    console.log("[hoshinokakera] ready v1.0.3", {
       img: SHARD_URL,
       reward: CFG.REWARD_COINS,
       chancePerSec: CFG.STAR_CHANCE_PER_SEC,
+      kira: KIRA_URL,
     });
   }).catch((err) => {
     console.warn("[hoshinokakera] init failed:", err?.message || err);
-    // fieldが無いページでも HOSHI.debug() はできる
   });
 })();
