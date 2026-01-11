@@ -2,9 +2,9 @@
 // ✅ 図鑑 + 実績 + 称号 UI（スクショ風のカードUI）
 // ✅ HUD「図鑑」ボタンは作らない（gameMenu.js → WB.zukan.open() で開く）
 // ✅ WB新旧互換 / CATEGORIES内蔵 / 旅立ち加算
-// ✅ 追加：転生兎 tennchi（assets/tennchi.png）を対象にする
-//    - WB側で b.isTennchi=true または wrap[data-tennchi="1"] を検知
-//    - 画像パスからの推定も対応（tennchi.png / tennchi）
+// ✅ 追加：転生兎 tennshi（assets/tennshi.png）を対象にする
+//    - WB側で b.istennshi=true または wrap[data-tennshi="1"] を検知
+//    - 画像パスからの推定も対応（tennshi.png / tennshi）
 //    - 図鑑に追加 / 旅立ちカウント対象
 
 (() => {
@@ -33,7 +33,7 @@
     return [];
   }
 
-  // ✅ 追加：転生兎 tennchi をマスターに追加
+  // ✅ 追加：転生兎 tennshi をマスターに追加
   const BUNNY_MASTER = [
     { key: "bunny1", name: "bunny1", img: "./assets/bunny.png", desc: "基本のうさぎ。コインは控えめ。", flavor: "数えきれない旅立ちの先で、\nここはもう帰る場所になった。" },
     { key: "bunny3", name: "bunny3", img: "./assets/bunny3.png", desc: "安定してコインを稼ぐ中級うさぎ。" },
@@ -41,18 +41,18 @@
     { key: "bunny5", name: "bunny5", img: "./assets/bunny5.png", desc: "牧場最上級クラス。圧倒的生産力。" },
     { key: "reabunny", name: "reabunny", img: "./assets/reabunny.png", desc: "突然変異でのみ現れる幻のうさぎ。" },
 
-    // ✅ 転生兎（tennchi）
-    { key: "tennchi", name: "tennchi", img: "./assets/tennchi.png", desc: "転生のときに現れる特別な兎。", flavor: "星の光の中で、\nもう一度だけ、ここに帰ってきた。" },
+    // ✅ 転生兎（tennshi）
+    { key: "tennshi", name: "tennshi", img: "./assets/tennshi.png", desc: "転生のときに現れる特別な兎。", flavor: "星の光の中で、\nもう一度だけ、ここに帰ってきた。" },
   ];
 
-  // ✅ tennchi 判定（WBマーク / DOMマーク / 画像パス推定）
-  function isTennchi(b) {
-    try { if (b?.isTennchi === true) return true; } catch {}
+  // ✅ tennshi 判定（WBマーク / DOMマーク / 画像パス推定）
+  function istennshi(b) {
+    try { if (b?.istennshi === true) return true; } catch {}
     try {
       const w = b?.wrap;
-      if (w?.getAttribute?.("data-tennchi") === "1") return true;
-      if (w?.dataset?.tennchi === "1") return true;
-      if (w?.classList?.contains?.("wbTennchiBunny")) return true;
+      if (w?.getAttribute?.("data-tennshi") === "1") return true;
+      if (w?.dataset?.tennshi === "1") return true;
+      if (w?.classList?.contains?.("wbtennshiBunny")) return true;
     } catch {}
 
     // 保険：画像/文字列から推定
@@ -66,10 +66,10 @@
       ].map(v => String(v ?? "")).join(" ").toLowerCase();
 
       if (!s) return false;
-      if (s.includes("tennchi")) return true;
-      if (s.includes("tennchi.png")) return true;
-      if (s.includes("/tennchi.png")) return true;
-      if (s.includes("assets/tennchi.png")) return true;
+      if (s.includes("tennshi")) return true;
+      if (s.includes("tennshi.png")) return true;
+      if (s.includes("/tennshi.png")) return true;
+      if (s.includes("assets/tennshi.png")) return true;
     } catch {}
     return false;
   }
@@ -78,7 +78,7 @@
     if (!b) return null;
 
     // ✅ 最優先：転生兎
-    if (isTennchi(b)) return "tennchi";
+    if (istennshi(b)) return "tennshi";
 
     const candidates = [];
     if (typeof b === "string") candidates.push(b);
@@ -117,7 +117,7 @@
       if (!Array.isArray(list)) return;
       for (const b of list) {
         const k = guessKeyFromBunnyObj(b);
-        if (k && k !== "babybunny") discover(k); // ✅ tennchi も対象
+        if (k && k !== "babybunny") discover(k); // ✅ tennshi も対象
       }
     } catch {}
   }
@@ -432,7 +432,7 @@
 
   try {
     WB.on?.("bunnyDeparted", (p) => {
-      // ✅ p.kind が "tennchi" で来てもカウントされる
+      // ✅ p.kind が "tennshi" で来てもカウントされる
       const key = String(p?.kind || "") || null;
       if (key) addFarewellByType(key, 1);
     });
