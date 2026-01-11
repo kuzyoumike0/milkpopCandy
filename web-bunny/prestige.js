@@ -4,6 +4,7 @@
 // ✅ 恒久解放(perks)を保存＆WB.prestige.hasPerk()で参照可能
 // ✅ リセットは “安全寄り”：WB API があればそれ優先。無い場合は DOM/LS を保守的に掃除。
 // ✅ 誤爆防止：転生ボタンは「長押し 1.2秒」
+// ✅ NEW: 転生時に「天使みるぽ(assets/tennshi.png)」を1体出現（bunny4より coinMul 大）
 //
 // 使い方：
 // - menu などから WB.prestige.open() を呼ぶ
@@ -11,8 +12,8 @@
 
 (() => {
   "use strict";
-  if (window.__WB_PRESTIGE_V1__) return;
-  window.__WB_PRESTIGE_V1__ = true;
+  if (window.__WB_PRESTIGE_V11__) return;
+  window.__WB_PRESTIGE_V11__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
@@ -45,6 +46,13 @@
       "milkpop_coins_v1",
     ],
 
+    // ✅ 天使うさぎ（転生ボーナス）
+    TENNSHI_KIND: "tennshi",
+    TENNSHI_IMG: "./assets/tennshi.png",
+    // bunny4 より確実に大きくするため “差分” で加算（bunny4未定義なら fallback）
+    TENNSHI_MORE_THAN_BUNNY4_ADD: 0.6,
+    TENNSHI_FALLBACK_COINMUL: 2.4, // bunny4 が分からない時の保険（だいたい強め）
+
     // UI文言
     LABEL: {
       title: "🌟 転生（牧場の星）",
@@ -56,6 +64,10 @@
   };
 
   const LS_PRESTIGE = "wb_prestige_v1"; // { ver:1, stars:0, spent:0, perks:{id:true}, history:[...] }
+
+  // ✅ 牧場転生後に天使を1体出す保険フラグ（WBが無い/ spawn不可の時用）
+  // ※ DEEP_LOCALSTORAGE_WIPE の WIPE_KEYS には入れないこと
+  const LS_SPAWN_TENNSHI_ON_BOOT = "wb_prestige_spawn_tennshi_v1";
 
   function waitForWB() {
     const start = Date.now();
@@ -162,7 +174,6 @@
   }
 
   function nextCoinsForStar(targetStars) {
-    // stars = floor(sqrt(coins/base)) → coins >= base * (stars^2)
     const s = Math.max(0, Math.floor(targetStars));
     return Math.max(0, Math.floor(CFG.STAR_BASE_COINS * (s * s)));
   }
@@ -175,12 +186,10 @@
   }
 
   function setCoinsZero(WB) {
-    // 1) WB.setCoin
     try {
       if (WB && typeof WB.setCoin === "function") { WB.setCoin(0); return true; }
     } catch {}
 
-    // 2) WB.coins
     try {
       if (WB && typeof WB.coins === "number") {
         WB.coins = 0;
@@ -191,35 +200,28 @@
       }
     } catch {}
 
-    // 3) #coinValue
     const el = document.getElementById("coinValue");
     if (el) el.textContent = "0";
     return true;
   }
 
   function removeAllBunnies(WB) {
-    // 1) WB.removeAllBunnies があれば最強
     try {
       if (WB && typeof WB.removeAllBunnies === "function") { WB.removeAllBunnies(); return true; }
     } catch {}
 
-    // 2) WB.bunnies 配列があるなら空にする
     try {
       if (WB && Array.isArray(WB.bunnies)) WB.bunnies.length = 0;
     } catch {}
 
-    // 3) DOMから消す（.bunnyWrap を全部消す）
     try {
       document.querySelectorAll(".bunnyWrap, .bunny-wrap").forEach(el => { try { el.remove(); } catch {} });
     } catch {}
 
-    // 4) bunnyLayer下も掃除
     try {
       const bl = document.getElementById("bunnyLayer") || document.getElementById("bunnylayer");
       if (bl) {
-        // bunnyLayerの中身を全部消すのは危険な場合もあるので “うさぎっぽい要素”だけ
         Array.from(bl.children).forEach(ch => {
-          // 画像を含む要素を優先して撤去
           if (ch.querySelector && ch.querySelector("img")) { try { ch.remove(); } catch {} }
         });
       }
@@ -236,6 +238,56 @@
     }
   }
 
+  // ✅ 転生ボーナス：天使を定義注入（bunny4より coinMul 大）
+  function ensureTennshiDef(WB) {
+    // coinMul を bunny4 より大きくする
+    let bunny4Mul = 0;
+    try {
+      bunny4Mul = Number(WB?.BUNNY_DEFS?.bunny4?.coinMul) || 0;
+    } catch {}
+    const tennshiMul = (bunny4Mul > 0)
+      ? (bunny4Mul + CFG.TENNSHI_MORE_THAN_BUNNY4_ADD)
+      : CFG.TENNSHI_FALLBACK_COINMUL;
+
+    // WB.BUNNY_DEFS があれば追加/上書き
+    try {
+      if (WB && WB.BUNNY_DEFS && typeof WB.BUNNY_DEFS === "object") {
+        WB.BUNNY_DEFS[CFG.TENNSHI_KIND] = {
+          label: "天使みるぽ",
+          img: CFG.TENNSHI_IMG,
+          price: 0,
+          coinMul: tennshiMul,
+          desc: "牧場転生の証。bunny4よりコインを多く落とす。",
+        };
+        return { ok: true, coinMul: tennshiMul };
+      }
+    } catch {}
+
+    // それ以外は何もしない（app.js 側で同名kindが無いと描画できないため）
+    return { ok: false, coinMul: tennshiMul };
+  }
+
+  // ✅ 転生後に天使を1体出現（可能なら即spawn、無理ならフラグだけ残す）
+  function spawnTennshiAfterPrestige(WB) {
+    // まず定義を注入（WB環境なら）
+    const def = ensureTennshiDef(WB);
+
+    // spawnBunny が使えるなら即出す
+    try {
+      if (WB && typeof WB.spawnBunny === "function") {
+        // bornAt を過去にして “最初から大人” 扱い（app.js側が baby->adult を採用してる前提）
+        const bornAtAdult = Date.now() - (3 * 60 * 1000) - 2000;
+        WB.spawnBunny(CFG.TENNSHI_KIND, bornAtAdult);
+        try { WB.emit?.("bunnyCountChanged", { count: (WB.bunnies?.length || 1) }); } catch {}
+        return { spawned: true, coinMul: def.coinMul };
+      }
+    } catch {}
+
+    // できない場合はフラグ（次回起動で app.js が拾えるように）
+    try { localStorage.setItem(LS_SPAWN_TENNSHI_ON_BOOT, "1"); } catch {}
+    return { spawned: false, coinMul: def.coinMul };
+  }
+
   // 恒久解放（例：演出中心）
   const PERK_MASTER = [
     { id: "coin_sparkle", cost: 1, name: "コイン回収キラッ", desc: "コイン回収時に小さな✨演出を追加（演出のみ）" },
@@ -243,8 +295,6 @@
     { id: "hanabi_glow", cost: 2, name: "花火発光ブースト", desc: "花火GIFの発光感を少し強化（演出のみ）" },
     { id: "bunny_aura", cost: 3, name: "うさぎの輪郭光", desc: "うさぎにうっすら輪郭の光（演出のみ）" },
     { id: "bg_soft", cost: 3, name: "背景ふわっと", desc: "背景に柔らかいビネットを追加（演出のみ）" },
-
-    // バランス影響は最後に（必要ならON）
     { id: "coin_bonus_1", cost: 6, name: "収入+1%", desc: "放置のコイン量を+1%（控えめ）", gameplay: true },
     { id: "coin_bonus_3", cost: 12, name: "収入+3%", desc: "放置のコイン量を+3%（控えめ）", gameplay: true },
   ];
@@ -333,6 +383,13 @@
     const needCoins = nextCoinsForStar(nextStar);
     const pct = (needCoins > 0) ? clamp((coins / needCoins) * 100, 0, 100) : 0;
 
+    // 天使の coinMul 表示（WBがあれば推定できる）
+    let tennshiMulPreview = CFG.TENNSHI_FALLBACK_COINMUL;
+    try {
+      const b4 = Number(WB?.BUNNY_DEFS?.bunny4?.coinMul) || 0;
+      tennshiMulPreview = (b4 > 0) ? (b4 + CFG.TENNSHI_MORE_THAN_BUNNY4_ADD) : CFG.TENNSHI_FALLBACK_COINMUL;
+    } catch {}
+
     const top = `
       <div class="row">
         <span class="pill">現在コイン：<b>🪙 ${format(coins)}</b></span>
@@ -345,6 +402,7 @@
           <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
           <div class="hint">次の星（${nextStar}）目安：🪙 ${format(needCoins)}（いま ${pct.toFixed(1)}%）</div>
           <div class="hint">※ 星は減衰で増えるため、コインが多いほど“伸びが緩やか”になります。</div>
+          <div class="hint">✅ 転生ボーナス：<b>天使みるぽ</b> が1体出現（coinMul ≈ <b>${Number(tennshiMulPreview).toFixed(2)}</b> / bunny4より多い）</div>
         </div>
 
         <div style="display:flex; gap:10px; align-items:center;">
@@ -405,7 +463,7 @@
       btn.addEventListener("click", () => {
         const id = btn.getAttribute("data-buy") || "";
         const pk = PERK_MASTER.find(x => x.id === id);
-        if (! declared(pk)) return;
+        if (!declared(pk)) return;
 
         const st2 = loadPrestige();
         const avail2 = Math.max(0, st2.stars - st2.spent);
@@ -440,10 +498,10 @@
       const step = () => {
         if (!holding) return;
         const now = Date.now();
-        const p = clamp((now - downAt) / CFG.HOLD_MS, 0, 1);
-        if (fill) fill.style.width = `${(p * 100).toFixed(1)}%`;
+        const pr = clamp((now - downAt) / CFG.HOLD_MS, 0, 1);
+        if (fill) fill.style.width = `${(pr * 100).toFixed(1)}%`;
 
-        if (p >= 1) {
+        if (pr >= 1) {
           stopHold();
           doPrestige();
           return;
@@ -484,11 +542,14 @@
       removeAllBunnies(WB);
       deepWipeLocalStorage();
 
-      // 3) 通知
-      try { WB?.emit?.("prestige", { stars: gain, total: st.stars }); } catch {}
-      try { WB?.emit?.("sy:add", { key: "prestige", delta: 1 }); } catch {} // 実績連携したい場合用
+      // 3) ✅ 転生ボーナス：天使を1体出現（可能なら即spawn、無理ならフラグ）
+      const res = spawnTennshiAfterPrestige(WB);
 
-      // 4) UI更新
+      // 4) 通知
+      try { WB?.emit?.("prestige", { stars: gain, total: st.stars, tennshi: res }); } catch {}
+      try { WB?.emit?.("sy:add", { key: "prestige", delta: 1 }); } catch {}
+
+      // 5) UI更新
       render();
     }
 
@@ -517,6 +578,14 @@
       calcStarsFromCoins,
       config: CFG,
       PERK_MASTER,
+
+      // ✅ 追加：転生後天使フラグ（app.js 側で拾う用）
+      getSpawnTennshiFlag: () => {
+        try { return localStorage.getItem(LS_SPAWN_TENNSHI_ON_BOOT) === "1"; } catch { return false; }
+      },
+      clearSpawnTennshiFlag: () => {
+        try { localStorage.removeItem(LS_SPAWN_TENNSHI_ON_BOOT); } catch {}
+      },
     };
 
     if (WB) {
@@ -525,7 +594,6 @@
       window.WB_PRESTIGE = api;
     }
 
-    // 自動でUIを開くボタンは作らない（あなたの gameMenu から呼ぶ想定）
-    console.log("[prestige] ready", { LS_PRESTIGE });
+    console.log("[prestige] ready v1.1", { LS_PRESTIGE, LS_SPAWN_TENNSHI_ON_BOOT });
   });
 })();
