@@ -1,16 +1,9 @@
-// tabidati.js（v13.1：✅既存HUDの #departBtn を優先して使う + 二重UI根絶 + app.js(ui:depart)でも反応）
-// - 旅立ちモードON/OFF
-// - 旅立ち時：コスト支払い / SE / 記録 / メッセージ / うさぎ削除
-// - 旅立ちモード中：うさぎホバーで赤縁取り
-// - 旅立ちモード中：うさぎが画面外へ行かないよう位置クランプ（※transform運用の環境では軽め）
-// - 「長い空白メッセージ」対策：専用トーストCSSで表示
-// ✅ SYOUGOU.add("tabidachi") を直接呼ぶ（あれば）
-// ✅ FIX: 旅立ち後に hart.png が残らない（bunny.hideHeart/hartEl/removeBunnyInstance）
-// ✅ 旅立ちボタン：
-//    - index.html に #departBtn があるならそれを使う（＝二重生成しない）
-//    - 無い場合だけ departBtnV1 を生成（旧互換）
-// ✅ app.js が emit("ui:depart") しても旅立ちモードをトグル（HUDボタンと同等）
-// ✅ 既存の WB.departBtn があっても壊さない（あればそれも反応）
+// tabidati.js（v13.2：旅立ちモード可視化 強化版）
+// ✅ 旅立ちモードON/OFFが一目で分かる：ボタンON + 画面上ヒント帯
+// ✅ 旅立ちモード中：全うさぎ常時「赤枠」＋ホバーでさらに強調
+// ✅ クリックで旅立たせる（capture）
+// ✅ 既存HUDの #departBtn を優先して使う（＝二重生成しない）
+// ✅ app.js(ui:depart) でも反応
 
 (() => {
   "use strict";
@@ -23,11 +16,9 @@
   let departMode = false;
   let clampTimer = null;
 
-  // 旧版が作ってたボタンID（互換用）
   const BTN_ID = "departBtnV1";
-
-  // ✅ index.html の既存ボタンID（あなたのHUD）
   const LEGACY_BTN_ID = "departBtn";
+  const BANNER_ID = "departModeBannerV1";
 
   /* =========================
    * Helpers（WB互換）
@@ -57,13 +48,14 @@
   }
 
   /* =========================
-   * Toast
+   * Styles
    * ========================= */
-  function ensureToastStyles() {
-    if (document.getElementById("tabidatiToastStyleV2")) return;
+  function ensureStyles() {
+    if (document.getElementById("tabidatiStyleV132")) return;
     const s = document.createElement("style");
-    s.id = "tabidatiToastStyleV2";
+    s.id = "tabidatiStyleV132";
     s.textContent = `
+/* ===== toast ===== */
 .tabidatiToast{
   position: fixed;
   left: 50%;
@@ -93,13 +85,45 @@
   to   { opacity:0; transform:translate(-50%,-30%); }
 }
 
-body.departModeOn .bunnyWrap{ outline: none; }
-body.departModeOn .bunnyWrap:hover{
-  outline: 4px solid rgba(255, 64, 64, .85);
+/* ===== depart mode banner ===== */
+#${BANNER_ID}{
+  position: fixed;
+  left: 50%;
+  top: calc(8px + 44px); /* HUDの下あたり */
+  transform: translateX(-50%);
+  z-index: 2147483647;
+  background: rgba(255, 56, 56, .92);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-weight: 1000;
+  letter-spacing: .02em;
+  box-shadow: 0 18px 55px rgba(255,56,56,.26);
+  max-width: min(720px, 92vw);
+  display: none;
+  pointer-events: none;
+}
+
+/* ===== ON表示（ボタン） ===== */
+#${LEGACY_BTN_ID}.on, #${BTN_ID}.on{
+  background: rgba(255, 64, 64, .12) !important;
+  outline: 3px solid rgba(255,64,64,.70) !important;
+  outline-offset: 2px;
+  box-shadow: 0 12px 30px rgba(255,64,64,.22);
+}
+
+/* ===== 旅立ちモード：全うさぎ常時 赤枠 ===== */
+body.departModeOn .bunnyWrap{
+  outline: 4px solid rgba(255, 64, 64, .72);
   outline-offset: 3px;
   border-radius: 18px;
 }
+body.departModeOn .bunnyWrap:hover{
+  outline: 5px solid rgba(255, 64, 64, .98);
+  box-shadow: 0 0 0 6px rgba(255,64,64,.14);
+}
 
+/* departing演出 */
 .bunnyWrap.departing{
   pointer-events: none !important;
   filter: saturate(1.05);
@@ -107,22 +131,15 @@ body.departModeOn .bunnyWrap:hover{
   transform: translateY(-18px) scale(0.98);
   opacity: 0;
 }
-
-/* ✅ ON表示：departBtn / departBtnV1 の両方に効く */
-#${LEGACY_BTN_ID}, #${BTN_ID}{
-  position: relative;
-}
-#${LEGACY_BTN_ID}.on, #${BTN_ID}.on{
-  outline: 3px solid rgba(255,64,64,.55);
-  outline-offset: 2px;
-  box-shadow: 0 10px 26px rgba(255,64,64,.18);
-}
 `;
     document.head.appendChild(s);
   }
 
+  /* =========================
+   * Toast
+   * ========================= */
   function toast(msg) {
-    ensureToastStyles();
+    ensureStyles();
     const text = String(msg ?? "").trim();
     if (!text) return;
     const el = document.createElement("div");
@@ -133,16 +150,34 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   /* =========================
+   * Banner
+   * ========================= */
+  function ensureBanner() {
+    ensureStyles();
+    let el = document.getElementById(BANNER_ID);
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = BANNER_ID;
+    el.textContent = "✈️ 旅立ちモード：うさぎをクリックで旅立ち（もう一度押すとOFF）";
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function setBannerVisible(on) {
+    const el = ensureBanner();
+    el.style.display = on ? "block" : "none";
+  }
+
+  /* =========================
    * HUD Button（既存 #departBtn を優先）
    * ========================= */
   function ensureDepartBtn() {
-    ensureToastStyles();
+    ensureStyles();
 
-    // ✅ 1) まず index.html の departBtn を最優先で使う（＝二重生成根絶）
     const legacy = document.getElementById(LEGACY_BTN_ID);
     if (legacy) {
-      if (!legacy.__tabidatiBoundV131) {
-        legacy.__tabidatiBoundV131 = true;
+      if (!legacy.__tabidatiBoundV132) {
+        legacy.__tabidatiBoundV132 = true;
         legacy.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -153,11 +188,9 @@ body.departModeOn .bunnyWrap:hover{
       return legacy;
     }
 
-    // ✅ 2) 既に departBtnV1 があるならそれを使う
     let btn = document.getElementById(BTN_ID);
     if (btn) return btn;
 
-    // ✅ 3) 無い時だけ作る（旧互換）
     btn = document.createElement("button");
     btn.id = BTN_ID;
     btn.type = "button";
@@ -165,7 +198,6 @@ body.departModeOn .bunnyWrap:hover{
 
     const hudButtons = document.getElementById("hudButtons");
     const hud = document.getElementById("hud") || document.body;
-
     if (hudButtons) hudButtons.appendChild(btn);
     else hud.appendChild(btn);
 
@@ -180,10 +212,8 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   function updateBtnUI() {
-    // ✅ 既存departBtn と departBtnV1 を両方同期（存在するものだけ）
     try { document.getElementById(LEGACY_BTN_ID)?.classList.toggle("on", departMode); } catch {}
     try { document.getElementById(BTN_ID)?.classList.toggle("on", departMode); } catch {}
-    // ✅ さらに WB.departBtn が別に参照を持ってる環境も同期
     try { WB.departBtn?.classList.toggle("on", departMode); } catch {}
   }
 
@@ -195,6 +225,7 @@ body.departModeOn .bunnyWrap:hover{
 
     updateBtnUI();
     try { document.body.classList.toggle("departModeOn", departMode); } catch {}
+    setBannerVisible(departMode);
 
     if (departMode) startClamp();
     else stopClamp();
@@ -207,26 +238,19 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   /* =========================
-   * Clamp（旅立ち中はみ出し防止）
-   * ※ app.js は translate3d で動かしてるので left/top 直しは効きにくい環境がある
-   *   → “暴走しない軽め”にしておく（無理に位置を書き換えない）
+   * Clamp（軽め）
    * ========================= */
   function startClamp() {
     stopClamp();
-
-    const field = document.getElementById("field");
-    const layer = document.getElementById("bunnyLayer") || field;
+    const layer = document.getElementById("bunnyLayer") || document.getElementById("field");
     if (!layer) return;
 
     clampTimer = setInterval(() => {
       if (!departMode) return;
-
       const ar = layer.getBoundingClientRect();
       if (!ar.width || !ar.height) return;
-
-      // ✅ transform運用環境では無理にleft/top触らない（ズレるだけになりがち）
-      // 必要なら app.js 側に「旅立ちモード中は hardClamp 強め」みたいに寄せるのが正攻法
-    }, 120);
+      // transform運用のため、ここでは何もしない（暴走防止だけ）
+    }, 140);
   }
 
   function stopClamp() {
@@ -237,25 +261,22 @@ body.departModeOn .bunnyWrap:hover{
   }
 
   /* =========================
-   * Depart core（FIX: hart残り）
+   * Depart core
    * ========================= */
   async function departBunny(bunny) {
     if (!bunny) return false;
 
     const list = getBunnyList();
-
     if (list.length <= 1) {
       toast("最後の1匹は旅立たせられないよ");
       return false;
     }
 
     const cost = getCost();
-
     if (getCoins() < cost) {
       toast(`コイン不足（必要：${cost}🪙）`);
       return false;
     }
-
     if (!spendCoins(cost)) {
       toast(`コイン不足（必要：${cost}🪙）`);
       return false;
@@ -266,7 +287,7 @@ body.departModeOn .bunnyWrap:hover{
     try { WB.recordFarewell?.(bunny.kind || bunny.adultSrc || ""); } catch {}
     try { WB.showFarewellMessage?.(bunny.kind || ""); } catch {}
 
-    // ✅ 旅立ちアニメ中に hart が残らないよう、先に消す
+    // hart消し
     try { bunny.hideHeart?.(); } catch {}
     try { bunny.hartEl?.remove?.(); } catch {}
     try { bunny.wrap?.querySelector?.(".wbChargeHart")?.remove?.(); } catch {}
@@ -280,26 +301,21 @@ body.departModeOn .bunnyWrap:hover{
       }
     } catch {}
 
-    // ✅ 正攻法：WB.removeBunnyInstance を優先（wrap/hart/配列/保存/emitまで）
+    // remove
     let removed = false;
     if (typeof WB.removeBunnyInstance === "function") {
       try { removed = !!WB.removeBunnyInstance(bunny); } catch { removed = false; }
     }
-
-    // フォールバック（旧環境）
     if (!removed) {
       const idx = list.indexOf(bunny);
       if (idx >= 0) list.splice(idx, 1);
-
       try { w?.remove?.(); } catch {}
       try { WB.saveBunnyMeta?.(); } catch {}
       try { WB.emit?.("bunnyCountChanged", { count: list.length }); } catch {}
     }
 
-    // 他モジュール通知
     try { WB.checkUnlocks?.(); } catch {}
 
-    // ✅ 称号カウント
     try { window.SYOUGOU?.add?.("tabidachi", 1); } catch {}
     try { WB.emit?.("tabidachi"); } catch {}
     try { window.dispatchEvent(new CustomEvent("wb:tabidachi")); } catch {}
@@ -331,23 +347,23 @@ body.departModeOn .bunnyWrap:hover{
   /* =========================
    * Bind
    * ========================= */
-  // ✅ ボタン準備（既存 #departBtn があるならそれにバインドされる）
   ensureDepartBtn();
+  ensureBanner();
+  setBannerVisible(false);
 
-  // ✅ 旧互換：WB.departBtn がどこかで設定されてる環境でも反応させる
-  // （index.html の departBtn を WB.departBtn に入れてない環境があるため）
-  if (WB.departBtn && !WB.departBtn.__tabidatiBoundV131) {
-    WB.departBtn.__tabidatiBoundV131 = true;
+  // WB.departBtn 互換
+  if (WB.departBtn && !WB.departBtn.__tabidatiBoundV132) {
+    WB.departBtn.__tabidatiBoundV132 = true;
     WB.departBtn.addEventListener("click", (e) => {
       e.preventDefault();
       toggleDepartMode();
     }, { passive: false });
   }
 
-  // ✅ app.js の emit("ui:depart") でもトグル（HUDボタンと同じ動き）
+  // app.js emit("ui:depart") 互換
   try {
-    if (typeof WB.on === "function" && !WB.__tabidatiUiDepartBoundV131) {
-      WB.__tabidatiUiDepartBoundV131 = true;
+    if (typeof WB.on === "function" && !WB.__tabidatiUiDepartBoundV132) {
+      WB.__tabidatiUiDepartBoundV132 = true;
       WB.on("ui:depart", () => {
         try { WB.unlockAudioOnce?.(); } catch {}
         toggleDepartMode();
@@ -368,7 +384,7 @@ body.departModeOn .bunnyWrap:hover{
     btnId: (document.getElementById(LEGACY_BTN_ID) ? LEGACY_BTN_ID : BTN_ID),
   };
 
-  console.log("[tabidati] ready v13.1 (use existing departBtn first)", {
+  console.log("[tabidati] ready v13.2 (depart mode visual enhanced)", {
     using: (document.getElementById(LEGACY_BTN_ID) ? LEGACY_BTN_ID : BTN_ID),
   });
 })();
