@@ -1,14 +1,16 @@
 // zisseki.js（✅実績：zisseki.js単体でカウント完結 + ✅図鑑タブ互換(ach提供) + ✅WB待機 + ✅トースト）
 // - localStorage 永続化（実績専用LSのみ）
-// - 回数系（うんち/お迎え/旅立ち/花火/スロット当たり）も zisseki.js 自前statsで保持
+// - 回数系（うんち/お迎え/旅立ち/花火/スロット当たり/✅黄金つつき）も zisseki.js 自前statsで保持
 // - WB events が無くても、WB.emit を安全にフックして拾う（最終保険）
 // - sy:add が来たら payload を解析して自動で stats に加算
 // - 図鑑(zukan.js)の renderAchievements が参照するために WB.zisseki.ach を提供（互換）
 //
 // ✅ 追加: omukae.js / slot.js 由来のイベント名も幅広く拾う（slotResult/slot:win/omukaeDone 等）
+// ✅ 追加: 黄金うんち「つつき」回数 stats.ougon_poke + 実績 + 称号
 //
 // 使い方（他モジュールから加算したい場合）
 //   WB.emit("sy:add", { key:"unchi", delta:1 })
+//   WB.emit("sy:add", { key:"ougon_poke", delta:1 })
 //   WB.emit("sy:add", { type:"tabidachi" })
 //   WB.zisseki.addCount("omukae", 1)
 //
@@ -42,25 +44,46 @@
 
   waitForWB().then((WB) => {
     /* =========================
-     * Storage（unlocked + stats）
+     * Storage（unlocked + stats + ✅titles）
      * ========================= */
-    const LS_ZISSEKI = "wb_zisseki_v6"; // { ver:6, unlocked:{}, stats:{} }
+    const LS_ZISSEKI = "wb_zisseki_v6"; // { ver:6, unlocked:{}, stats:{}, ✅titles:{ current, unlocked:{} } }
     const UNLOCK_BUNNY4_NEED = 10;
+
+    // ✅ 黄金うんち：removed を “つつき扱い” に加算するか（不要なら 0）
+    const OUGON_REMOVED_AS_POKE = 1;
+
+    // ✅ 称号（黄金つつき）
+    const OUGON_TITLES = [
+      { id: "og_none",  name: "（なし）",         need: 0,   desc: "称号なし" },
+      { id: "og_poke1", name: "つつき見習い",     need: 3,   desc: "黄金うんちをつつき始めた。" },
+      { id: "og_poke2", name: "黄金つつき職人",   need: 10,  desc: "手つきが“慣れている”。" },
+      { id: "og_poke3", name: "金運の手",         need: 25,  desc: "つつくたびに運が上がる（気がする）。" },
+      { id: "og_poke4", name: "黄金うんちの親友", need: 50,  desc: "もはや会話できる。" },
+      { id: "og_poke5", name: "伝説のつつき王",   need: 100, desc: "つつきの頂点。" },
+    ];
 
     function loadState() {
       // 新形式
       try {
         const raw = JSON.parse(localStorage.getItem(LS_ZISSEKI) || "null");
         if (raw && typeof raw === "object") {
+          // 旧形式（平坦object：{achId:true,...}）
           if (raw.unlocked && typeof raw.unlocked === "object") {
+            const titlesRaw = raw.titles && typeof raw.titles === "object" ? raw.titles : null;
             return {
               ver: Number(raw.ver || 6) || 6,
               unlocked: raw.unlocked && typeof raw.unlocked === "object" ? raw.unlocked : {},
               stats: raw.stats && typeof raw.stats === "object" ? raw.stats : {},
+              titles: titlesRaw ? {
+                current: typeof titlesRaw.current === "string" ? titlesRaw.current : "og_none",
+                unlocked: titlesRaw.unlocked && typeof titlesRaw.unlocked === "object" ? titlesRaw.unlocked : {},
+              } : { current: "og_none", unlocked: {} },
             };
           }
-          // 旧形式（平坦object：{achId:true,...}）
-          return { ver: 6, unlocked: raw, stats: {} };
+          // raw が unlocked map だけの旧保存
+          if (raw && typeof raw === "object") {
+            return { ver: 6, unlocked: raw, stats: {}, titles: { current: "og_none", unlocked: {} } };
+          }
         }
       } catch {}
 
@@ -68,19 +91,30 @@
       try {
         const legacy = JSON.parse(localStorage.getItem("wb_ach_v5") || "null");
         if (legacy && typeof legacy === "object") {
-          return { ver: 6, unlocked: legacy, stats: {} };
+          return { ver: 6, unlocked: legacy, stats: {}, titles: { current: "og_none", unlocked: {} } };
         }
       } catch {}
 
-      return { ver: 6, unlocked: {}, stats: {} };
+      return { ver: 6, unlocked: {}, stats: {}, titles: { current: "og_none", unlocked: {} } };
     }
 
     const state = loadState();
     const unlocked = state.unlocked || {};
     const stats = state.stats || {};
+    const titlesState = state.titles || { current: "og_none", unlocked: {} };
+    const titlesUnlocked = titlesState.unlocked || {};
+    let currentTitle = typeof titlesState.current === "string" ? titlesState.current : "og_none";
 
     function saveState() {
-      localStorage.setItem(LS_ZISSEKI, JSON.stringify({ ver: 6, unlocked, stats }));
+      localStorage.setItem(LS_ZISSEKI, JSON.stringify({
+        ver: 6,
+        unlocked,
+        stats,
+        titles: {
+          current: currentTitle,
+          unlocked: titlesUnlocked,
+        },
+      }));
     }
 
     function isUnlocked(id) {
@@ -90,7 +124,7 @@
     /* =========================
      * Stats（zisseki.js完結カウンタ）
      * ========================= */
-    const STAT_KEYS = ["unchi", "omukae", "tabidachi", "hanabi", "slot_win"];
+    const STAT_KEYS = ["unchi", "omukae", "tabidachi", "hanabi", "slot_win", "ougon_poke"];
 
     function normKey(k) {
       const s = String(k ?? "").trim().toLowerCase();
@@ -101,6 +135,9 @@
       if (s === "slot:win") return "slot_win";
       if (s === "fireworks") return "hanabi";
       if (s === "fw") return "hanabi";
+      if (s === "ougonpoke") return "ougon_poke";
+      if (s === "ougon_poke") return "ougon_poke";
+      if (s === "goldpoke") return "ougon_poke";
       return s;
     }
 
@@ -137,6 +174,9 @@
     for (const k of STAT_KEYS) {
       if (!(k in stats)) stats[k] = 0;
     }
+    // ✅ titles 側も初期化
+    if (!("og_none" in titlesUnlocked)) titlesUnlocked["og_none"] = true;
+    if (!currentTitle) currentTitle = "og_none";
     saveState();
 
     /* =========================
@@ -249,8 +289,6 @@
      * sy:add / event 解析 → stats加算
      * ========================= */
     function isSlotWinPayload(p) {
-      // slot.js が色々返しても勝ちなら true に寄せる
-      // 例: {win:true} / {result:"win"} / {isWin:true} / {hit:true}
       try {
         if (!p || typeof p !== "object") return true;
         if (p.win === false || p.isWin === false || p.hit === false) return false;
@@ -261,7 +299,6 @@
         }
         if (p.win === true || p.isWin === true || p.hit === true || p.jackpot === true) return true;
       } catch {}
-      // payload不明なら「勝ちイベントとして来た」前提
       return true;
     }
 
@@ -282,7 +319,6 @@
           normKey(payload.event) ||
           normKey(payload.kind);
 
-        // slot勝ち判定
         if (k === "slot_win") {
           if (!isSlotWinPayload(payload)) return { key: "slot_win", delta: 0 };
         }
@@ -309,6 +345,8 @@
       __lastSyPing = now;
       checkUnlocks();
       try { WB.emit?.("achievementDirty", { t: now }); } catch {}
+      // ✅ 称号もチェック
+      try { checkTitleUnlocks(); } catch {}
     }
 
     function onSyAdd(payload) {
@@ -328,7 +366,6 @@
         WB.on?.(evtName, (payload) => {
           const p = parseSyPayload(payload);
 
-          // イベント名から key を強制する場合（slot勝ち等）
           const forced = opt?.forceKey ? normKey(opt.forceKey) : "";
           if (forced) {
             if (forced === "slot_win") {
@@ -370,14 +407,18 @@
     bindCountEvent("slotWin", "slot_win", { forceKey: "slot_win" });
     bindCountEvent("slotwin", "slot_win", { forceKey: "slot_win" });
     bindCountEvent("slot:win", "slot_win", { forceKey: "slot_win" });
-    bindCountEvent("slotResult", "slot_win", { forceKey: "slot_win" }); // payloadが win/lose を含む想定
+    bindCountEvent("slotResult", "slot_win", { forceKey: "slot_win" });
     bindCountEvent("slot:result", "slot_win", { forceKey: "slot_win" });
     bindCountEvent("slotFinished", "slot_win", { forceKey: "slot_win" });
     bindCountEvent("slot:finished", "slot_win", { forceKey: "slot_win" });
-    bindCountEvent("slotPayout", "slot_win", { forceKey: "slot_win" }); // 当たり時だけ出す想定
+    bindCountEvent("slotPayout", "slot_win", { forceKey: "slot_win" });
+
+    // ✅ 黄金うんち：つつき/削除
+    bindCountEvent("ougonunchi:poke", "ougon_poke");
+    bindCountEvent("ougonunchi:removed", "ougon_poke", { forceKey: "ougon_poke", delta: OUGON_REMOVED_AS_POKE });
 
     /* =========================
-     * 最終保険：WB.emit フック（omukae / slot 系の別名も拾う）
+     * 最終保険：WB.emit フック
      * ========================= */
     function hookEmitOnce() {
       try {
@@ -396,18 +437,24 @@
             if (ev === "tabidachi" || ev === "tabidati") addCount("tabidachi", 1);
             if (ev === "hanabiFired" || ev === "hanabi" || ev === "fireworks" || ev === "fw") addCount("hanabi", 1);
 
-            // ✅ omukae別名
+            // omukae別名
             if (ev === "omukae" || ev === "omukaeDone" || ev === "omukae:done" || ev === "omukaeComplete"
              || ev === "adopt" || ev === "adopted" || ev === "bunnyBought" || ev === "buyBunny") {
               addCount("omukae", 1);
             }
 
-            // ✅ slot別名（勝ちだけ）
+            // slot別名（勝ちだけ）
             if (ev === "slotWin" || ev === "slotwin" || ev === "slot:win"
              || ev === "slotResult" || ev === "slot:result"
              || ev === "slotFinished" || ev === "slot:finished"
              || ev === "slotPayout") {
               if (isSlotWinPayload(payload)) addCount("slot_win", 1);
+            }
+
+            // ✅ 黄金うんち
+            if (ev === "ougonunchi:poke") addCount("ougon_poke", 1);
+            if (ev === "ougonunchi:removed") {
+              if (OUGON_REMOVED_AS_POKE > 0) addCount("ougon_poke", OUGON_REMOVED_AS_POKE);
             }
           } catch {}
           return orig(name, payload);
@@ -418,6 +465,84 @@
     }
     hookEmitOnce();
     setTimeout(hookEmitOnce, 500);
+
+    /* =========================
+     * ✅ Titles（黄金つつき称号）
+     * ========================= */
+    function getTitleById(id) {
+      return OUGON_TITLES.find(t => t.id === id) || OUGON_TITLES[0];
+    }
+
+    function bestTitleIdByCount(count) {
+      let best = OUGON_TITLES[0];
+      for (const t of OUGON_TITLES) {
+        if (count >= t.need && t.need >= best.need) best = t;
+      }
+      return best.id;
+    }
+
+    function isTitleUnlocked(id) {
+      return !!titlesUnlocked[String(id || "")];
+    }
+
+    function unlockTitle(id) {
+      id = String(id || "");
+      if (!id) return false;
+      if (titlesUnlocked[id]) return false;
+      titlesUnlocked[id] = true;
+      saveState();
+
+      const t = getTitleById(id);
+      if (t.id !== "og_none") toast(`🏷️ 称号「${t.name}」解放！`, t.desc);
+
+      try { WB.emit?.("titleUnlocked", { id: t.id, name: t.name, desc: t.desc, type: "ougon_poke" }); } catch {}
+      return true;
+    }
+
+    function checkTitleUnlocks() {
+      const c = getCount("ougon_poke");
+      for (const t of OUGON_TITLES) {
+        if (c >= t.need) unlockTitle(t.id);
+      }
+
+      // “おすすめ”だけ通知（自動で付け替えはしない）
+      const bestId = bestTitleIdByCount(c);
+      const best = getTitleById(bestId);
+      const cur = getTitleById(currentTitle);
+      if (best && cur && best.need > cur.need) {
+        // spam防止：実績チェックタイミングで一度だけ出るように unlocked を鍵にする
+        const hintKey = `hint_best_${bestId}`;
+        if (!titlesUnlocked[hintKey]) {
+          titlesUnlocked[hintKey] = true;
+          saveState();
+          toast(`⭐ 新しい称号が使えます：「${best.name}」`);
+        }
+      }
+    }
+
+    function setTitle(id) {
+      id = String(id || "og_none");
+      if (id !== "og_none" && !isTitleUnlocked(id)) {
+        toast("その称号はまだ解放されてない…！");
+        return false;
+      }
+      currentTitle = id;
+      saveState();
+
+      const t = getTitleById(id);
+      toast(`🏷️ 称号を「${t.name}」にした`);
+
+      // 他UI連携用
+      try { WB.emit?.("titleChanged", { id: t.id, name: t.name }); } catch {}
+
+      // app.js 側のタイトルLSがある場合だけ軽く同期（壊さない）
+      try {
+        const key = WB?.LS?.title;
+        if (key) localStorage.setItem(key, t.name);
+      } catch {}
+
+      return true;
+    }
 
     /* =========================
      * Achievements Master（flavor）
@@ -547,6 +672,38 @@
         check: () => getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]) >= 100,
         progress: () => ({ now: getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]), target: 100, unit: "匹" })
       },
+
+      // ✅ 黄金つつき：実績（ここが追加）
+      { id: "ougon_poke_1",  name: "金色はじめて",     desc: "黄金うんちをつつく 1回",
+        flavor: "指先が、ちょっとだけ金運になった気がする。",
+        check: () => getCount("ougon_poke") >= 1,
+        progress: () => ({ now: getCount("ougon_poke"), target: 1, unit: "回" })
+      },
+      { id: "ougon_poke_5",  name: "つつきの才能",     desc: "黄金うんちをつつく 5回",
+        flavor: "“音”が変わった。たぶん気のせいじゃない。",
+        check: () => getCount("ougon_poke") >= 5,
+        progress: () => ({ now: getCount("ougon_poke"), target: 5, unit: "回" })
+      },
+      { id: "ougon_poke_15", name: "黄金の音がする",   desc: "黄金うんちをつつく 15回",
+        flavor: "カツン…って、世界がご褒美をくれる音。",
+        check: () => getCount("ougon_poke") >= 15,
+        progress: () => ({ now: getCount("ougon_poke"), target: 15, unit: "回" })
+      },
+      { id: "ougon_poke_30", name: "金運よ来い",       desc: "黄金うんちをつつく 30回",
+        flavor: "祈りじゃなくて、習慣になった。",
+        check: () => getCount("ougon_poke") >= 30,
+        progress: () => ({ now: getCount("ougon_poke"), target: 30, unit: "回" })
+      },
+      { id: "ougon_poke_60", name: "黄金うんち研究家", desc: "黄金うんちをつつく 60回",
+        flavor: "これは…神秘…いや…うんち…？",
+        check: () => getCount("ougon_poke") >= 60,
+        progress: () => ({ now: getCount("ougon_poke"), target: 60, unit: "回" })
+      },
+      { id: "ougon_poke_120", name: "神域のつつき",    desc: "黄金うんちをつつく 120回",
+        flavor: "王冠は、指先に宿る。",
+        check: () => getCount("ougon_poke") >= 120,
+        progress: () => ({ now: getCount("ougon_poke"), target: 120, unit: "回" })
+      },
     ];
 
     function getAchById(id) {
@@ -579,6 +736,8 @@
           try { a.onUnlock?.(); } catch {}
         }
       }
+      // ✅ 実績チェックのついでに称号も
+      checkTitleUnlocks();
     }
 
     function buildAchCompatMap() {
@@ -608,6 +767,17 @@
       setCount,
       addCount,
 
+      // ✅ 黄金称号API（ここが追加）
+      titles: {
+        list: OUGON_TITLES,
+        get current() { return currentTitle; },
+        get currentName() { return getTitleById(currentTitle).name; },
+        unlocked: titlesUnlocked,
+        isUnlocked: (id) => isTitleUnlocked(id),
+        set: (id) => setTitle(id),
+        check: () => checkTitleUnlocks(),
+      },
+
       _parseSyPayload: parseSyPayload,
     };
 
@@ -621,9 +791,10 @@
 
     WB.zisseki.stop = () => { try { clearInterval(timer); } catch {} };
 
-    console.log("[zisseki] ready (omukae/slot supported)", {
+    console.log("[zisseki] ready (omukae/slot/ougon_poke + titles)", {
       unlocked: Object.keys(unlocked).length,
       stats: { ...stats },
+      title: getTitleById(currentTitle).name,
     });
   }).catch((e) => {
     console.warn("[zisseki] WB wait failed:", e?.message || e);
