@@ -1,7 +1,7 @@
-// gameMenu.js（非module）V2.7
-// ✅ 通常メニュー完全復活
-// ✅ 🔥 完全リセット（localStorage / IndexedDB / SW / reload）
-// ⚠️ reset は 1.5秒長押し必須
+// gameMenu.js（非module）V2.8
+// ✅ 🎰 スロット復活
+// ✅ 🌟 転生 / 🛒 / 🎵 / 📖 すべて維持
+// ✅ 🔥 完全リセット（長押し1.5秒）
 
 (() => {
   "use strict";
@@ -99,6 +99,7 @@
         <div class="list">
           <button class="item" data-act="shop">🛒 ショップ</button>
           <button class="item" data-act="itemplace">🧸 アイテム配置</button>
+          <button class="item" data-act="slot">🎰 スロット</button>
           <button class="item" data-act="zukan">📖 図鑑</button>
           <button class="item" data-act="bgm">🎵 BGM</button>
           <button class="item" data-act="prestige">🌟 転生</button>
@@ -116,15 +117,34 @@
   }
 
   /* =========================
+   * Slot best effort
+   * ========================= */
+  function openSlotBestEffort() {
+    try { if (window.WB?.slot?.open) return window.WB.slot.open(); } catch {}
+    try { if (window.SLOT?.open) return window.SLOT.open(); } catch {}
+
+    const btn = document.getElementById("slotBtn");
+    if (btn) {
+      try { btn.click(); return; } catch {}
+      try {
+        btn.dispatchEvent(new MouseEvent("click", { bubbles:true }));
+        return;
+      } catch {}
+    }
+    console.warn("[gameMenu] slot open failed");
+  }
+
+  /* =========================
    * Actions
    * ========================= */
   function handleAction(act) {
     try {
       if (act === "shop")      return window.WB?.shop?.open?.();
       if (act === "itemplace")return window.ITEMPLACE?.open?.();
-      if (act === "zukan")     return window.WB?.zukan?.open?.("bunny");
-      if (act === "bgm")       return window.WB?.bgm?.openModal?.();
-      if (act === "prestige")  return window.WB?.prestige?.open?.();
+      if (act === "slot")     return openSlotBestEffort();
+      if (act === "zukan")    return window.WB?.zukan?.open?.("bunny");
+      if (act === "bgm")      return window.WB?.bgm?.openModal?.();
+      if (act === "prestige") return window.WB?.prestige?.open?.();
     } catch (e) {
       console.warn("[gameMenu] action failed:", act, e);
     }
@@ -134,8 +154,6 @@
    * 🔥 Complete Reset
    * ========================= */
   async function completeReset() {
-    console.warn("[RESET] FULL RESET");
-
     try { window.WB?.emit?.("core:reset_all"); } catch {}
     try { localStorage.clear(); } catch {}
 
@@ -166,7 +184,6 @@
       panel.style.display = panel.style.display === "block" ? "none" : "block";
     };
 
-    // 通常クリック
     panel.addEventListener("click", (e) => {
       const b = e.target.closest("[data-act]");
       if (!b) return;
@@ -176,41 +193,32 @@
       handleAction(act);
     });
 
-    // reset 長押し
-    let holding = false, holdAt = 0, raf = 0;
-
+    let holding=false, holdAt=0, raf=0;
     panel.addEventListener("pointerdown", (e) => {
       const b = e.target.closest('[data-act="reset"]');
       if (!b) return;
+      holding=true; holdAt=Date.now();
+      const fill=b.querySelector(".fill");
 
-      holding = true;
-      holdAt = Date.now();
-      const fill = b.querySelector(".fill");
-
-      const step = () => {
-        if (!holding) return;
-        const p = Math.min(1, (Date.now() - holdAt) / HOLD_RESET_MS);
-        if (fill) fill.style.width = `${p * 100}%`;
-        if (p >= 1) {
-          holding = false;
-          completeReset();
-          return;
-        }
-        raf = requestAnimationFrame(step);
+      const step=()=>{
+        if(!holding) return;
+        const p=Math.min(1,(Date.now()-holdAt)/HOLD_RESET_MS);
+        if(fill) fill.style.width=`${p*100}%`;
+        if(p>=1){ holding=false; completeReset(); return; }
+        raf=requestAnimationFrame(step);
       };
       step();
     });
 
-    ["pointerup","pointerleave","pointercancel"].forEach(ev => {
-      panel.addEventListener(ev, () => {
-        holding = false;
-        const fill = panel.querySelector(".fill");
-        if (fill) fill.style.width = "0%";
-        if (raf) cancelAnimationFrame(raf);
+    ["pointerup","pointerleave","pointercancel"].forEach(ev=>{
+      panel.addEventListener(ev,()=>{
+        holding=false;
+        panel.querySelector(".fill")?.style.setProperty("width","0%");
+        if(raf) cancelAnimationFrame(raf);
       });
     });
 
-    console.log("[gameMenu] ready v2.7 (FULL RESET + normal actions)");
+    console.log("[gameMenu] ready v2.8 (slot restored)");
   }
 
   if (document.readyState === "loading") {
