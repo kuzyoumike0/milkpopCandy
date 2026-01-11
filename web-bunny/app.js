@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.6 (disable ALL idle drops incl tennshi)", Date.now());
+  console.log("[app.js] LOADED v16.7.8 (tennshi as bunny+ stronger than bunny4, keep full features)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -23,11 +23,16 @@
   };
 
   const BUNNY_DEFS = {
-    bunny1:  { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+    bunny1:   { label: "通常みるぽ",       img: "./assets/bunny1.png",   price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
+    bunny3:   { label: "毒タイプみるぽ",   img: "./assets/bunny3.png",   price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
+    bunny4:   { label: "水タイプみるぽ",   img: "./assets/bunny4.png",   price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
+    bunny5:   { label: "お正月みるぽ",     img: "./assets/bunny5.png",   price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
+    reabunny: { label: "黄金レアみるぽ",   img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
+
+    // ✅ 転生天使（tennshi）
+    // - “bunnyと同じ扱い” なので app.js 側は通常種として扱う
+    // - クリックドロップは getDropPlanFromOwnCharge() で強化
+    tennshi:  { label: "転生天使みるぽ",   img: "./assets/tennshi.png",  price: 0,     coinMul: 5.2,  desc: "転生で現れる天使。bunny4より稼ぐ。" },
   };
 
   /* =========================
@@ -92,9 +97,9 @@
    * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1676")) return;
+    if (document.getElementById("wbAppCoreCssV1678")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1676";
+    st.id = "wbAppCoreCssV1678";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -326,7 +331,10 @@
     emit("hudUpdated", { coins });
     emit("coinChanged", coins); // ✅ prestige.js が拾えるように（number）
   }
-  function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
+
+  function safeKind(k) {
+    return BUNNY_DEFS[k] ? k : "bunny1";
+  }
 
   function loadBunnyMeta() {
     try {
@@ -342,7 +350,6 @@
   /* =========================
    * ✅ 放置（自動）コインは「完全停止」
    * - クリック生成だけ許可
-   * - 転生tennshiの自動ドロップもここで止まる
    * ========================= */
   const DISABLE_IDLE_COINS = true;
   let __allowCoinSpawn = false;
@@ -408,9 +415,7 @@
 
   function spawnCoinDropAt(x, y, tier = 0) {
     // ✅ 自動（放置）発生は全部禁止。クリック生成だけ許可。
-    if (DISABLE_IDLE_COINS && !__allowCoinSpawn) {
-      return null;
-    }
+    if (DISABLE_IDLE_COINS && !__allowCoinSpawn) return null;
     const c = new CoinDrop(x, y, tier);
     dropsOnField.push(c);
     return c;
@@ -463,6 +468,7 @@
         try { e?.preventDefault?.(); } catch {}
         try { e?.stopPropagation?.(); } catch {}
 
+        // ✅ “bunnyと同じ扱い”＝tennshiも通常と同じSE（成体はpoyo）
         playSE(this.isBaby ? seBaby : sePoyo);
 
         const plan = this.getDropPlanFromOwnCharge();
@@ -486,7 +492,13 @@
     }
 
     syncSprite() {
-      this.el.src = this.isBaby ? ASSETS.babyBunny : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
+      // ✅ babyは必ず baby画像
+      if (this.isBaby) {
+        this.el.src = ASSETS.babyBunny;
+        return;
+      }
+      // ✅ 成体：tennshi も含めて BUNNY_DEFS から
+      this.el.src = (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
     }
 
     ensureHeartEl() {
@@ -528,7 +540,9 @@
         this.charge = CHARGE_MAX;
         this.chargeReady = true;
 
+        // ✅ baby はハート表示しない（ready 状態は内部で維持）
         if (!this.isBaby) this.showHeart();
+
         emit("bunnyChargeReady", { bornAt: this.bornAt });
       }
     }
@@ -551,6 +565,23 @@
         return { count, pickTier: () => 0 };
       }
 
+      // ✅ tennshi：bunnyと同じ扱いだが、bunny4より多く出す（クリック時のみ）
+      if (this.kind === "tennshi") {
+        // 数を増やす（通常 3~18 を 6~30 に）
+        const count = 6 + Math.floor(r * 24);
+
+        // tierは coin3/coin4 寄り（2,3中心。たまに1）
+        const pickTier = () => {
+          const x = Math.random();
+          if (x < 0.08) return 1;     // coin2 少し
+          if (x < 0.58) return 2;     // coin3 多め
+          return 3;                   // coin4 多め
+        };
+
+        return { count, pickTier };
+      }
+
+      // ✅ 通常成体
       const count = 3 + Math.floor(r * 15);
       const maxTier = Math.floor(r * 3 + 1e-9);
 
@@ -572,11 +603,16 @@
       if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
 
       this.isBaby = false;
-      if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
+
+      // ✅ tennshi は固定（突然変異を起こさない）
+      if (this.kind !== "tennshi") {
+        if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
+      }
 
       this.syncSprite();
       this.hardClamp(true);
 
+      // ✅ baby -> adult に変わった瞬間に、もしchargeReadyだったらハートを出せるようにする
       if (this.chargeReady) this.showHeart();
 
       if (isInit) saveBunnyMeta();
@@ -732,7 +768,7 @@
     spawnBunny,
     removeBunnyInstance,
 
-    spawnCoinDropAt, // ✅ これを呼んでも idle は出ない（クリック許可時のみ）
+    spawnCoinDropAt, // ✅ idleは禁止（クリック許可時のみ）
 
     saveCoins,
     saveBunnyMeta,
