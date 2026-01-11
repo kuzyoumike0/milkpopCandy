@@ -16,10 +16,15 @@
 // ✅ FIX：購入したBGMが流れないことがある → src差し替え後に audio.load() / play失敗理由をtoast / canplay追い再生 / 再試行
 // ✅ FIX：tryPlayBgm 内の toast 例外でUIが死ぬのを根絶（safeToast）
 // ✅ FIX：assets/BGM（大文字フォルダ）に統一 + 旧assets/bgm指定でも自動補正
+//
+// ✅ 変更：朝/昼/夜 は「購入不要で最初から所持」扱いにする
+//    - morning/day/night を owned として常に true
+//    - UI上も「購入済み」で表示＆購入ボタン無効
+//    - それ以外（depart/cocktail/stream/dokkan）は従来通り購入制
 
 (() => {
   "use strict";
-  console.log("[BGM.js] LOADED v3.3.4 (assets/BGM fix + path normalize)", Date.now());
+  console.log("[BGM.js] LOADED v3.3.5 (base BGM free: morning/day/night)", Date.now());
 
   /* =========================
    * Storage
@@ -75,6 +80,11 @@
   };
 
   /* =========================
+   * ✅ Base BGM Free（購入不要）
+   * ========================= */
+  const FREE_KEYS = new Set(["morning", "day", "night"]);
+
+  /* =========================
    * UI ids
    * ========================= */
   const UI = {
@@ -91,14 +101,10 @@
    * Path helpers（日本語ファイル名 / フォルダ大文字小文字事故対策）
    * ========================= */
   function normalizeAssetPath(src) {
-    // 旧コードや別モジュールが ./assets/bgm/ を渡してきても ./assets/BGM/ に補正
     try {
       let s = String(src || "");
-      // よくある事故：assets/bgm と assets/BGM
       s = s.replace(/\/assets\/bgm\//g, "/assets/BGM/");
       s = s.replace(/\.\/assets\/bgm\//g, "./assets/BGM/");
-      // たまに BGM フォルダに置いたのにルート ./assets/ を参照してしまう事故の保険
-      // （morning/day/night/tabi だけは既に正しいので触らない）
       return s;
     } catch {
       return src;
@@ -164,7 +170,19 @@
   let seVolume = loadSeVol();
   let owned = loadOwned();
   let selected = loadSelected();
-  function isOwned(key) { return !!owned?.[key]; }
+
+  // ✅ FREE_KEYS を常に所持扱いに固定（localStorageが無くても常にtrue）
+  function isOwned(key) { return FREE_KEYS.has(key) ? true : !!owned?.[key]; }
+
+  // ✅ 念のため、保存データにも反映（UIで「購入済み」表示を安定させる）
+  function ensureFreeKeysOwnedPersisted() {
+    let changed = false;
+    for (const k of FREE_KEYS) {
+      if (!owned[k]) { owned[k] = true; changed = true; }
+    }
+    if (changed) saveOwned(owned);
+  }
+  ensureFreeKeysOwnedPersisted();
 
   /* =========================
    * Coins compat（WB）
@@ -302,21 +320,18 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   // ✅ 追加：最後に落ちた理由（デバッグ用）
   let __lastPlayErr = "";
 
-  // ✅ FIX強化：src差し替え後に「canplayで追い再生」＋「error理由表示」＋「少し待って再試行」
   async function tryPlayBgm(src, keyHint = null) {
     ensureBgmAudio();
     if (!src) return false;
 
     const key = keyHint || resolveKeyBySrc(src);
+    // ✅ FREE_KEYS は常にOK、それ以外は所持チェック
     if (key && !isOwned(key)) { stopBgm(); return false; }
 
-    // 状態チェック
     if (!bgmSettings.enabled) return false;
     if (!unlocked) { __lastPlayErr = "locked"; return false; }
 
     const abs = toAbsUrlEncoded(src);
-
-    // --- 追い再生フラグ（src差し替え直後に play が落ちる環境対策） ---
     audio.__needRetryPlay = false;
 
     const onCanPlay = async () => {
@@ -349,7 +364,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       }
     };
 
-    // リスナー重複防止（常駐）
     if (!audio.__milkpopRetryHooked) {
       try {
         audio.addEventListener("canplay", onCanPlay);
@@ -360,19 +374,17 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
       audio.__milkpopRetryHooked = true;
     }
 
-    // src変更時は確実にリセット
     const changed = (audio.src !== abs);
     if (changed) {
       try { audio.pause(); } catch {}
       audio.src = abs;
       try { audio.load(); } catch {}
       try { audio.currentTime = 0; } catch {}
-      audio.__needRetryPlay = true; // ★canplayで追い再生
+      audio.__needRetryPlay = true;
     }
 
     applyBgmVolume();
 
-    // まずは即 play を試す（成功する環境はここで鳴る）
     try {
       const p = audio.play();
       if (p && typeof p.then === "function") await p;
@@ -382,8 +394,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     } catch (e) {
       __lastPlayErr = String(e?.name || e?.message || e || "play failed");
       safeToast(`⚠️ BGM再生失敗：${__lastPlayErr}`);
-
-      // 念のため少し待ってもう一回（canplayが来ない環境の保険）
       if (audio.__needRetryPlay) {
         setTimeout(() => { try { audio.play().catch(() => {}); } catch {} }, 180);
       }
@@ -398,7 +408,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function decideKeyToPlay() {
-    if (previewKey) return null; // プレビュー優先
+    if (previewKey) return null;
     if (specialKey && TRACKS[specialKey] && isOwned(specialKey)) return specialKey;
 
     const sk = selected?.selectedKey ?? null;
@@ -577,6 +587,10 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
    * ========================= */
   function buyBgm(key) {
     if (!TRACKS[key] || !PRICES[key]) return { ok: false, reason: "unknown" };
+
+    // ✅ 朝/昼/夜 は購入不要（常にOK）
+    if (FREE_KEYS.has(key)) return { ok: true, reason: "free" };
+
     if (isOwned(key)) return { ok: true, reason: "already" };
 
     const price = PRICES[key];
@@ -745,9 +759,13 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function renderItem(key) {
-    const price = PRICES[key] ?? 0;
     const label = LABELS[key] ?? key;
     const desc  = DESCS[key] ?? "";
+    const free = FREE_KEYS.has(key);
+
+    // ✅ FREE は価格表示を「最初から」に
+    const priceText = free ? "最初から" : `${(PRICES[key] ?? 0)}🪙`;
+
     return `
 <div class="item">
   <div style="min-width:170px;">
@@ -755,7 +773,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     <div class="meta">${desc}</div>
   </div>
   <div class="right">
-    <div class="tag" id="bgmPrice_${key}">${price}🪙</div>
+    <div class="tag" id="bgmPrice_${key}">${priceText}</div>
     <button class="preview" id="bgmPrev_${key}" type="button">試聴</button>
     <button class="buy" id="bgmBuy_${key}" type="button">購入</button>
     <button class="select" id="bgmSelect_${key}" type="button">流す</button>
@@ -763,7 +781,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 </div>`;
   }
 
-  // ✅ app.js から mountUI({position,...}) で呼ばれても壊れないよう引数を受ける
   function mountUI(_opts = null) {
     if (document.getElementById(UI.btn) && document.getElementById(UI.panel)) return;
 
@@ -857,6 +874,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     }
 
     function refresh() {
+      // FREE_KEYS は常に所持状態にする（途中でownedが壊れても復旧）
+      ensureFreeKeysOwnedPersisted();
+
       bgmVol.value = String(Math.round(bgmSettings.volume * 100));
       seVol.value  = String(Math.round(getSEVolume() * 100));
       seTag.textContent = `🔊 ${Math.round(getSEVolume() * 100)}`;
@@ -888,13 +908,15 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
       for (const k of keys) {
         const own = isOwned(k);
+        const free = FREE_KEYS.has(k);
         const price = PRICES[k] || 0;
 
-        if (priceTags[k]) priceTags[k].textContent = own ? "購入済み" : `${price}🪙`;
+        if (priceTags[k]) priceTags[k].textContent = own ? (free ? "最初から" : "購入済み") : `${price}🪙`;
 
         if (buyBtns[k]) {
-          buyBtns[k].disabled = own || (c < price);
-          buyBtns[k].textContent = own ? "OK" : "購入";
+          // ✅ FREE は常に購入不可（見た目上も購入済み）
+          buyBtns[k].disabled = free || own || (c < price);
+          buyBtns[k].textContent = free ? "OK" : (own ? "OK" : "購入");
         }
 
         if (selectBtns[k]) {
@@ -1024,7 +1046,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
   }
 
   function openModal() {
-    // ✅ 例外でモーダルが出ないのを根絶：絶対に display=block まで行く
     try { mountUI(); } catch (e) { console.warn("[BGM] mountUI failed", e); }
     const panel = document.getElementById(UI.panel);
     if (panel) {
@@ -1040,7 +1061,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
   function patchWB(WB) {
     if (!WB || typeof WB !== "object") return;
-    if (lastWBRef === WB && WB.__bgmPatchedV334) return;
+    if (lastWBRef === WB && WB.__bgmPatchedV335) return;
     lastWBRef = WB;
 
     const prevUnlock = (typeof WB.unlockAudioOnce === "function") ? WB.unlockAudioOnce : null;
@@ -1074,6 +1095,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     WB.bgm.TRACKS = TRACKS;
     WB.bgm.PRICES = PRICES;
     WB.bgm.LABELS = LABELS;
+
     WB.bgm.isOwned = isOwned;
     WB.bgm.buy = buyBgm;
     WB.bgm.select = selectBgm;
@@ -1085,7 +1107,7 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
     WB.toast = WB.toast || ((m) => safeToast(m));
 
-    WB.__bgmPatchedV334 = true;
+    WB.__bgmPatchedV335 = true;
 
     if (unlocked && bgmSettings.enabled && !previewKey) startBgm(false);
   }
@@ -1143,6 +1165,9 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
     ensureBgmAudio();
     window.__milkpopSeVolume = getSEVolume();
 
+    // ✅ FREE_KEYS を確実に所持に
+    ensureFreeKeysOwnedPersisted();
+
     startWBWatcher();
     setupAutoplayUnlock();
     startTimeWatcher();
@@ -1153,6 +1178,6 @@ pointer-events:none; opacity:0; transition:opacity .18s ease;
 
     setInterval(drainRegisterQueue, 700);
 
-    console.log("[BGM.js] ready (use WB.bgm.openModal())");
+    console.log("[BGM.js] ready (base BGM free: morning/day/night)");
   })();
 })();
