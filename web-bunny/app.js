@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.8 (tennshi as bunny+ stronger than bunny4, keep full features)", Date.now());
+  console.log("[app.js] LOADED v16.7.9 (tennshi as bunny+ stronger than bunny4, keep full features + ougonunchi remove bonus +10000)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -97,9 +97,9 @@
    * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1678")) return;
+    if (document.getElementById("wbAppCoreCssV1679")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1678";
+    st.id = "wbAppCoreCssV1679";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -331,6 +331,84 @@
     emit("hudUpdated", { coins });
     emit("coinChanged", coins); // ✅ prestige.js が拾えるように（number）
   }
+
+  /* =========================
+   * ✅ ougonunchi.png 削除ボーナス（軽量＆確実）
+   * - “削除処理” を removeOugonUnchi() に集約
+   * - クリックで削除する実装でも拾えるように field で委譲
+   * - 1要素につき1回だけ +10000（重複防止）
+   * ========================= */
+  const OUGONUNCHI_BONUS = 10000;
+  const __ougonGranted = new WeakSet();
+
+  function isOugonUnchiEl(el) {
+    if (!el || el.nodeType !== 1) return false;
+
+    // img src に ougonunchi.png
+    if (el.tagName === "IMG") {
+      const src = String(el.getAttribute("src") || "");
+      if (src.includes("ougonunchi.png")) return true;
+    }
+
+    // wrapper の中に ougonunchi.png の img
+    try {
+      const img = el.querySelector?.('img[src*="ougonunchi.png"]');
+      if (img) return true;
+    } catch {}
+
+    return false;
+  }
+
+  function grantOugonBonusOnce(el) {
+    if (!el || __ougonGranted.has(el)) return false;
+    __ougonGranted.add(el);
+
+    coins += OUGONUNCHI_BONUS;
+    saveCoins();
+    updateHud();
+    return true;
+  }
+
+  // ✅ 黄金うんちを消す時は必ずこれを呼ぶ（imgでもwrapでもOK）
+  function removeOugonUnchi(el) {
+    if (!el) return false;
+
+    // 可能なら“wrap”を消す（残骸防止）
+    let target = el;
+    try {
+      const img = (el.tagName === "IMG") ? el : el.querySelector?.('img[src*="ougonunchi.png"]');
+      if (img) target = img.closest?.(".unchiWrap") || img.parentElement || img;
+    } catch {}
+
+    // 付与（1回だけ）
+    grantOugonBonusOnce(target);
+
+    // 実削除
+    try { target.remove(); }
+    catch { try { target.parentNode?.removeChild?.(target); } catch {} }
+
+    try { emit("ougonunchi:removed", { bonus: OUGONUNCHI_BONUS }); } catch {}
+    return true;
+  }
+
+  // ✅ “クリックで削除”型の黄金うんちなら、これだけで確実に +10000
+  // ※ 既存の黄金うんち削除処理がある場合は、その処理の中も removeOugonUnchi() に置換推奨
+  field.addEventListener("pointerdown", (e) => {
+    const t = e.target;
+    if (!t || t.nodeType !== 1) return;
+
+    const img = (t.tagName === "IMG" && String(t.getAttribute("src") || "").includes("ougonunchi.png"))
+      ? t
+      : t.closest?.('img[src*="ougonunchi.png"]');
+
+    if (!img) return;
+
+    try { e.preventDefault(); } catch {}
+    try { e.stopPropagation(); } catch {}
+
+    const wrap = img.closest?.(".unchiWrap") || img.parentElement || img;
+    removeOugonUnchi(wrap);
+  }, { passive: false });
 
   function safeKind(k) {
     return BUNNY_DEFS[k] ? k : "bunny1";
@@ -778,6 +856,13 @@
     seTabidati,
 
     updateHud,
+
+    // ✅ 外部モジュールからも“必ず+10000”で削除できるAPI
+    ougonUnchi: {
+      bonus: OUGONUNCHI_BONUS,
+      isOugon: isOugonUnchiEl,
+      remove: removeOugonUnchi,
+    },
 
     getBunnyCharge: (bornAt) => {
       const t = Number(bornAt);
