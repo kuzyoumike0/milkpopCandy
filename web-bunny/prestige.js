@@ -43,7 +43,7 @@
 
     TENNCHI: {
       LS_ACTIVE: "wb_tennchi_active_v1",
-      WRAP_MARK: "data-tennchi",
+      WRAP_MARK: "data-tennshi",
       IMG: "./assets/tennchi.png",
 
       dropEveryMs: 2300,
