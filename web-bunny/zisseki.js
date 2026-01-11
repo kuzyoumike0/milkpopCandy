@@ -1,16 +1,18 @@
 // zisseki.js（✅実績：zisseki.js単体でカウント完結 + ✅図鑑タブ互換(ach提供) + ✅WB待機 + ✅トースト）
 // - localStorage 永続化（実績専用LSのみ）
-// - 回数系（うんち/お迎え/旅立ち/花火/スロット当たり/✅黄金つつき）も zisseki.js 自前statsで保持
+// - 回数系（うんち/お迎え/旅立ち/花火/スロット当たり/✅黄金つつき/✅星のかけら）も zisseki.js 自前statsで保持
 // - WB events が無くても、WB.emit を安全にフックして拾う（最終保険）
 // - sy:add が来たら payload を解析して自動で stats に加算
 // - 図鑑(zukan.js)の renderAchievements が参照するために WB.zisseki.ach を提供（互換）
 //
 // ✅ 追加: omukae.js / slot.js 由来のイベント名も幅広く拾う（slotResult/slot:win/omukaeDone 等）
 // ✅ 追加: 黄金うんち「つつき」回数 stats.ougon_poke + 実績 + 称号
+// ✅ 追加: ほしのかけら収集 stats.hoshi_kakera + 実績
 //
 // 使い方（他モジュールから加算したい場合）
 //   WB.emit("sy:add", { key:"unchi", delta:1 })
 //   WB.emit("sy:add", { key:"ougon_poke", delta:1 })
+//   WB.emit("sy:add", { key:"hoshi_kakera", delta:1 })
 //   WB.emit("sy:add", { type:"tabidachi" })
 //   WB.zisseki.addCount("omukae", 1)
 //
@@ -124,7 +126,8 @@
     /* =========================
      * Stats（zisseki.js完結カウンタ）
      * ========================= */
-    const STAT_KEYS = ["unchi", "omukae", "tabidachi", "hanabi", "slot_win", "ougon_poke"];
+    // ✅ hoshi_kakera 追加
+    const STAT_KEYS = ["unchi", "omukae", "tabidachi", "hanabi", "slot_win", "ougon_poke", "hoshi_kakera"];
 
     function normKey(k) {
       const s = String(k ?? "").trim().toLowerCase();
@@ -138,6 +141,16 @@
       if (s === "ougonpoke") return "ougon_poke";
       if (s === "ougon_poke") return "ougon_poke";
       if (s === "goldpoke") return "ougon_poke";
+
+      // ✅ ほしのかけら系
+      if (s === "hoshi") return "hoshi_kakera";
+      if (s === "kakera") return "hoshi_kakera";
+      if (s === "hoshi:kakera") return "hoshi_kakera";
+      if (s === "hoshinokakera") return "hoshi_kakera";
+      if (s === "hoshi_kakera") return "hoshi_kakera";
+      if (s === "star_shard") return "hoshi_kakera";
+      if (s === "shootingstar_shard") return "hoshi_kakera";
+
       return s;
     }
 
@@ -417,6 +430,13 @@
     bindCountEvent("ougonunchi:poke", "ougon_poke");
     bindCountEvent("ougonunchi:removed", "ougon_poke", { forceKey: "ougon_poke", delta: OUGON_REMOVED_AS_POKE });
 
+    // ✅ ほしのかけら：拾ったイベント
+    bindCountEvent("hoshi:kakera", "hoshi_kakera");
+    bindCountEvent("hoshiKakera", "hoshi_kakera");
+    bindCountEvent("hoshinokakera", "hoshi_kakera");
+    bindCountEvent("star:shard", "hoshi_kakera");
+    bindCountEvent("shootingstar:shard", "hoshi_kakera");
+
     /* =========================
      * 最終保険：WB.emit フック
      * ========================= */
@@ -455,6 +475,12 @@
             if (ev === "ougonunchi:poke") addCount("ougon_poke", 1);
             if (ev === "ougonunchi:removed") {
               if (OUGON_REMOVED_AS_POKE > 0) addCount("ougon_poke", OUGON_REMOVED_AS_POKE);
+            }
+
+            // ✅ ほしのかけら
+            if (ev === "hoshi:kakera" || ev === "hoshiKakera" || ev === "hoshinokakera"
+             || ev === "star:shard" || ev === "shootingstar:shard") {
+              addCount("hoshi_kakera", 1);
             }
           } catch {}
           return orig(name, payload);
@@ -505,12 +531,10 @@
         if (c >= t.need) unlockTitle(t.id);
       }
 
-      // “おすすめ”だけ通知（自動で付け替えはしない）
       const bestId = bestTitleIdByCount(c);
       const best = getTitleById(bestId);
       const cur = getTitleById(currentTitle);
       if (best && cur && best.need > cur.need) {
-        // spam防止：実績チェックタイミングで一度だけ出るように unlocked を鍵にする
         const hintKey = `hint_best_${bestId}`;
         if (!titlesUnlocked[hintKey]) {
           titlesUnlocked[hintKey] = true;
@@ -532,10 +556,8 @@
       const t = getTitleById(id);
       toast(`🏷️ 称号を「${t.name}」にした`);
 
-      // 他UI連携用
       try { WB.emit?.("titleChanged", { id: t.id, name: t.name }); } catch {}
 
-      // app.js 側のタイトルLSがある場合だけ軽く同期（壊さない）
       try {
         const key = WB?.LS?.title;
         if (key) localStorage.setItem(key, t.name);
@@ -673,7 +695,7 @@
         progress: () => ({ now: getStatMaybe(["totalBunnyBought", "bunnyBought", "boughtBunnies"]), target: 100, unit: "匹" })
       },
 
-      // ✅ 黄金つつき：実績（ここが追加）
+      // ✅ 黄金つつき：実績
       { id: "ougon_poke_1",  name: "金色はじめて",     desc: "黄金うんちをつつく 1回",
         flavor: "指先が、ちょっとだけ金運になった気がする。",
         check: () => getCount("ougon_poke") >= 1,
@@ -703,6 +725,38 @@
         flavor: "王冠は、指先に宿る。",
         check: () => getCount("ougon_poke") >= 120,
         progress: () => ({ now: getCount("ougon_poke"), target: 120, unit: "回" })
+      },
+
+      // ✅ ほしのかけら：実績（追加）
+      { id: "hoshi_kakera_1",  name: "星のかけら、ひとつ", desc: "星のかけらを拾う 1回",
+        flavor: "空の端っこから、幸運が落ちてきた。",
+        check: () => getCount("hoshi_kakera") >= 1,
+        progress: () => ({ now: getCount("hoshi_kakera"), target: 1, unit: "回" })
+      },
+      { id: "hoshi_kakera_3",  name: "流れ星ハンター",     desc: "星のかけらを拾う 3回",
+        flavor: "見える前に、気配が分かるようになった。",
+        check: () => getCount("hoshi_kakera") >= 3,
+        progress: () => ({ now: getCount("hoshi_kakera"), target: 3, unit: "回" })
+      },
+      { id: "hoshi_kakera_10", name: "星の収集家",         desc: "星のかけらを拾う 10回",
+        flavor: "ポケットの中で、夜空が鳴っている。",
+        check: () => getCount("hoshi_kakera") >= 10,
+        progress: () => ({ now: getCount("hoshi_kakera"), target: 10, unit: "回" })
+      },
+      { id: "hoshi_kakera_30", name: "星屑の守り手",       desc: "星のかけらを拾う 30回",
+        flavor: "拾った数だけ、願い事が増えた。",
+        check: () => getCount("hoshi_kakera") >= 30,
+        progress: () => ({ now: getCount("hoshi_kakera"), target: 30, unit: "回" })
+      },
+      { id: "hoshi_kakera_60", name: "天の採掘者",         desc: "星のかけらを拾う 60回",
+        flavor: "空が、あなたにだけ優しい。",
+        check: () => getCount("hoshi_kakera") >= 60,
+        progress: () => ({ now: getCount("hoshi_kakera"), target: 60, unit: "回" })
+      },
+      { id: "hoshi_kakera_120", name: "星の主",            desc: "星のかけらを拾う 120回",
+        flavor: "夜空の鍵は、もうあなたの手の中。",
+        check: () => getCount("hoshi_kakera") >= 120,
+        progress: () => ({ now: getCount("hoshi_kakera"), target: 120, unit: "回" })
       },
     ];
 
@@ -767,7 +821,7 @@
       setCount,
       addCount,
 
-      // ✅ 黄金称号API（ここが追加）
+      // ✅ 黄金称号API
       titles: {
         list: OUGON_TITLES,
         get current() { return currentTitle; },
@@ -791,7 +845,7 @@
 
     WB.zisseki.stop = () => { try { clearInterval(timer); } catch {} };
 
-    console.log("[zisseki] ready (omukae/slot/ougon_poke + titles)", {
+    console.log("[zisseki] ready (omukae/slot/ougon_poke + hoshi_kakera + titles)", {
       unlocked: Object.keys(unlocked).length,
       stats: { ...stats },
       title: getTitleById(currentTitle).name,
