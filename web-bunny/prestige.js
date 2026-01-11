@@ -1,35 +1,23 @@
-// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.3
-// ✅ zisseki/zukan に依存しない単体完結（WBがあれば連携）
-// ✅ 星の保存：localStorage wb_prestige_v1
-// ✅ 恒久解放(perks)を保存＆WB.prestige.hasPerk()で参照可能
-// ✅ 誤爆防止：転生ボタンは「長押し 1.2秒」
-// ✅ FIX: app.js の WB.coins が getter でも「現在コイン」を正しく拾う
-// ✅ 追加: 転生したら assets/tennchi.png の兎を1体出現（1体のみ・常駐）
-// ✅ 追加: tennchi は bunny4 より多くコインを落とす（高tier + 高頻度）
+// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.4
+// ✅ 現在コイン反映FIX（WB.coins getterでも拾う）
+// ✅ 転生時：assets/tennchi.png の兎を「既存うさぎと完全に同じ移動」で1体出現（skin差し替え方式）
+// ✅ tennchi は bunny4 より多くコインを落とす（別ドロップループで確実に上）
+// ✅ 1体だけ（重複生成しない）・LSで常駐
 
 (() => {
   "use strict";
-  if (window.__WB_PRESTIGE_V13__) return;
-  window.__WB_PRESTIGE_V13__ = true;
+  if (window.__WB_PRESTIGE_V14__) return;
+  window.__WB_PRESTIGE_V14__ = true;
 
   const WAIT_MS = 12000;
   const TICK_MS = 50;
 
   const CFG = {
-    // 星計算：減衰（おすすめ）
-    // coins → stars = floor( sqrt(coins / BASE) )
     STAR_BASE_COINS: 50000,
-
-    // 転生最低条件（0で無条件）
     MIN_COINS_TO_PRESTIGE: 50000,
-
-    // 長押し時間
     HOLD_MS: 1200,
 
-    // “深めのLSリセット” をしたいなら true（基本は false 推奨）
     DEEP_LOCALSTORAGE_WIPE: false,
-
-    // 深めリセットで消す候補キー（あなたの環境に合わせて追記OK）
     WIPE_KEYS: [
       "wb_coins_v6",
       "wb_bunnies_v6",
@@ -48,28 +36,26 @@
       unlocked: "解放済",
     },
 
-    // ===== 転生兎（tennchi）設定 =====
+    // ===== 転生兎（tennchi）=====
     TENNCHI: {
       LS_ACTIVE: "wb_tennchi_active_v1",
-      ID: "wbTennchiBunnyV1",
-      STYLE_ID: "wbTennchiBunnyStyleV1",
+      // WBの“通常うさぎ”として存在するので DOM固定IDは使わない（wrapに印を付ける）
+      WRAP_MARK: "data-tennchi",
+
       IMG: "./assets/tennchi.png",
 
-      size: 90,
-      z: 140, // bunnyLayerより上に見える
-
-      // bunny4より多く：tier高め(=coin4率↑) + 出す頻度↑ + 出す枚数↑
-      dropEveryMs: 2600,     // 放置で落とす間隔（短いほど多い）
-      dropCount: 3,          // 1回に落とす枚数
-      tierMin: 2,            // 0..3（2=coin3, 3=coin4）
+      // bunny4より多く：別ドロップループ（確実）
+      dropEveryMs: 2300,
+      dropCount: 3,
+      tierMin: 2, // 0..3
       tierMax: 3,
-      speed: 52,
-      bobSpeed: 0.0013,
-      pad: 14,
+
+      // 見分け用クラス（CSSは任意）
+      className: "wbTennchiBunny",
     },
   };
 
-  const LS_PRESTIGE = "wb_prestige_v1"; // { ver:1, stars:0, spent:0, perks:{id:true}, history:[...] }
+  const LS_PRESTIGE = "wb_prestige_v1";
 
   function waitForWB() {
     const start = Date.now();
@@ -163,7 +149,6 @@
     document.head.appendChild(s);
   }
 
-  // 星計算（減衰）
   function calcStarsFromCoins(coins) {
     const c = Math.max(0, Math.floor(Number(coins) || 0));
     if (c < CFG.MIN_COINS_TO_PRESTIGE) return 0;
@@ -176,39 +161,22 @@
     return Math.max(0, Math.floor(CFG.STAR_BASE_COINS * (s * s)));
   }
 
-  // ✅ FIX: WB.coins が getter でも読む
+  // ✅ FIX: WB.coins getterでも拾う
   function getCoins(WB) {
-    // 1) WB.getCoin()
     try { if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
-
-    // 2) WB.coins (getter含む)
     try {
       if (WB && ("coins" in WB)) {
         const v = Number(WB.coins);
         if (Number.isFinite(v)) return v;
       }
     } catch {}
-
-    // 3) coinValue
     const el = document.getElementById("coinValue");
     return el ? (Number(el.textContent) || 0) : 0;
   }
 
   function setCoinsZero(WB) {
-    // 1) WB.setCoin
-    try {
-      if (WB && typeof WB.setCoin === "function") { WB.setCoin(0); return true; }
-    } catch {}
-
-    // 2) WB.coins setter (getter/setter想定)
-    try {
-      if (WB && ("coins" in WB)) {
-        WB.coins = 0;
-        return true;
-      }
-    } catch {}
-
-    // 3) localStorage fallback
+    try { if (WB && typeof WB.setCoin === "function") { WB.setCoin(0); return true; } } catch {}
+    try { if (WB && ("coins" in WB)) { WB.coins = 0; return true; } } catch {}
     try { localStorage.setItem("wb_coins_v6", "0"); } catch {}
     const el = document.getElementById("coinValue");
     if (el) el.textContent = "0";
@@ -216,28 +184,16 @@
   }
 
   function removeAllBunnies(WB) {
-    // 1) removeAllBunnies
-    try {
-      if (WB && typeof WB.removeAllBunnies === "function") { WB.removeAllBunnies(); return true; }
-    } catch {}
-
-    // 2) WB.removeBunnyInstance を回す（ある場合）
+    try { if (WB && typeof WB.removeAllBunnies === "function") { WB.removeAllBunnies(); return true; } } catch {}
     try {
       if (WB && typeof WB.removeBunnyInstance === "function" && Array.isArray(WB.bunnies)) {
         const copy = WB.bunnies.slice();
         copy.forEach(b => { try { WB.removeBunnyInstance(b); } catch {} });
       }
     } catch {}
-
-    // 3) WB.bunnies 配列があるなら空にする
     try { if (WB && Array.isArray(WB.bunnies)) WB.bunnies.length = 0; } catch {}
-
-    // 4) DOMから消す
     try { document.querySelectorAll(".bunnyWrap, .bunny-wrap").forEach(el => { try { el.remove(); } catch {} }); } catch {}
-
-    // 5) ハートも掃除（app.jsの wbChargeHart）
     try { document.querySelectorAll(".wbChargeHart").forEach(el => { try { el.remove(); } catch {} }); } catch {}
-
     try { WB?.emit?.("bunnyCountChanged", { count: 0 }); } catch {}
     return true;
   }
@@ -249,14 +205,12 @@
     }
   }
 
-  // 恒久解放（例：演出中心）
   const PERK_MASTER = [
     { id: "coin_sparkle", cost: 1, name: "コイン回収キラッ", desc: "コイン回収時に小さな✨演出を追加（演出のみ）" },
     { id: "mirrorball_plus", cost: 2, name: "ミラーボール増し", desc: "ミラーボール範囲内の✨演出を少し増やす（演出のみ）" },
     { id: "hanabi_glow", cost: 2, name: "花火発光ブースト", desc: "花火GIFの発光感を少し強化（演出のみ）" },
     { id: "bunny_aura", cost: 3, name: "うさぎの輪郭光", desc: "うさぎにうっすら輪郭の光（演出のみ）" },
     { id: "bg_soft", cost: 3, name: "背景ふわっと", desc: "背景に柔らかいビネットを追加（演出のみ）" },
-
     { id: "coin_bonus_1", cost: 6, name: "収入+1%", desc: "放置のコイン量を+1%（控えめ）", gameplay: true },
     { id: "coin_bonus_3", cost: 12, name: "収入+3%", desc: "放置のコイン量を+3%（控えめ）", gameplay: true },
   ];
@@ -264,7 +218,6 @@
   function defaultPrestigeState() {
     return { ver: 1, stars: 0, spent: 0, perks: {}, history: [] };
   }
-
   function loadPrestige() {
     const st = loadJson(LS_PRESTIGE, defaultPrestigeState());
     if (!st || typeof st !== "object") return defaultPrestigeState();
@@ -275,68 +228,12 @@
     st.history = Array.isArray(st.history) ? st.history : [];
     return st;
   }
-
-  function savePrestige(st) {
-    saveJson(LS_PRESTIGE, st);
-  }
-
-  function format(n) {
-    return (Number(n) || 0).toLocaleString();
-  }
+  function savePrestige(st) { saveJson(LS_PRESTIGE, st); }
+  function format(n) { return (Number(n) || 0).toLocaleString(); }
 
   /* =========================
-   * ✅ 転生兎（tennchi）実装
+   * ✅ tennchi：既存うさぎ生成 → 画像だけ差し替え（移動完全同一）
    * ========================= */
-  function ensureTennchiStyle() {
-    if (document.getElementById(CFG.TENNCHI.STYLE_ID)) return;
-    const s = document.createElement("style");
-    s.id = CFG.TENNCHI.STYLE_ID;
-    s.textContent = `
-#${CFG.TENNCHI.ID}{
-  position:absolute;
-  width:${CFG.TENNCHI.size}px;
-  height:${CFG.TENNCHI.size}px;
-  pointer-events:none;
-  z-index:${CFG.TENNCHI.z};
-  will-change:transform;
-  filter: drop-shadow(0 18px 28px rgba(255,255,255,.22));
-}
-#${CFG.TENNCHI.ID} .aura{
-  position:absolute; inset:-6px;
-  border-radius:24px;
-  background:radial-gradient(circle at 35% 35%,
-    rgba(255,255,255,.95) 0%,
-    rgba(255,220,250,.65) 28%,
-    rgba(120,220,255,.40) 55%,
-    rgba(0,0,0,0) 70%
-  );
-}
-#${CFG.TENNCHI.ID} img{
-  position:absolute;
-  left:50%; top:50%;
-  width:${CFG.TENNCHI.size}px;
-  height:${CFG.TENNCHI.size}px;
-  transform:translate(-50%,-50%);
-  object-fit:contain;
-  user-select:none;
-  -webkit-user-drag:none;
-}
-#${CFG.TENNCHI.ID} .spark{
-  position:absolute;
-  left:50%; top:-10px;
-  transform:translateX(-50%);
-  font-weight:1000;
-  opacity:.9;
-  animation: wbTennchiSpark 1.25s ease-in-out infinite;
-}
-@keyframes wbTennchiSpark{
-  0%{ transform:translateX(-50%) translateY(0); opacity:.6; }
-  50%{ transform:translateX(-50%) translateY(-8px); opacity:1; }
-  100%{ transform:translateX(-50%) translateY(0); opacity:.6; }
-}
-`;
-    document.head.appendChild(s);
-  }
 
   function isTennchiActive() {
     return localStorage.getItem(CFG.TENNCHI.LS_ACTIVE) === "true";
@@ -345,95 +242,226 @@
     try { localStorage.setItem(CFG.TENNCHI.LS_ACTIVE, on ? "true" : "false"); } catch {}
   }
 
-  function ensureTennchiDom(WB) {
-    ensureTennchiStyle();
-    const field = WB?.field || document.getElementById("field") || document.body;
-
-    let el = document.getElementById(CFG.TENNCHI.ID);
-    if (el && el.isConnected) return el;
-
-    el = document.createElement("div");
-    el.id = CFG.TENNCHI.ID;
-    el.innerHTML = `
-      <div class="aura"></div>
-      <div class="spark">✨</div>
-      <img src="${CFG.TENNCHI.IMG}" alt="tennchi">
-    `;
-    field.appendChild(el);
-    return el;
+  function getBunnyList(WB) {
+    try {
+      const a = WB?.getBunnies?.();
+      if (Array.isArray(a)) return a;
+    } catch {}
+    try {
+      if (Array.isArray(WB?.bunnies)) return WB.bunnies;
+    } catch {}
+    return [];
   }
 
-  let __tennchiLoopStarted = false;
-  function startTennchiLoop(WB) {
-    if (__tennchiLoopStarted) return;
-    __tennchiLoopStarted = true;
+  function findTennchiBunny(WB) {
+    const list = getBunnyList(WB);
+    for (const b of list) {
+      const w = b?.wrap;
+      if (w?.getAttribute?.(CFG.TENNCHI.WRAP_MARK) === "1") return b;
+      // 旧：wrap無し対策
+      if (b?.isTennchi === true) return b;
+    }
+    return null;
+  }
 
-    let x = 40, y = 120;
-    let vx = 1, vy = 0.55;
-    let last = performance.now();
-    let lastDrop = 0;
-
-    const pickTier = () => {
-      const a = CFG.TENNCHI.tierMin, b = CFG.TENNCHI.tierMax;
-      const t = Math.floor(a + Math.random() * (b - a + 1));
-      return clamp(t, 0, 3);
-    };
-
-    const dropCoins = () => {
-      if (!WB?.spawnCoinDropAt) return;
-      const count = Math.max(1, CFG.TENNCHI.dropCount | 0);
-      for (let i = 0; i < count; i++) {
-        const tier = pickTier();
-        WB.spawnCoinDropAt(x + CFG.TENNCHI.size * 0.55 + (Math.random()*20-10), y + CFG.TENNCHI.size * 0.9, tier);
+  function markTennchi(b) {
+    try { b.isTennchi = true; } catch {}
+    try {
+      const w = b?.wrap;
+      if (w?.setAttribute) {
+        w.setAttribute(CFG.TENNCHI.WRAP_MARK, "1");
+        w.classList?.add?.(CFG.TENNCHI.className);
       }
-    };
+    } catch {}
+  }
 
-    function raf(now) {
-      if (!isTennchiActive()) {
-        try { document.getElementById(CFG.TENNCHI.ID)?.remove(); } catch {}
-        __tennchiLoopStarted = false;
-        return;
-      }
+  function skinToTennchi(b) {
+    if (!b) return false;
+    // img参照候補
+    const img =
+      b.img ||
+      b?.wrap?.querySelector?.("img") ||
+      null;
 
-      const el = ensureTennchiDom(WB);
-      const field = WB?.field || document.getElementById("field") || document.body;
-      const r = field.getBoundingClientRect();
+    if (img && img.tagName === "IMG") {
+      try { img.src = CFG.TENNCHI.IMG; } catch {}
+      try { img.alt = "tennchi"; } catch {}
+    } else {
+      // どうしてもimgが取れない時は、wrap内にimgを差し込む（保険）
+      try {
+        const w = b.wrap;
+        if (w && !w.querySelector("img")) {
+          const im = document.createElement("img");
+          im.src = CFG.TENNCHI.IMG;
+          im.alt = "tennchi";
+          im.draggable = false;
+          w.appendChild(im);
+        }
+      } catch {}
+    }
+    markTennchi(b);
+    return true;
+  }
 
-      const dt = Math.min(0.033, (now - last) / 1000);
-      last = now;
+  // ✅ “通常うさぎ”を1匹作る（可能なAPIを総当たり）
+  function spawnOneNormalBunnyPreferBunny4(WB) {
+    // 1) 明示APIがあるなら最優先
+    const tryCalls = [
+      // なるべく bunny4 相当を要求
+      () => WB?.addBunny?.("bunny4"),
+      () => WB?.spawnBunny?.("bunny4"),
+      () => WB?.createBunny?.("bunny4"),
+      () => WB?.omukae?.spawn?.("bunny4"),
+      () => WB?.omukae?.add?.("bunny4"),
 
-      x += vx * CFG.TENNCHI.speed * dt;
-      y += vy * CFG.TENNCHI.speed * dt;
+      // 型指定不可な環境用（とにかく1体増やす）
+      () => WB?.addBunny?.(),
+      () => WB?.spawnBunny?.(),
+      () => WB?.createBunny?.(),
+      () => WB?.omukae?.spawn?.(),
+      () => WB?.omukae?.add?.(),
+      () => WB?.adopt?.(),
+    ];
 
-      const bob = Math.sin(now * CFG.TENNCHI.bobSpeed) * 10;
+    for (const f of tryCalls) {
+      try {
+        const before = getBunnyList(WB).length;
+        const r = f();
+        const after = getBunnyList(WB).length;
+        if (after > before) return true;
+        // Promise返す系もあるので軽く許容
+        if (r && typeof r.then === "function") return true;
+      } catch {}
+    }
+    return false;
+  }
 
-      const minX = CFG.TENNCHI.pad;
-      const maxX = Math.max(minX, r.width - CFG.TENNCHI.size - CFG.TENNCHI.pad);
-      const minY = CFG.TENNCHI.pad;
-      const maxY = Math.max(minY, r.height - CFG.TENNCHI.size - CFG.TENNCHI.pad);
+  // ✅ 生成直後の「新しい個体」を拾う
+  function pickNewestBunny(WB, prevIds) {
+    const list = getBunnyList(WB);
+    // bornAt があるなら “新しいbornAt” を優先
+    let cand = null;
+    for (const b of list) {
+      if (!b) continue;
+      const id = b.bornAt ?? b.id ?? b.uuid ?? null;
+      if (id != null && prevIds && prevIds.has(String(id))) continue;
+      // すでにtennchiなら除外
+      if (b?.wrap?.getAttribute?.(CFG.TENNCHI.WRAP_MARK) === "1") continue;
+      cand = b;
+    }
+    if (cand) return cand;
 
-      if (x <= minX) { x = minX; vx = Math.abs(vx); }
-      if (x >= maxX) { x = maxX; vx = -Math.abs(vx); }
-      if (y <= minY) { y = minY; vy = Math.abs(vy); }
-      if (y >= maxY) { y = maxY; vy = -Math.abs(vy); }
+    // bornAtが無い環境：wrapが増えたやつを拾う（最後）
+    return list[list.length - 1] || null;
+  }
 
-      el.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y + bob)}px, 0)`;
+  // ✅ tennchi の “bunny4超え” コイン排出（位置は tennchi の足元）
+  let __tennchiDropTimer = 0;
 
-      // コイン排出（bunny4より多い）
-      if (now - lastDrop >= CFG.TENNCHI.dropEveryMs) {
-        lastDrop = now;
-        dropCoins();
-      }
+  function startTennchiCoinDropLoop(WB, b) {
+    stopTennchiCoinDropLoop();
 
-      requestAnimationFrame(raf);
+    if (!WB?.spawnCoinDropAt) {
+      // spawnCoinDropAt が無い環境では諦めず coins を直接増やす…はゲーム性が崩れるのでやらない
+      return;
     }
 
-    requestAnimationFrame(raf);
+    const pickTier = () => {
+      const a = CFG.TENNCHI.tierMin, c = CFG.TENNCHI.tierMax;
+      return clamp(Math.floor(a + Math.random() * (c - a + 1)), 0, 3);
+    };
+
+    __tennchiDropTimer = window.setInterval(() => {
+      if (!isTennchiActive()) return;
+
+      const bb = findTennchiBunny(WB) || b;
+      const w = bb?.wrap;
+      if (!w || !w.isConnected) return;
+
+      const r = w.getBoundingClientRect();
+      const field = WB?.field || document.getElementById("field") || document.body;
+      const fr = field.getBoundingClientRect();
+
+      const baseX = (r.left - fr.left) + r.width * 0.55;
+      const baseY = (r.top - fr.top) + r.height * 0.92;
+
+      for (let i = 0; i < Math.max(1, CFG.TENNCHI.dropCount | 0); i++) {
+        const tier = pickTier();
+        WB.spawnCoinDropAt(
+          baseX + (Math.random() * 26 - 13),
+          baseY + (Math.random() * 10 - 5),
+          tier
+        );
+      }
+    }, CFG.TENNCHI.dropEveryMs);
   }
 
-  function spawnTennchiOnPrestige(WB) {
+  function stopTennchiCoinDropLoop() {
+    if (__tennchiDropTimer) clearInterval(__tennchiDropTimer);
+    __tennchiDropTimer = 0;
+  }
+
+  // ✅ リロード後も常駐：t始動
+  async function ensureTennchiExists(WB) {
+    if (!WB) return null;
+    if (!isTennchiActive()) return null;
+
+    // 既に居るならそれでOK
+    const exists = findTennchiBunny(WB);
+    if (exists) {
+      skinToTennchi(exists);
+      startTennchiCoinDropLoop(WB, exists);
+      return exists;
+    }
+
+    // まだ居ない → 1体生成してskin
+    const before = getBunnyList(WB);
+    const prevIds = new Set(before.map(b => String(b?.bornAt ?? b?.id ?? b?.uuid ?? "")));
+
+    spawnOneNormalBunnyPreferBunny4(WB);
+
+    // 少し待って生成反映
+    await new Promise(r => setTimeout(r, 80));
+    let b = pickNewestBunny(WB, prevIds);
+
+    // さらに待ってもダメなら再探索（保険）
+    if (!b) {
+      await new Promise(r => setTimeout(r, 120));
+      b = pickNewestBunny(WB, prevIds);
+    }
+    if (!b) return null;
+
+    skinToTennchi(b);
+    startTennchiCoinDropLoop(WB, b);
+    return b;
+  }
+
+  async function spawnTennchiOnPrestige(WB) {
     setTennchiActive(true);
-    startTennchiLoop(WB);
+    const b = await ensureTennchiExists(WB);
+    return b;
+  }
+
+  function removeTennchi(WB) {
+    setTennchiActive(false);
+    stopTennchiCoinDropLoop();
+
+    const b = findTennchiBunny(WB);
+    if (!b) return;
+
+    // WB側で消せるなら消す（最優先）
+    try {
+      if (WB?.removeBunnyInstance) { WB.removeBunnyInstance(b); return; }
+    } catch {}
+
+    // 配列＆DOM掃除（保険）
+    try { b?.wrap?.remove?.(); } catch {}
+    try {
+      if (Array.isArray(WB?.bunnies)) {
+        const i = WB.bunnies.indexOf(b);
+        if (i >= 0) WB.bunnies.splice(i, 1);
+      }
+    } catch {}
   }
 
   /* =========================
@@ -471,12 +499,24 @@
     return p;
   }
 
+  let __liveTimer = 0;
+  function startLiveCoins() {
+    stopLiveCoins();
+    __liveTimer = window.setInterval(() => {
+      const p = panelEl || document.getElementById(PANEL_ID);
+      if (!p || p.style.display !== "block") return;
+      render();
+    }, 250);
+  }
+  function stopLiveCoins() {
+    if (__liveTimer) clearInterval(__liveTimer);
+    __liveTimer = 0;
+  }
+
   function open() {
     const p = buildPanel();
     p.style.display = "block";
     render();
-
-    // ✅ 開いてる間は「現在コイン」を追従（0.25sごと）
     startLiveCoins();
   }
 
@@ -485,20 +525,6 @@
     if (!p) return;
     p.style.display = "none";
     stopLiveCoins();
-  }
-
-  let __liveTimer = 0;
-  function startLiveCoins() {
-    stopLiveCoins();
-    __liveTimer = window.setInterval(() => {
-      const p = panelEl || document.getElementById(PANEL_ID);
-      if (!p || p.style.display !== "block") return;
-      render(); // コイン表示の同期目的（軽い）
-    }, 250);
-  }
-  function stopLiveCoins() {
-    if (__liveTimer) clearInterval(__liveTimer);
-    __liveTimer = 0;
   }
 
   function declared(x) { return !!x; }
@@ -512,7 +538,6 @@
     const st = loadPrestige();
     const coinsNow = getCoins(WB);
     const gainStars = calcStarsFromCoins(coinsNow);
-
     const available = Math.max(0, (st.stars - st.spent));
 
     const nextStar = Math.max(1, gainStars + 1);
@@ -651,7 +676,7 @@
       btnPrestige.addEventListener("pointerleave", stopHold);
     }
 
-    function doPrestige() {
+    async function doPrestige() {
       const WB = window.WB || null;
       const st = loadPrestige();
       const coins = getCoins(WB);
@@ -670,8 +695,8 @@
       removeAllBunnies(WB);
       deepWipeLocalStorage();
 
-      // 3) ✅ 転生兎を1体出す（常駐）
-      spawnTennchiOnPrestige(WB);
+      // 3) ✅ tennchi 1体（移動完全同一）を出す
+      await spawnTennchiOnPrestige(WB);
 
       // 4) 通知
       try { WB?.emit?.("prestige", { stars: gain, total: st.stars }); } catch {}
@@ -683,7 +708,7 @@
   }
 
   // Public API
-  waitForWB().then((WB) => {
+  waitForWB().then(async (WB) => {
     const api = {
       open,
       close,
@@ -705,28 +730,25 @@
       config: CFG,
       PERK_MASTER,
 
-      // 追加公開：転生兎
+      // tennchi 操作
       tennchi: {
         isActive: () => isTennchiActive(),
+        ensure: () => ensureTennchiExists(window.WB || null),
         spawn: () => spawnTennchiOnPrestige(window.WB || null),
-        remove: () => {
-          setTennchiActive(false);
-          try { document.getElementById(CFG.TENNCHI.ID)?.remove(); } catch {}
-        },
+        remove: () => removeTennchi(window.WB || null),
       },
     };
 
-    if (WB) {
-      WB.prestige = api;
-    } else {
-      window.WB_PRESTIGE = api;
-    }
+    if (WB) WB.prestige = api;
+    else window.WB_PRESTIGE = api;
 
-    // ✅ すでに転生兎が有効なら起動（リロード後も常駐）
+    // ✅ リロード後も常駐
     try {
-      if (WB && isTennchiActive()) startTennchiLoop(WB);
+      if (WB && isTennchiActive()) {
+        await ensureTennchiExists(WB);
+      }
     } catch {}
 
-    console.log("[prestige] ready v1.3", { LS_PRESTIGE, tennchi: CFG.TENNCHI.ID });
+    console.log("[prestige] ready v1.4", { LS_PRESTIGE, tennchi: CFG.TENNCHI.IMG });
   });
 })();
