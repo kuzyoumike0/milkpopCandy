@@ -1,35 +1,34 @@
-// memoryGarden_fusion.js（V1.1 - 記憶の合成：2つの記憶 → 1つの短編 / 高コスト / messages分離対応）
+// memoryGarden_fusion.js（V1.3 - 記憶の合成：2つの記憶 → 1つの短編 / 高コスト / 結果単体表示つき）
 //
 // ✅ memoryGarden.js を改造せず「後付けパッチ」で実装
 // ✅ 記憶カードに「🧵 合成に使う」ボタンを追加（2つ選択）
+// ✅ data-memid が無い環境でも、DOMに後付けして確実に選べる（V1.2）
 // ✅ 高コストコインで合成（不足なら中断）
 // ✅ 合成結果は新しい記憶として保存（emotion="tsumugi"）
 // ✅ 合成メッセージは memoryGarden_fusion_messages.js（window.MG_FUSION_MESSAGES）から取得
-// ✅ 合成後：単体表示（MG API があれば）
+// ✅ 合成後：結果を必ず単体表示（このJS内モーダル）＋ 可能ならMGの単体表示APIも叩く（V1.3）
 // ✅ emit("memoryGarden:updated") で図鑑/庭UIが更新される
 //
 // 読み込み順：memoryGarden_messages.js → memoryGarden_fusion_messages.js → memoryGarden.js → memoryGarden_fusion.js
 
 (() => {
   "use strict";
-  if (window.__MEMORY_GARDEN_FUSION_V11__) return;
-  window.__MEMORY_GARDEN_FUSION_V11__ = true;
+  if (window.__MEMORY_GARDEN_FUSION_V13__) return;
+  window.__MEMORY_GARDEN_FUSION_V13__ = true;
 
-  const VERSION = "1.1";
+  const VERSION = "1.3";
 
   const CFG = {
     pollMs: 700,
-
-    // ✅ 高コスト（好みで上げてOK）
     costCoin: 25000,
-
-    // 連打ガード
     minActIntervalMs: 450,
+
+    // ✅ 単体表示SE（要求）
+    seUrl: "./assets/messege/messegese.mp3",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
   const $$ = (q, p = document) => Array.from(p.querySelectorAll(q));
-
   function safe(fn) { try { return fn(); } catch { return undefined; } }
   function now() { return Date.now(); }
 
@@ -46,11 +45,9 @@
       "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
     }[c]));
   }
-
   function uid(prefix) {
     return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
   }
-
   function todayStr() {
     const d = new Date();
     const y = d.getFullYear();
@@ -66,7 +63,6 @@
     const WB = window.WB;
     try { if (typeof WB?.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
     try { if (typeof WB?.coins === "number") return Number(WB.coins) || 0; } catch {}
-    // HUD fallback
     try {
       const v = Number(document.getElementById("coinValue")?.textContent || "0");
       if (Number.isFinite(v)) return v;
@@ -80,12 +76,10 @@
 
     const WB = window.WB;
 
-    // 最優先API
     try {
       if (typeof WB?.spendCoin === "function") return !!WB.spendCoin(amount);
     } catch {}
 
-    // 直接減算（WB.coins）
     try {
       if (typeof WB?.coins === "number") {
         if (WB.coins < amount) return false;
@@ -101,17 +95,15 @@
   }
 
   /* =========================
-   * Toast (simple)
+   * Toast
    * ========================= */
   function toast(msg) {
     msg = String(msg || "");
     if (!msg) return;
 
-    // 既存トーストが使えたらそれ優先
     try { if (window.WB?.toast) return window.WB.toast(msg); } catch {}
     try { if (window.ZISSEKI?.toast) return window.ZISSEKI.toast(msg); } catch {}
 
-    // fallback
     try {
       const id = "mgFusionToastV1";
       let el = document.getElementById(id);
@@ -145,23 +137,37 @@
     } catch {}
   }
 
+  /* =========================
+   * SE
+   * ========================= */
   function playSE() {
-    // memoryGarden.js 側に message SE がある前提（無ければ無音）
     const mg = getMG();
-    safe(() => mg?.playMessageSE?.());
+    // もし memoryGarden.js 側に playMessageSE があるならそれ優先（音量連携できる可能性がある）
+    const ok = safe(() => mg?.playMessageSE?.());
+    if (ok !== undefined) return;
+
+    // フォールバック：単体で鳴らす
+    try {
+      if (!window.__mgFusionSe__) {
+        const a = new Audio(CFG.seUrl);
+        a.preload = "auto";
+        a.volume = 1.0;
+        window.__mgFusionSe__ = a;
+      }
+      const a = window.__mgFusionSe__;
+      a.currentTime = 0;
+      a.play().catch(() => {});
+    } catch {}
   }
 
   /* =========================
    * Fusion UI
    * ========================= */
-  const UI = {
-    panel: "mgFusionPanelV1",
-    style: "mgFusionStyleV1",
-  };
+  const UI = { panel: "mgFusionPanelV1", style: "mgFusionStyleV1" };
 
   let lastActAt = 0;
-  let pickA = null; // mem object
-  let pickB = null; // mem object
+  let pickA = null;
+  let pickB = null;
 
   function canAct() {
     const t = now();
@@ -197,8 +203,7 @@
 #${UI.panel} .body{padding:14px;}
 #${UI.panel} .row{display:flex; gap:12px; flex-wrap:wrap;}
 #${UI.panel} .box{
-  flex:1;
-  min-width:260px;
+  flex:1; min-width:260px;
   background:rgba(0,0,0,.04);
   border-radius:16px;
   padding:12px;
@@ -326,21 +331,48 @@
   }
 
   /* =========================
-   * Pick from memory cards (Memory Garden panel)
+   * ★ data-memid 後付け
    * ========================= */
+  function attachMemIdsToGardenCards() {
+    const store = getStore();
+    const panel = document.getElementById("mgPanelV1");
+    if (!store || !panel || panel.style.display !== "block") return;
+
+    const body = panel.querySelector(".body");
+    if (!body) return;
+
+    const cards = $$(".mem", body);
+    if (!cards.length) return;
+
+    const list = (store.memories || []).slice(0, 80);
+    const n = Math.min(cards.length, list.length);
+
+    for (let i = 0; i < n; i++) {
+      const el = cards[i];
+      const mem = list[i];
+      if (!mem?.id) continue;
+      if (!el.getAttribute("data-memid")) el.setAttribute("data-memid", mem.id);
+    }
+  }
+
   function findMemoryCardsInGardenPanel() {
     const panel = document.getElementById("mgPanelV1");
     if (!panel || panel.style.display !== "block") return [];
     const body = panel.querySelector(".body");
     if (!body) return [];
-    return $$(`.mem[data-memid]`, body);
+
+    attachMemIdsToGardenCards();
+
+    const a = $$(`.mem[data-memid]`, body);
+    if (a.length) return a;
+
+    return $$(`.mem`, body);
   }
 
   function ensureFusionButtonOnCard(card) {
     if (!card) return false;
     if (card.querySelector('[data-act="fusionPick"]')) return true;
 
-    // btnRowがあればそこへ、なければ作る
     let row = card.querySelector(".btnRow");
     if (!row) {
       row = document.createElement("div");
@@ -362,14 +394,23 @@
       e.preventDefault(); e.stopPropagation();
       if (!canAct()) return;
 
-      const id = card.getAttribute("data-memid");
       const store = getStore();
-      if (!id || !store) return;
+      if (!store) return;
 
-      const mem = (store.memories || []).find(m => m && m.id === id);
+      let mem = null;
+      const id = card.getAttribute("data-memid");
+      if (id) mem = (store.memories || []).find(m => m && m.id === id) || null;
+
+      if (!mem) {
+        const panel = document.getElementById("mgPanelV1");
+        const body = panel?.querySelector?.(".body");
+        const cards = body ? $$(".mem", body) : [];
+        const idx = cards.indexOf(card);
+        if (idx >= 0) mem = (store.memories || [])[idx] || null;
+      }
+
       if (!mem) return;
 
-      // 同じのを2回選べない
       if (pickA?.id === mem.id || pickB?.id === mem.id) {
         toast("同じ記憶は2回使えないよ");
         return;
@@ -391,7 +432,6 @@
         return;
       }
 
-      // 3回目以降は押したやつをBとして差し替え
       pickB = mem;
       playSE();
       toast("2つ目を入れ替えた");
@@ -403,15 +443,121 @@
   }
 
   /* =========================
-   * Fused message picker (from fusion_messages.js)
+   * Fusion message picker
    * ========================= */
   function pickFusionMessage() {
     const pool = window.MG_FUSION_MESSAGES?.tsumugi;
     if (Array.isArray(pool) && pool.length) {
       return String(pool[Math.floor(Math.random() * pool.length)] || "").trim();
     }
-    // フォールバック（未読込でも落ちない）
     return "ほどいた記憶を、結び直す。\n二つ分の静けさが残った。\nそれを短編と呼ぶ。";
+  }
+
+  /* =========================
+   * ✅ 合成結果の単体表示（このJS内）
+   * ========================= */
+  const VIEW = { panel: "mgFusionViewV1", style: "mgFusionViewStyleV1" };
+
+  function ensureViewStyle() {
+    if (document.getElementById(VIEW.style)) return;
+    const s = document.createElement("style");
+    s.id = VIEW.style;
+    s.textContent = `
+#${VIEW.panel}{position:fixed; inset:0; z-index:2147483647; display:none; user-select:none;}
+#${VIEW.panel} .bg{position:absolute; inset:0; background:rgba(0,0,0,.45);}
+#${VIEW.panel} .card{
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(680px, 92vw);
+  background:rgba(255,255,255,.98);
+  border-radius:18px;
+  box-shadow:0 22px 70px rgba(0,0,0,.28);
+  overflow:hidden;
+}
+#${VIEW.panel} .head{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 14px; border-bottom:1px solid rgba(0,0,0,.06);
+}
+#${VIEW.panel} .title{font-weight:1100; display:flex; align-items:center; gap:10px;}
+#${VIEW.panel} .close{
+  width:34px; height:34px; border:none; border-radius:999px;
+  background:rgba(0,0,0,.06); font-weight:1100; cursor:pointer;
+}
+#${VIEW.panel} .body{padding:14px 14px 16px;}
+#${VIEW.panel} .meta{font-weight:900; opacity:.7; font-size:12px; margin-bottom:10px;}
+#${VIEW.panel} .txt{font-weight:1000; white-space:pre-line; line-height:1.55;}
+#${VIEW.panel} .foot{
+  padding:12px 14px 14px;
+  display:flex; gap:10px; align-items:center; justify-content:flex-end;
+  border-top:1px solid rgba(0,0,0,.06);
+}
+#${VIEW.panel} .btn{
+  border:none; border-radius:12px; padding:10px 12px;
+  font-weight:1000; cursor:pointer; background:rgba(0,0,0,.06);
+}
+#${VIEW.panel} .btn.primary{background:rgba(255,214,231,.75);}
+`;
+    document.head.appendChild(s);
+  }
+
+  function ensureViewPanel() {
+    ensureViewStyle();
+    let p = document.getElementById(VIEW.panel);
+    if (p) return p;
+
+    p = document.createElement("div");
+    p.id = VIEW.panel;
+    p.innerHTML = `
+      <div class="bg"></div>
+      <div class="card" role="dialog" aria-modal="true">
+        <div class="head">
+          <div class="title">🧵 合成された短編</div>
+          <button class="close" type="button">×</button>
+        </div>
+        <div class="body">
+          <div class="meta"></div>
+          <div class="txt"></div>
+        </div>
+        <div class="foot">
+          <button class="btn" data-act="close" type="button">閉じる</button>
+          <button class="btn primary" data-act="openGarden" type="button">記憶の庭を開く</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(p);
+
+    $(".bg", p).addEventListener("click", (e) => { e.preventDefault(); closeView(); });
+    $(".close", p).addEventListener("click", (e) => { e.preventDefault(); closeView(); });
+    $(".card", p).addEventListener("click", (e) => e.stopPropagation());
+    p.querySelector('[data-act="close"]').addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation(); closeView();
+    });
+    p.querySelector('[data-act="openGarden"]').addEventListener("click", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      closeView();
+      // MGのUIがあるなら記憶タブへ誘導
+      const mg = getMG();
+      safe(() => mg?.open?.("mem"));
+      safe(() => window.WB?.zukan?.open?.("memory"));
+    });
+
+    return p;
+  }
+
+  function openView(mem) {
+    const p = ensureViewPanel();
+    const meta = $(".meta", p);
+    const txt = $(".txt", p);
+
+    meta.textContent = `emotion: ${mem?.emotion || "tsumugi"} / ${mem?.date || ""}`;
+    txt.textContent = String(mem?.text || "");
+
+    p.style.display = "block";
+    playSE();
+  }
+
+  function closeView() {
+    const p = document.getElementById(VIEW.panel);
+    if (p) p.style.display = "none";
   }
 
   /* =========================
@@ -428,7 +574,6 @@
       return;
     }
 
-    // コストチェック
     const cost = Math.floor(Number(CFG.costCoin) || 0);
     const coins = getCoins();
     if (coins < cost) {
@@ -436,7 +581,6 @@
       openFusion();
       return;
     }
-
     if (!spendCoins(cost)) {
       toast(`コイン不足（必要：${cost.toLocaleString()}🪙）`);
       openFusion();
@@ -460,32 +604,28 @@
     store.memories = store.memories || [];
     store.memories.unshift(memObj);
 
-    // 選択リセット
     pickA = null;
     pickB = null;
 
-    // 更新通知
     safe(() => window.WB?.emit?.("memoryGarden:updated", { fusion: true }));
     toast("🧵 記憶を紡いだ（新しい短編が残った）");
 
-    // 単体表示（MGがあれば）
+    // ✅ まずこのJS内の単体表示で「確実に見せる」
+    openView(memObj);
+
+    // ✅ もしMG側に単体表示APIがあるなら、そっちでも表示してOK（好みでOFFにもできる）
     safe(() => mg?.showById?.(memObj.id));
 
+    // 合成パネルも更新（任意：開いたままにする）
     openFusion();
   }
 
-  /* =========================
-   * Optional: label hint
-   * ========================= */
   function patchTsUmugiLabel() {
     const store = getStore();
     if (!store) return;
     store.__fusionLabel = store.__fusionLabel || { tsumugi: "🧵 つむぎ" };
   }
 
-  /* =========================
-   * Main loop
-   * ========================= */
   function tick() {
     const mg = getMG();
     const store = getStore();
@@ -493,13 +633,22 @@
 
     patchTsUmugiLabel();
 
-    // 記憶の庭パネルの記憶カードへボタン後付け
     const cards = findMemoryCardsInGardenPanel();
     cards.forEach(ensureFusionButtonOnCard);
   }
 
+  // 外部から呼びたい時用（デバッグ/拡張）
+  window.WB = window.WB || {};
+  window.WB.memoryFusion = {
+    openView,
+    closeView,
+    openFusion,
+    closeFusion,
+    version: VERSION,
+  };
+
   setInterval(tick, CFG.pollMs);
   window.addEventListener("load", () => setTimeout(tick, 0));
 
-  console.log(`[memoryGarden_fusion] loaded v${VERSION} (use fusion_messages=${!!window.MG_FUSION_MESSAGES})`);
+  console.log(`[memoryGarden_fusion] loaded v${VERSION} (show result modal=ON)`);
 })();
