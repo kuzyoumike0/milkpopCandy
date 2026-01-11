@@ -1,11 +1,13 @@
-// memoryGarden.js（V1.1.3 - ✅記憶表示時にSE再生 + messages分離 + 実績Toastと被らない専用Toast + 出やすさ調整）
+// memoryGarden.js（V1.1.4 - ✅記憶表示SE + ✅単体表示 + ✅育ち切り時に本文を自動表示(キュー) + messages分離 + 実績Toastと被らない専用Toast）
+//
 // ✅ localStorage永続化
 // ✅ WBイベントから「感情の種」を自動生成
 // ✅ 放置で成長 → 完了時に3行小説「記憶」ログ生成（messages分離）
-// ✅ ゲームメニューに「🌱 記憶の庭」を追加
+// ✅ ゲームメニューに「🌱 記憶の庭」＋「📖 最新の記憶」を追加
 // ✅ 図鑑(zukan)に「記憶」タブを後付け（パッチ）
 // ✅ 実績(zisseki)トーストと被らない（専用トースト＆キュー）
 // ✅ 記憶メッセージを表示するときに assets/messege/messegese.mp3 を鳴らす
+// ✅ 育ち切った瞬間（メッセージ解除）に、3行本文を単体ポップアップ表示（連続はキューで順送り）
 //
 // ★調整（あなた指定）
 // - 放置種：5分
@@ -19,10 +21,10 @@
 
 (() => {
   "use strict";
-  if (window.__MEMORY_GARDEN_V113__) return;
-  window.__MEMORY_GARDEN_V113__ = true;
+  if (window.__MEMORY_GARDEN_V114__) return;
+  window.__MEMORY_GARDEN_V114__ = true;
 
-  const VERSION = "1.1.3";
+  const VERSION = "1.1.4";
   const LS_KEY = "milkpop_memory_garden_v1";
 
   const CFG = {
@@ -65,6 +67,13 @@
       src: "./assets/messege/messegese.mp3",
       volume: 0.95,
       minIntervalMs: 120, // 連続表示でも音が詰まらない保険
+    },
+
+    // ✅ 育ち切り（記憶生成）時：本文を自動単体表示
+    single: {
+      autoShowOnComplete: true, // ✅ 育ち切ったら表示
+      autoCloseMs: 5200,        // ✅ 自動で閉じる（0で無効）
+      queueGapMs: 900,          // ✅ 連続生成時の間隔
     },
   };
 
@@ -139,6 +148,12 @@
     saveStore();
   }
 
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    }[c]));
+  }
+
   /* =========================
    * Message SE（記憶表示時）
    * - autoplay制限があるので失敗しても無視
@@ -176,94 +191,6 @@
   }
 
   /* =========================
-   * Seeds / Memories
-   * ========================= */
-  function addSeed(emotion, meta = {}) {
-    const e = String(emotion || "");
-    if (!EMO[e]) return;
-
-    const t = Date.now();
-    if (t - (store.stats.lastSeedAt || 0) < CFG.minSeedIntervalMs) return;
-
-    while (store.seeds.length >= CFG.maxSeeds) store.seeds.shift();
-
-    store.seeds.push({
-      id: uid("seed"),
-      emotion: e,
-      growth: 0,
-      bornAt: t,
-      related: {
-        bunnyIds: meta.bunnyIds || [],
-        actions: meta.actions || [],
-        note: meta.note || "",
-      }
-    });
-
-    store.stats.lastSeedAt = t;
-    saveStore();
-    toast(`🌱 ${EMO[e].name} の種が芽吹いた`);
-  }
-
-  function pick3LineNovel(emotion) {
-    const arr = MSG[emotion] || ["……\n……\n……"];
-    const s = arr[Math.floor(Math.random() * arr.length)] || arr[0];
-
-    // 念のため3行化（壊れてても3行に矯正）
-    const lines = String(s).split("\n").slice(0, 3);
-    while (lines.length < 3) lines.push("……");
-    return lines.join("\n");
-  }
-
-  function completeSeed(seed) {
-    const e = seed.emotion;
-    const text = pick3LineNovel(e);
-
-    store.memories.unshift({
-      id: uid("mem"),
-      emotion: e,
-      text,
-      date: nowDateStr(),
-      bornAt: seed.bornAt,
-      doneAt: Date.now(),
-    });
-
-    store.seeds = store.seeds.filter(s => s.id !== seed.id);
-    saveStore();
-
-    toast(`📖 記憶が残った：${EMO[e].name}`);
-    try { window.WB?.emit?.("memoryGarden:updated", {}); } catch {}
-  }
-
-  /* =========================
-   * Growth tick
-   * ========================= */
-  function growTick() {
-    const t = Date.now();
-    const last = Number(store.stats.lastTick || t);
-    const dt = Math.max(0, t - last);
-    store.stats.lastTick = t;
-
-    for (const s of store.seeds) {
-      const hours = Number(CFG.growHours[s.emotion] || 8);
-      const needMs = Math.max(1, hours * 60 * 60 * 1000);
-      s.growth = clamp01((Number(s.growth) || 0) + (dt / needMs));
-    }
-
-    const done = store.seeds.filter(s => (Number(s.growth) || 0) >= 1);
-
-    // ✅ 完了時：1tickで最大4つまで
-    for (const s of done.slice(0, 4)) completeSeed(s);
-
-    const idle = t - (Number(store.stats.lastActionAt || t));
-    if (idle >= CFG.idleSeedAfterMs) {
-      addSeed("sabishisa", { note: "idle" });
-      store.stats.lastActionAt = t;
-    }
-
-    saveStore();
-  }
-
-  /* =========================
    * Toast (MemoryGarden専用：実績と被らない)
    * - WB.toast / ZISSEKI.toast は絶対使わない
    * - 右上固定 + キュー + 他トースト検知で少し遅延
@@ -284,7 +211,7 @@
     if (!msg) { __mgToastBusy = false; return; }
 
     const maybeOtherToast =
-      document.querySelector("#zissekiToast, .zissekiToast, .toast, .wbToast") ||
+      document.querySelector("#zissekiToast, .zissekiToast, .toast, .wbToast, .tabidatiToast") ||
       null;
 
     const delay = maybeOtherToast ? CFG.toast.delayIfOtherToastMs : 0;
@@ -335,10 +262,258 @@
   }
 
   /* =========================
-   * UI Panel
+   * Seeds / Memories
+   * ========================= */
+  function addSeed(emotion, meta = {}) {
+    const e = String(emotion || "");
+    if (!EMO[e]) return;
+
+    const t = Date.now();
+    if (t - (store.stats.lastSeedAt || 0) < CFG.minSeedIntervalMs) return;
+
+    while (store.seeds.length >= CFG.maxSeeds) store.seeds.shift();
+
+    store.seeds.push({
+      id: uid("seed"),
+      emotion: e,
+      growth: 0,
+      bornAt: t,
+      related: {
+        bunnyIds: meta.bunnyIds || [],
+        actions: meta.actions || [],
+        note: meta.note || "",
+      }
+    });
+
+    store.stats.lastSeedAt = t;
+    saveStore();
+    toast(`🌱 ${EMO[e].name} の種が芽吹いた`);
+  }
+
+  function pick3LineNovel(emotion) {
+    const arr = MSG[emotion] || ["……\n……\n……"];
+    const s = arr[Math.floor(Math.random() * arr.length)] || arr[0];
+
+    // 念のため3行化（壊れてても3行に矯正）
+    const lines = String(s).split("\n").slice(0, 3);
+    while (lines.length < 3) lines.push("……");
+    return lines.join("\n");
+  }
+
+  /* =========================
+   * ✅ Single Memory Popup（単体表示）
+   * ========================= */
+  const SINGLE = { panel: "mgSinglePanelV1", style: "mgSingleStyleV1" };
+
+  function ensureSingleStyle() {
+    if (document.getElementById(SINGLE.style)) return;
+    const s = document.createElement("style");
+    s.id = SINGLE.style;
+    s.textContent = `
+#${SINGLE.panel}{position:fixed; inset:0; z-index:2147483647; display:none; user-select:none;}
+#${SINGLE.panel} .bg{position:absolute; inset:0; background:rgba(0,0,0,.42);}
+#${SINGLE.panel} .card{
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(560px, 92vw);
+  background:rgba(255,255,255,.98);
+  border-radius:18px;
+  box-shadow:0 22px 70px rgba(0,0,0,.28);
+  overflow:hidden;
+}
+#${SINGLE.panel} .head{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 14px; border-bottom:1px solid rgba(0,0,0,.06);
+}
+#${SINGLE.panel} .title{
+  font-weight:1000; letter-spacing:.02em; display:flex; gap:10px; align-items:center;
+}
+#${SINGLE.panel} .close{
+  width:34px; height:34px; border:none; border-radius:999px;
+  background:rgba(0,0,0,.06); font-weight:1000; cursor:pointer;
+}
+#${SINGLE.panel} .body{ padding:14px 14px 16px; }
+#${SINGLE.panel} .meta{
+  display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+  font-weight:900; opacity:.7; font-size:12px; margin-bottom:10px;
+}
+#${SINGLE.panel} .txt{
+  font-weight:950; white-space:pre-line; line-height:1.55;
+  background:rgba(255,214,231,.20);
+  border-radius:14px;
+  padding:12px;
+}
+#${SINGLE.panel} .hint{
+  margin-top:10px;
+  font-weight:900; font-size:12px; opacity:.65;
+}
+`;
+    document.head.appendChild(s);
+  }
+
+  function ensureSinglePanel() {
+    ensureSingleStyle();
+    let p = document.getElementById(SINGLE.panel);
+    if (p) return p;
+
+    p = document.createElement("div");
+    p.id = SINGLE.panel;
+    p.innerHTML = `
+      <div class="bg"></div>
+      <div class="card" role="dialog" aria-modal="true">
+        <div class="head">
+          <div class="title">📖 記憶</div>
+          <button class="close" type="button">×</button>
+        </div>
+        <div class="body"></div>
+      </div>
+    `;
+    document.body.appendChild(p);
+
+    p.querySelector(".bg").addEventListener("click", (e) => { e.preventDefault(); closeSingle(); });
+    p.querySelector(".close").addEventListener("click", (e) => { e.preventDefault(); closeSingle(); });
+    p.querySelector(".card").addEventListener("click", (e) => e.stopPropagation());
+
+    return p;
+  }
+
+  function closeSingle() {
+    const p = document.getElementById(SINGLE.panel);
+    if (p) p.style.display = "none";
+  }
+
+  function openSingleMemory(mem) {
+    if (!mem) {
+      toast("まだ記憶がありません");
+      return;
+    }
+
+    // ✅ 記憶表示SE
+    playMessageSE();
+
+    const p = ensureSinglePanel();
+    const body = p.querySelector(".body");
+    const emo = EMO[mem.emotion] || { icon:"?", name:"?" };
+
+    const born = mem.bornAt ? new Date(mem.bornAt).toLocaleString() : "";
+    const done = mem.doneAt ? new Date(mem.doneAt).toLocaleString() : "";
+    const date = mem.date || "";
+
+    body.innerHTML = `
+      <div class="meta">
+        <div>${escapeHtml(`${emo.icon} ${emo.name}`)}</div>
+        <div>${escapeHtml(date)}</div>
+      </div>
+      <div class="txt">${escapeHtml(mem.text || "")}</div>
+      <div class="hint">芽吹き：${escapeHtml(born)}　/　記憶化：${escapeHtml(done)}</div>
+    `;
+
+    p.style.display = "block";
+
+    // ✅ 連続表示でも自動クローズが暴れないように
+    try {
+      clearTimeout(openSingleMemory.__autoCloseT);
+      const ac = Number(CFG.single?.autoCloseMs || 0);
+      if (ac > 0) {
+        openSingleMemory.__autoCloseT = setTimeout(() => { try { closeSingle(); } catch {} }, ac);
+      }
+    } catch {}
+  }
+
+  function showLatestMemory() {
+    const m = store.memories && store.memories.length ? store.memories[0] : null;
+    openSingleMemory(m);
+  }
+
+  function showMemoryById(id) {
+    const m = (store.memories || []).find(x => x && x.id === id);
+    openSingleMemory(m);
+  }
+
+  /* =========================
+   * ✅ 育ち切り（メッセージ解除）時：本文を自動で単体表示（キュー）
+   * ========================= */
+  const __mgAutoPopQueue = [];
+  let __mgAutoPopBusy = false;
+
+  function enqueueAutoPopup(mem) {
+    if (!mem) return;
+    if (!CFG.single?.autoShowOnComplete) return;
+
+    __mgAutoPopQueue.push(mem);
+    if (__mgAutoPopBusy) return;
+    __mgAutoPopBusy = true;
+    pumpAutoPopup();
+  }
+
+  function pumpAutoPopup() {
+    const mem = __mgAutoPopQueue.shift();
+    if (!mem) { __mgAutoPopBusy = false; return; }
+
+    try { openSingleMemory(mem); } catch {}
+
+    setTimeout(() => pumpAutoPopup(), Number(CFG.single?.queueGapMs || 900));
+  }
+
+  function completeSeed(seed) {
+    const e = seed.emotion;
+    const text = pick3LineNovel(e);
+
+    const memObj = {
+      id: uid("mem"),
+      emotion: e,
+      text,
+      date: nowDateStr(),
+      bornAt: seed.bornAt,
+      doneAt: Date.now(),
+    };
+
+    store.memories.unshift(memObj);
+    store.seeds = store.seeds.filter(s => s.id !== seed.id);
+    saveStore();
+
+    toast(`📖 記憶が残った：${EMO[e].name}`);
+
+    // ✅ ★育ち切った瞬間（メッセージ解除）に本文を表示
+    enqueueAutoPopup(memObj);
+
+    try { window.WB?.emit?.("memoryGarden:updated", {}); } catch {}
+  }
+
+  /* =========================
+   * Growth tick
+   * ========================= */
+  function growTick() {
+    const t = Date.now();
+    const last = Number(store.stats.lastTick || t);
+    const dt = Math.max(0, t - last);
+    store.stats.lastTick = t;
+
+    for (const s of store.seeds) {
+      const hours = Number(CFG.growHours[s.emotion] || 8);
+      const needMs = Math.max(1, hours * 60 * 60 * 1000);
+      s.growth = clamp01((Number(s.growth) || 0) + (dt / needMs));
+    }
+
+    const done = store.seeds.filter(s => (Number(s.growth) || 0) >= 1);
+
+    // ✅ 完了時：1tickで最大4つまで
+    for (const s of done.slice(0, 4)) completeSeed(s);
+
+    const idle = t - (Number(store.stats.lastActionAt || t));
+    if (idle >= CFG.idleSeedAfterMs) {
+      addSeed("sabishisa", { note: "idle" });
+      store.stats.lastActionAt = t;
+    }
+
+    saveStore();
+  }
+
+  /* =========================
+   * UI Panel（種/記憶一覧）
    * ========================= */
   const UI = { panel: "mgPanelV1", style: "mgStyleV1" };
   const $ = (q, p = document) => p.querySelector(q);
+  let currentTab = "seed";
 
   function ensureStyle() {
     if (document.getElementById(UI.style)) return;
@@ -389,16 +564,13 @@
 #${UI.panel} .mem .top{display:flex; justify-content:space-between; gap:10px; font-weight:1000; opacity:.9;}
 #${UI.panel} .mem .txt{font-weight:950; white-space:pre-line; line-height:1.45;}
 #${UI.panel} .hint{font-weight:900; font-size:12px; opacity:.65; padding:6px 2px 0;}
+#${UI.panel} .mem .btnRow{display:flex; gap:10px; margin-top:8px;}
+#${UI.panel} .mem .btn{
+  border:none; border-radius:12px; padding:8px 10px;
+  font-weight:1000; background:rgba(0,0,0,.06); cursor:pointer;
+}
 `;
     document.head.appendChild(s);
-  }
-
-  let currentTab = "seed";
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({
-      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-    }[c]));
   }
 
   function buildPanel() {
@@ -431,7 +603,6 @@
 
       p.querySelectorAll(".tab").forEach((b) => {
         b.addEventListener("click", () => {
-          // ✅ タブ切り替えも「記憶表示」扱い（memのときSE）
           p.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
           b.classList.add("on");
           currentTab = b.dataset.tab || "seed";
@@ -461,7 +632,7 @@
               <div class="desc">小さな気配が、ここにいる。</div>
               <div class="bar"><i style="width:${p}%;"></i></div>
               <div class="meta">${p}%</div>
-              <div class="hint">芽吹き：${born}</div>
+              <div class="hint">芽吹き：${escapeHtml(born)}</div>
             </div>
           `;
         }).join("")}
@@ -476,7 +647,7 @@
       return;
     }
 
-    // ✅ 記憶一覧を描画する＝「記憶メッセージを表示する」なのでSE
+    // ✅ 記憶一覧の表示＝記憶メッセージ表示
     playMessageSE();
 
     body.innerHTML = `
@@ -484,17 +655,33 @@
         ${list.map(m=>{
           const emo = EMO[m.emotion] || {icon:"?", name:"?"};
           return `
-            <div class="mem">
+            <div class="mem" data-memid="${escapeHtml(m.id||"")}">
               <div class="top">
                 <div>${emo.icon} ${emo.name}</div>
                 <div>${escapeHtml(m.date||"")}</div>
               </div>
               <div class="txt">${escapeHtml(m.text||"")}</div>
+              <div class="btnRow">
+                <button class="btn" type="button" data-act="single">単体で読む</button>
+              </div>
             </div>
           `;
         }).join("")}
       </div>
     `;
+
+    // 「単体で読む」クリック
+    try {
+      body.querySelectorAll('.mem .btn[data-act="single"]').forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const card = btn.closest(".mem");
+          const id = card?.getAttribute("data-memid");
+          if (id) showMemoryById(id);
+        });
+      });
+    } catch {}
   }
 
   function render() {
@@ -533,20 +720,38 @@
     if (!panel) return false;
     const list = panel.querySelector(".list");
     if (!list) return false;
-    if (list.querySelector('[data-act="memoryGarden"]')) return true;
 
-    const z = list.querySelector('[data-act="zukan"]');
-    const btn = document.createElement("button");
-    btn.className = "item";
-    btn.setAttribute("data-act", "memoryGarden");
-    btn.textContent = "🌱 記憶の庭";
-    btn.addEventListener("click", () => {
-      panel.style.display = "none";
-      open("seed");
-    });
+    // ① 記憶の庭
+    if (!list.querySelector('[data-act="memoryGarden"]')) {
+      const z = list.querySelector('[data-act="zukan"]');
+      const btn = document.createElement("button");
+      btn.className = "item";
+      btn.setAttribute("data-act", "memoryGarden");
+      btn.textContent = "🌱 記憶の庭";
+      btn.addEventListener("click", () => {
+        panel.style.display = "none";
+        open("seed");
+      });
 
-    if (z && z.parentNode) z.parentNode.insertBefore(btn, z.nextSibling);
-    else list.appendChild(btn);
+      if (z && z.parentNode) z.parentNode.insertBefore(btn, z.nextSibling);
+      else list.appendChild(btn);
+    }
+
+    // ② 最新の記憶（単体表示）
+    if (!list.querySelector('[data-act="memoryGardenLatest"]')) {
+      const mg = list.querySelector('[data-act="memoryGarden"]');
+      const btn2 = document.createElement("button");
+      btn2.className = "item";
+      btn2.setAttribute("data-act", "memoryGardenLatest");
+      btn2.textContent = "📖 最新の記憶";
+      btn2.addEventListener("click", () => {
+        panel.style.display = "none";
+        showLatestMemory();
+      });
+
+      if (mg && mg.parentNode) mg.parentNode.insertBefore(btn2, mg.nextSibling);
+      else list.appendChild(btn2);
+    }
 
     return true;
   }
@@ -579,7 +784,6 @@
         b.addEventListener("click", () => {
           p.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
           b.classList.add("on");
-          // ✅ 図鑑側も「記憶表示」なのでSE
           playMessageSE();
           renderZukanMemory(body);
         });
@@ -606,11 +810,12 @@
             ※ 記憶は消えません（見送って残るログ）
           </div>
         </div>
+
         <div style="display:flex; flex-direction:column; gap:12px;">
           ${list.map(m=>{
             const emo = EMO[m.emotion] || {icon:"?", name:"?"};
             return `
-              <div style="
+              <div data-memid="${escapeHtml(m.id||"")}" style="
                 background:rgba(255,255,255,.94);
                 border-radius:14px;
                 padding:12px;
@@ -624,11 +829,30 @@
                 <div style="font-weight:950; white-space:pre-line; line-height:1.45;">
                   ${escapeHtml(m.text||"")}
                 </div>
+                <div style="display:flex; gap:10px; margin-top:8px;">
+                  <button type="button" data-act="single" style="
+                    border:none; border-radius:12px; padding:8px 10px;
+                    font-weight:1000; background:rgba(0,0,0,.06); cursor:pointer;
+                  ">単体で読む</button>
+                </div>
               </div>
             `;
           }).join("")}
         </div>
       `;
+
+      // 図鑑側の「単体で読む」
+      try {
+        body.querySelectorAll('button[data-act="single"]').forEach((btn) => {
+          btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const card = btn.closest("[data-memid]");
+            const id = card?.getAttribute("data-memid");
+            if (id) showMemoryById(id);
+          });
+        });
+      } catch {}
     }
 
     WB.zukan.open = function(tab = "bunny") {
@@ -718,7 +942,17 @@
    * ========================= */
   function exposeAPI() {
     const WB = window.WB || (window.WB = {});
-    WB.memoryGarden = { open, close, addSeed, store, version: VERSION };
+    WB.memoryGarden = {
+      open, close, addSeed, store, version: VERSION,
+
+      // ✅ 単体表示API
+      showLatest: showLatestMemory,
+      showById: showMemoryById,
+      closeSingle,
+
+      // ✅ SE（外から鳴らしたい時用）
+      playMessageSE,
+    };
   }
 
   /* =========================
