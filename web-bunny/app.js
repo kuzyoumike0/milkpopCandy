@@ -1,6 +1,6 @@
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.4 (coinChanged emit + prestige gauge fix)", Date.now());
+  console.log("[app.js] LOADED v16.7.3p (anti-overlay 유지 + coinChanged emit)", Date.now());
 
   /* =========================
    * Assets / Defs
@@ -92,9 +92,9 @@
    * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
    * ========================= */
   (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1674")) return;
+    if (document.getElementById("wbAppCoreCssV1673")) return;
     const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1674";
+    st.id = "wbAppCoreCssV1673";
     st.textContent = `
       #field{
         position:fixed !important;
@@ -131,7 +131,7 @@
         height:${WRAP_H}px !important;
         will-change: transform;
         touch-action: manipulation;
-        pointer-events:auto !important;
+        pointer-events:auto !important; /* ✅ ここが超重要：wrapがイベント受ける */
       }
       .bunnyWrap .bunny{
         width:100% !important;
@@ -282,6 +282,7 @@
     if (audioUnlocked) return;
     audioUnlocked = true;
 
+    // ✅ SE unlock
     try {
       sePoyo.muted = true;
       sePoyo.currentTime = 0;
@@ -290,6 +291,7 @@
         .catch(() => (sePoyo.muted = false));
     } catch {}
 
+    // ✅ BGMもユーザー操作内で開始を試す（ブロック対策）
     try {
       window.WB?.bgm?.start?.();
       window.WB?.bgm?.play?.();
@@ -323,14 +325,14 @@
 
   function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
 
-  // ✅ ここが重要：HUD更新時に coinChanged を必ず emit（prestige が拾う）
+  // ✅ v16.7.3の仕様を維持しつつ「転生ゲージ用イベント」を追加
   function updateHud() {
     coinValueEl.textContent = String(coins);
 
-    // 既存：HUD更新
+    // 既存
     emit("hudUpdated", { coins });
 
-    // ✅ 追加：prestige 用の統一イベント
+    // ✅ 追加：prestigeが購読する統一イベント（ゲージが増えない問題の根治）
     emit("coinChanged", coins);
     try { window.dispatchEvent(new CustomEvent("wb:coinChanged", { detail: { coins } })); } catch {}
     try { window.dispatchEvent(new CustomEvent("milkpop:coinChanged", { detail: { coins } })); } catch {}
@@ -450,6 +452,7 @@
       this.evolveIfNeeded(true);
       this.syncSprite();
 
+      // ✅ クリックでコイン（“確実”版）
       const tap = (e) => {
         try { e?.preventDefault?.(); } catch {}
         try { e?.stopPropagation?.(); } catch {}
@@ -688,7 +691,11 @@
     shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
 
     get coins() { return coins; },
-    set coins(v) { coins = Math.max(0, Math.floor(Number(v) || 0)); saveCoins(); updateHud(); },
+    set coins(v) {
+      coins = Math.max(0, Math.floor(Number(v) || 0));
+      saveCoins();
+      updateHud(); // ✅ coinChangedも出る
+    },
 
     getCoin: () => coins,
     spendCoin: (n) => {
@@ -696,7 +703,8 @@
       if (n <= 0) return true;
       if (coins < n) return false;
       coins -= n;
-      saveCoins(); updateHud();
+      saveCoins();
+      updateHud(); // ✅ coinChangedも出る
       return true;
     },
 
@@ -760,7 +768,7 @@
     await initBunnies();
     scheduleRescueAll();
 
-    updateHud(); // ✅ ここで coinChanged が出る
+    updateHud(); // ✅ 起動直後も coinChanged を出す（prestige初期同期）
     emit("bunnyCountChanged", { count: bunnies.length });
 
     requestAnimationFrame(tick);
