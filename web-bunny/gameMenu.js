@@ -1,10 +1,7 @@
-// gameMenu.js（非module）V2.6
-// ✅ 追加：🔥 完全リセット（牧場を完全初期化）
-// - localStorage 全消去
-// - IndexedDB 全削除
-// - ServiceWorker 解除
-// - ページ強制リロード
-// ⚠️ 取り消し不可（長押し1.5秒）
+// gameMenu.js（非module）V2.7
+// ✅ 通常メニュー完全復活
+// ✅ 🔥 完全リセット（localStorage / IndexedDB / SW / reload）
+// ⚠️ reset は 1.5秒長押し必須
 
 (() => {
   "use strict";
@@ -15,9 +12,8 @@
     style: "gameMenuStyleV1",
   };
 
-  const $ = (q, p = document) => p.querySelector(q);
-
   const HOLD_RESET_MS = 1500;
+  const $ = (q, p = document) => p.querySelector(q);
 
   /* =========================
    * Style
@@ -66,11 +62,10 @@
   cursor:pointer;
   text-align:left;
 }
-#${UI.panel} .item.danger{ background:#ffe0e0; }
 #${UI.panel} .item:hover{ background:rgba(0,0,0,.06); }
-#${UI.panel} .hold{
-  position:relative; overflow:hidden;
-}
+#${UI.panel} .item.danger{ background:#ffe0e0; }
+
+#${UI.panel} .hold{ position:relative; overflow:hidden; }
 #${UI.panel} .hold .fill{
   position:absolute; inset:0;
   width:0%;
@@ -108,7 +103,6 @@
           <button class="item" data-act="bgm">🎵 BGM</button>
           <button class="item" data-act="prestige">🌟 転生</button>
 
-          <!-- 🔥 完全リセット -->
           <button class="item danger hold" data-act="reset">
             🔥 牧場を完全リセット（長押し）
             <i class="fill"></i>
@@ -122,36 +116,41 @@
   }
 
   /* =========================
-   * Complete Reset
+   * Actions
+   * ========================= */
+  function handleAction(act) {
+    try {
+      if (act === "shop")      return window.WB?.shop?.open?.();
+      if (act === "itemplace")return window.ITEMPLACE?.open?.();
+      if (act === "zukan")     return window.WB?.zukan?.open?.("bunny");
+      if (act === "bgm")       return window.WB?.bgm?.openModal?.();
+      if (act === "prestige")  return window.WB?.prestige?.open?.();
+    } catch (e) {
+      console.warn("[gameMenu] action failed:", act, e);
+    }
+  }
+
+  /* =========================
+   * 🔥 Complete Reset
    * ========================= */
   async function completeReset() {
-    console.warn("[RESET] full reset start");
+    console.warn("[RESET] FULL RESET");
 
-    // 1) WBに止めさせる
-    try { window.WB?.mirrorballDance?.stop?.(); } catch {}
-    try { window.WB?.bgm?.stop?.(); } catch {}
     try { window.WB?.emit?.("core:reset_all"); } catch {}
-
-    // 2) localStorage 全消去
     try { localStorage.clear(); } catch {}
 
-    // 3) IndexedDB 全削除
-    if (window.indexedDB?.databases) {
+    if (indexedDB?.databases) {
       const dbs = await indexedDB.databases();
       for (const db of dbs) {
-        if (db.name) {
-          try { indexedDB.deleteDatabase(db.name); } catch {}
-        }
+        if (db.name) indexedDB.deleteDatabase(db.name);
       }
     }
 
-    // 4) Service Worker 解除
     try {
       const regs = await navigator.serviceWorker.getRegistrations();
       for (const r of regs) await r.unregister();
     } catch {}
 
-    // 5) 強制リロード（キャッシュ無視）
     setTimeout(() => {
       location.href = location.pathname + "?reset=" + Date.now();
     }, 300);
@@ -167,16 +166,22 @@
       panel.style.display = panel.style.display === "block" ? "none" : "block";
     };
 
-    let holdAt = 0;
-    let raf = 0;
-    let holding = false;
-
-    panel.addEventListener("pointerdown", (e) => {
+    // 通常クリック
+    panel.addEventListener("click", (e) => {
       const b = e.target.closest("[data-act]");
       if (!b) return;
-
       const act = b.dataset.act;
-      if (act !== "reset") return;
+      if (act === "reset") return;
+      panel.style.display = "none";
+      handleAction(act);
+    });
+
+    // reset 長押し
+    let holding = false, holdAt = 0, raf = 0;
+
+    panel.addEventListener("pointerdown", (e) => {
+      const b = e.target.closest('[data-act="reset"]');
+      if (!b) return;
 
       holding = true;
       holdAt = Date.now();
@@ -205,7 +210,7 @@
       });
     });
 
-    console.log("[gameMenu] ready v2.6 (FULL RESET)");
+    console.log("[gameMenu] ready v2.7 (FULL RESET + normal actions)");
   }
 
   if (document.readyState === "loading") {
