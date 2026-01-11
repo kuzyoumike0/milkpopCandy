@@ -1,778 +1,879 @@
+// prestige.js（転生：コイン＆うさぎリセット →「牧場の星」獲得 → 恒久解放） v1.5.2
+// ✅ FIX: getCoins が 0 固定になる問題修正（__latestCoins を null に）
+// ✅ coinChanged が number / {coins} どちらでも拾う
+// ✅ tennchi 生成を「戻り値優先」で確実化（spawnBunny が Bunny を返す環境に最適）
+// ✅ app.js が emit("coinChanged") すればスロット/回収/放置すべてゲージ反映
+
 (() => {
   "use strict";
-  console.log("[app.js] LOADED v16.7.3p (anti-overlay 유지 + coinChanged emit)", Date.now());
+  if (window.__WB_PRESTIGE_V152__) return;
+  window.__WB_PRESTIGE_V152__ = true;
 
-  /* =========================
-   * Assets / Defs
-   * ========================= */
-  const ASSETS = {
-    babyBunny: "./assets/babybunny.png",
-    hart: "./assets/hart.png",
+  const WAIT_MS = 12000;
+  const TICK_MS = 50;
 
-    coinSE: "./assets/coin.mp3",
-    poyoSE: "./assets/poyo.mp3",
-    babySE: "./assets/babybunny.mp3",
-    tabidatiSE: "./assets/tabidati.mp3",
+  const CFG = {
+    STAR_BASE_COINS: 50000,
+    MIN_COINS_TO_PRESTIGE: 50000,
+    HOLD_MS: 1200,
 
-    coins: [
-      "./assets/coin1.png",
-      "./assets/coin2.png",
-      "./assets/coin3.png",
-      "./assets/coin4.png",
+    COIN_WATCH_MS: 250,
+
+    LS_EARNED: "wb_prestige_earned_v1",
+
+    DEEP_LOCALSTORAGE_WIPE: false,
+    WIPE_KEYS: [
+      "wb_coins_v6",
+      "wb_bunnies_v6",
+      "wb_bunnies_v5",
+      "wb_state_v1",
+      "wb_state_v2",
+      "milkpop_bunnies_v1",
+      "milkpop_coins_v1",
     ],
+
+    LABEL: {
+      title: "🌟 転生（牧場の星）",
+      prestigeBtn: "🌟 転生する",
+      close: "閉じる",
+      unlock: "解放",
+      unlocked: "解放済",
+      earned: "転生ゲージ（累計獲得）",
+    },
+
+    TENNCHI: {
+      LS_ACTIVE: "wb_tennchi_active_v1",
+      WRAP_MARK: "data-tennchi",
+      IMG: "./assets/tennchi.png",
+
+      dropEveryMs: 2300,
+      dropCount: 3,
+      tierMin: 2,
+      tierMax: 3,
+
+      className: "wbTennchiBunny",
+    },
   };
 
-  const BUNNY_DEFS = {
-    bunny1:  { label: "通常みるぽ",     img: "./assets/bunny1.png",  price: 300,   coinMul: 0.55, desc: "基本のうさぎ。コインは控えめ。" },
-    bunny3:  { label: "毒タイプみるぽ", img: "./assets/bunny3.png",  price: 1800,  coinMul: 1.0,  desc: "安定してコインを稼ぐ中級うさぎ。" },
-    bunny4:  { label: "水タイプみるぽ", img: "./assets/bunny4.png",  price: 6000,  coinMul: 1.8,  desc: "大量のコインを生み出す上級うさぎ。" },
-    bunny5:  { label: "お正月みるぽ",   img: "./assets/bunny5.png",  price: 20000, coinMul: 2.8,  desc: "牧場最上級クラス。圧倒的生産力。" },
-    reabunny:{ label: "黄金レアみるぽ", img: "./assets/reabunny.png", price: 0,     coinMul: 4.0,  desc: "突然変異でのみ現れる幻のうさぎ。" },
-  };
+  const LS_PRESTIGE = "wb_prestige_v1";
 
-  /* =========================
-   * Balance
-   * ========================= */
-  const BABY_DURATION_MS = 3 * 60 * 1000;
-  const BABY_SPEED_MUL   = 0.65;
-  const REA_EVOLVE_RATE  = 0.01;
-
-  const DEPART_COST = 10;
-
-  // charge
-  const CHARGE_MAX = 100;
-  const CHARGE_PER_SEC = 3.0;
-  const CHARGE_GAIN_ON_TAP_AFTER_CONSUME = 2;
-
-  // coin value
-  const COIN_VALUE_MULTIPLIER = 2;
-
-  /* =========================
-   * HARD SIZE (絶対値で扱う)
-   * ========================= */
-  const WRAP_W = 140;
-  const WRAP_H = 140;
-  const PAD = 6;
-
-  /* =========================
-   * Storage
-   * ========================= */
-  const LS = {
-    coins:     "wb_coins_v6",
-    bunnies:   "wb_bunnies_v6",
-    dex:       "wb_dex_v1",
-    unchi:     "wb_unchi_v1",
-    title:     "wb_title_v1",
-    titleList: "wb_title_list_v1",
-  };
-
-  /* =========================
-   * DOM
-   * ========================= */
-  const field       = document.getElementById("field");
-  const bunnyLayer  = document.getElementById("bunnyLayer");
-  const coinLayer   = document.getElementById("coinLayer");
-  const coinValueEl = document.getElementById("coinValue");
-
-  const shopBtn     = document.getElementById("shopBtn");
-  const omukaeBtn   = document.getElementById("omukaeBtn");
-  const hanabiBtn   = document.getElementById("hanabiBtn");
-  const departBtn   = document.getElementById("departBtn");
-  const resetBtn    = document.getElementById("resetBtn");
-  const rankBtn     = document.getElementById("rankBtn");
-  const slotBtn     = document.getElementById("slotBtn");
-
-  if (!field || !bunnyLayer || !coinLayer || !coinValueEl) {
-    console.error("[app.js] 必要DOMが見つかりません (#field/#bunnyLayer/#coinLayer/#coinValue)");
-    return;
-  }
-
-  /* =========================
-   * ✅ 座標系を強制（最重要）
-   * ✅ クリック阻害レイヤー対策（bg/tenki等は貫通）
-   * ========================= */
-  (function injectCssOnce() {
-    if (document.getElementById("wbAppCoreCssV1673")) return;
-    const st = document.createElement("style");
-    st.id = "wbAppCoreCssV1673";
-    st.textContent = `
-      #field{
-        position:fixed !important;
-        inset:0 !important;
-        overflow:hidden !important;
-      }
-
-      /* ✅ 背景/天気/FXは“クリックを奪わない” */
-      #bgLayer, #tenkiLayer, #bgMirrorFXWrapV13{
-        pointer-events:none !important;
-      }
-
-      /* ✅ レイヤーは貫通、実体だけクリック可 */
-      #bunnyLayer{
-        position:absolute !important;
-        inset:0 !important;
-        overflow:hidden !important;
-        pointer-events:none !important;
-        z-index:100 !important;
-      }
-      #coinLayer{
-        position:absolute !important;
-        inset:0 !important;
-        overflow:hidden !important;
-        pointer-events:none !important;
-        z-index:120 !important;
-      }
-
-      .bunnyWrap{
-        position:absolute !important;
-        left:0 !important;
-        top:0 !important;
-        width:${WRAP_W}px !important;
-        height:${WRAP_H}px !important;
-        will-change: transform;
-        touch-action: manipulation;
-        pointer-events:auto !important; /* ✅ ここが超重要：wrapがイベント受ける */
-      }
-      .bunnyWrap .bunny{
-        width:100% !important;
-        height:100% !important;
-        object-fit:contain !important;
-        user-select:none;
-        -webkit-user-drag:none;
-        pointer-events:auto !important;
-      }
-
-      /* ✅ コイン小さめ（コイン自体だけクリック可） */
-      .coin{
-        position:absolute;
-        width:34px !important;
-        height:34px !important;
-        object-fit:contain !important;
-        user-select:none;
-        -webkit-user-drag:none;
-        cursor:pointer;
-        pointer-events:auto !important;
-      }
-
-      .wbChargeHart{
-        position:absolute;
-        z-index:9999;
-        pointer-events:none;
-        transform:translate(-50%,-50%);
-        animation:wbHartBob 1.05s ease-in-out infinite;
-        width:24px;
-        height:24px;
-        filter:drop-shadow(0 6px 10px rgba(0,0,0,.18));
-      }
-      @keyframes wbHartBob{
-        0%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}
-        50%{transform:translate(-50%,-50%) translateY(-7px) rotate(3deg) scale(1.03);}
-        100%{transform:translate(-50%,-50%) translateY(0) rotate(-3deg) scale(1);}
-      }
-    `;
-    document.head.appendChild(st);
-  })();
-
-  /* =========================
-   * WB bus (merge-safe)
-   * ========================= */
-  const prevWB = (window.WB && typeof window.WB === "object") ? window.WB : {};
-
-  const __events = new Map();
-  function localOn(ev, fn) { if (!__events.has(ev)) __events.set(ev, new Set()); __events.get(ev).add(fn); }
-  function localOff(ev, fn){ __events.get(ev)?.delete(fn); }
-  function localEmit(ev, payload){ __events.get(ev)?.forEach(fn=>{ try{fn(payload);}catch{} }); }
-
-  const on   = (typeof prevWB.on   === "function") ? prevWB.on.bind(prevWB)   : localOn;
-  const off  = (typeof prevWB.off  === "function") ? prevWB.off.bind(prevWB)  : localOff;
-  const emit = (typeof prevWB.emit === "function") ? prevWB.emit.bind(prevWB) : localEmit;
-
-  /* =========================
-   * Utils / Field size（安定版）
-   * ========================= */
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const rand  = (a, b) => a + Math.random() * (b - a);
-
-  let FIELD_W = 1, FIELD_H = 1;
-
-  function readFieldSize() {
-    const cw = Math.round(field.clientWidth || 0);
-    const ch = Math.round(field.clientHeight || 0);
-    if (cw >= 50 && ch >= 50) return { w: cw, h: ch };
-
-    const r = field.getBoundingClientRect();
-    const w = Math.round(r.width || window.innerWidth || 1);
-    const h = Math.round(r.height || window.innerHeight || 1);
-    return { w: Math.max(1, w), h: Math.max(1, h) };
-  }
-
-  function refreshFieldSize() {
-    const v = readFieldSize();
-    FIELD_W = v.w;
-    FIELD_H = v.h;
-  }
-
-  function groundY() {
-    const minGround = Math.max(120, WRAP_H + PAD + 10);
-    return Math.max(minGround, FIELD_H - 60);
-  }
-
-  async function ensureFieldReady() {
-    for (let i = 0; i < 120; i++) {
-      refreshFieldSize();
-      if (FIELD_W >= 200 && FIELD_H >= 200) return true;
-      await new Promise(r => setTimeout(r, 50));
-    }
-    console.warn("[app.js] field size not ready; continue with guarded values");
-    return false;
-  }
-
-  function worldBounds() {
-    refreshFieldSize();
-    const gy = groundY();
-    const minX = PAD;
-    const maxX = Math.max(minX, FIELD_W - WRAP_W - PAD);
-    const minY = PAD;
-    const maxY = Math.max(minY, gy - WRAP_H);
-    return { minX, maxX, minY, maxY, gy };
-  }
-
-  const bunnies = [];
-  function scheduleRescueAll() {
-    requestAnimationFrame(() => {
-      const { minX, maxX, minY, maxY } = worldBounds();
-      for (const b of bunnies) {
-        b.x = clamp(b.x, minX, maxX);
-        b.y = clamp(b.y, minY, maxY);
-        b.applyPos();
-        b.positionHeart?.();
-      }
-      emit("resize", {});
+  function waitForWB() {
+    const start = Date.now();
+    return new Promise((resolve) => {
+      const t = setInterval(() => {
+        if (window.WB && typeof window.WB === "object") {
+          clearInterval(t);
+          resolve(window.WB);
+          return;
+        }
+        if (Date.now() - start > WAIT_MS) {
+          clearInterval(t);
+          resolve(null);
+        }
+      }, TICK_MS);
     });
   }
 
-  window.addEventListener("resize", scheduleRescueAll, { passive: true });
-  if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", scheduleRescueAll, { passive: true });
-    window.visualViewport.addEventListener("scroll", scheduleRescueAll, { passive: true });
-  }
-
-  /* =========================
-   * Audio
-   * ========================= */
-  const sePoyo     = new Audio(ASSETS.poyoSE);
-  const seBaby     = new Audio(ASSETS.babySE);
-  const seCoin     = new Audio(ASSETS.coinSE);
-  const seTabidati = new Audio(ASSETS.tabidatiSE);
-
-  window.__milkpopSeRegisterQueue = window.__milkpopSeRegisterQueue || [];
-  function tryRegisterSE(a) {
+  function loadJson(key, def) {
     try {
-      if (window.WB?.bgm?.registerSE) { window.WB.bgm.registerSE(a); return; }
-    } catch {}
-    try { window.__milkpopSeRegisterQueue.push(a); } catch {}
-  }
-  tryRegisterSE(sePoyo);
-  tryRegisterSE(seBaby);
-  tryRegisterSE(seCoin);
-  tryRegisterSE(seTabidati);
-
-  let audioUnlocked = false;
-  function unlockAudioOnce() {
-    if (audioUnlocked) return;
-    audioUnlocked = true;
-
-    // ✅ SE unlock
-    try {
-      sePoyo.muted = true;
-      sePoyo.currentTime = 0;
-      sePoyo.play()
-        .then(() => { sePoyo.pause(); sePoyo.currentTime = 0; sePoyo.muted = false; })
-        .catch(() => (sePoyo.muted = false));
-    } catch {}
-
-    // ✅ BGMもユーザー操作内で開始を試す（ブロック対策）
-    try {
-      window.WB?.bgm?.start?.();
-      window.WB?.bgm?.play?.();
-      window.WB?.bgm?.mountUI?.({ position: "top-right", title: "BGM" });
-    } catch {}
-  }
-  window.addEventListener("pointerdown", unlockAudioOnce, { once: true, passive: true });
-
-  function getSeVolume() {
-    try { if (typeof window.WB?.getSEVolume === "function") return clamp(Number(window.WB.getSEVolume()) || 0.85, 0, 1); } catch {}
-    const v = Number(window.__milkpopSeVolume);
-    return clamp(Number.isFinite(v) ? v : 0.85, 0, 1);
-  }
-  function playSE(a) {
-    try {
-      unlockAudioOnce();
-      a.volume = getSeVolume();
-      a.muted = false;
-      a.currentTime = 0;
-      a.play().catch(() => {});
-    } catch {}
-  }
-
-  /* =========================
-   * State
-   * ========================= */
-  let coins = (() => {
-    const n = parseInt(localStorage.getItem(LS.coins) || "0", 10);
-    return Number.isFinite(n) ? n : 0;
-  })();
-
-  function saveCoins() { localStorage.setItem(LS.coins, String(coins)); }
-
-  // ✅ v16.7.3の仕様を維持しつつ「転生ゲージ用イベント」を追加
-  function updateHud() {
-    coinValueEl.textContent = String(coins);
-
-    // 既存
-    emit("hudUpdated", { coins });
-
-    // ✅ 追加：prestigeが購読する統一イベント（ゲージが増えない問題の根治）
-    emit("coinChanged", coins);
-    try { window.dispatchEvent(new CustomEvent("wb:coinChanged", { detail: { coins } })); } catch {}
-    try { window.dispatchEvent(new CustomEvent("milkpop:coinChanged", { detail: { coins } })); } catch {}
-  }
-
-  function safeKind(k) { return BUNNY_DEFS[k] ? k : "bunny1"; }
-
-  function loadBunnyMeta() {
-    try {
-      const arr = JSON.parse(localStorage.getItem(LS.bunnies) || "null");
-      if (!Array.isArray(arr)) return null;
-      return arr.map(x => ({ bornAt: Number(x?.bornAt) || Date.now(), kind: safeKind(x?.kind) }));
-    } catch { return null; }
-  }
-  function saveBunnyMeta() {
-    localStorage.setItem(LS.bunnies, JSON.stringify(bunnies.map(b => ({ bornAt: b.bornAt, kind: b.kind }))));
-  }
-
-  /* =========================
-   * Drops
-   * ========================= */
-  const dropsOnField = [];
-  const dropByEl = new WeakMap();
-
-  class CoinDrop {
-    constructor(x, y, tierIndex = 0) {
-      this.x = x; this.y = y;
-      this.vx = (Math.random() * 2 - 1) * 110;
-      this.vy = -(420 + Math.random() * 240);
-      this.gravity = 2200;
-      this.bounce  = 0.22 + Math.random() * 0.12;
-      this.floor   = groundY();
-
-      const el = document.createElement("img");
-      el.className = "coin";
-      this.tier = clamp(Math.floor(tierIndex), 0, ASSETS.coins.length - 1);
-      el.src = ASSETS.coins[this.tier];
-      el.draggable = false;
-      this.el = el;
-
-      dropByEl.set(el, this);
-      el.addEventListener("pointerenter", () => this.collect());
-      el.addEventListener("pointerdown", (e) => { e.preventDefault(); this.collect(); });
-      el.addEventListener("click", () => this.collect());
-
-      coinLayer.appendChild(el);
-      this.render();
+      const v = JSON.parse(localStorage.getItem(key) || "null");
+      return (v ?? def);
+    } catch {
+      return def;
     }
-    render(){ this.el.style.left = `${this.x}px`; this.el.style.top = `${this.y}px`; }
-    update(dt){
-      this.floor = groundY();
-      this.vy += this.gravity * dt;
-      this.x  += this.vx * dt;
-      this.y  += this.vy * dt;
+  }
+  function saveJson(key, v) {
+    localStorage.setItem(key, JSON.stringify(v));
+  }
 
-      if (this.y >= this.floor) {
-        this.y = this.floor;
-        if (Math.abs(this.vy) > 260) { this.vy = -this.vy * this.bounce; this.vx *= 0.72; }
-        else { this.vy = 0; this.vx = 0; }
+  function clamp(n, a, b) {
+    n = Number(n);
+    if (!Number.isFinite(n)) n = 0;
+    return Math.max(a, Math.min(b, n));
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function ensureStyle() {
+    if (document.getElementById("wbPrestigeStyleV1")) return;
+    const s = document.createElement("style");
+    s.id = "wbPrestigeStyleV1";
+    s.textContent = `
+#wbPrestigePanelV1{position:fixed; inset:0; z-index:2147483647; display:none; user-select:none;}
+#wbPrestigePanelV1 .bg{position:absolute; inset:0; background:rgba(0,0,0,.38);}
+#wbPrestigePanelV1 .card{
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(860px, 94vw); max-height:min(84vh, 900px);
+  background:rgba(255,255,255,.97);
+  border-radius:18px;
+  box-shadow:0 20px 60px rgba(0,0,0,.24);
+  overflow:hidden;
+  display:flex; flex-direction:column;
+}
+#wbPrestigePanelV1 .head{display:flex; align-items:center; justify-content:space-between; padding:14px 14px 10px; border-bottom:1px solid rgba(0,0,0,.08);}
+#wbPrestigePanelV1 .title{font-weight:1000; letter-spacing:.02em; display:flex; gap:10px; align-items:center;}
+#wbPrestigePanelV1 .close{border:none; background:rgba(0,0,0,.06); border-radius:12px; padding:8px 12px; font-weight:1000; cursor:pointer;}
+#wbPrestigePanelV1 .body{padding:12px 14px 16px; overflow:auto;}
+#wbPrestigePanelV1 .row{display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:10px;}
+#wbPrestigePanelV1 .pill{display:inline-flex; align-items:center; gap:8px; background:rgba(0,0,0,.05); border-radius:999px; padding:8px 10px; font-weight:1000;}
+#wbPrestigePanelV1 .btn{border:none; border-radius:12px; padding:10px 12px; font-weight:1000; cursor:pointer; background:#fff; box-shadow:0 10px 22px rgba(0,0,0,.10);}
+#wbPrestigePanelV1 .btn.primary{background:#ffd6e7;}
+#wbPrestigePanelV1 .btn.danger{background:#ffe0e0;}
+#wbPrestigePanelV1 .btn[disabled]{opacity:.55; cursor:not-allowed; box-shadow:none;}
+#wbPrestigePanelV1 .grid{display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:12px;}
+@media (max-width:760px){ #wbPrestigePanelV1 .grid{grid-template-columns:1fr;} }
+#wbPrestigePanelV1 .perk{
+  background:rgba(255,255,255,.94);
+  border-radius:14px;
+  padding:12px;
+  box-shadow:0 10px 22px rgba(0,0,0,.08);
+}
+#wbPrestigePanelV1 .perk .name{font-weight:1000;}
+#wbPrestigePanelV1 .perk .desc{margin-top:4px; font-size:12px; opacity:.8; font-weight:900; line-height:1.35; white-space:pre-line;}
+#wbPrestigePanelV1 .perk .foot{display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:10px; flex-wrap:wrap;}
+#wbPrestigePanelV1 .badge{display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:6px 10px; font-weight:1000; font-size:12px; background:rgba(120,210,255,.22);}
+#wbPrestigePanelV1 .badge.lock{background:rgba(255,120,120,.18);}
+#wbPrestigePanelV1 .bar{height:10px; border-radius:999px; background:rgba(0,0,0,.08); overflow:hidden; margin-top:8px;}
+#wbPrestigePanelV1 .bar > i{display:block; height:100%; width:0%; background:rgba(120,210,255,.55);}
+#wbPrestigePanelV1 .hint{font-size:12px; opacity:.78; font-weight:900; line-height:1.35;}
+#wbPrestigePanelV1 .hold{position:relative; overflow:hidden;}
+#wbPrestigePanelV1 .hold > .fill{position:absolute; inset:0; width:0%; background:rgba(0,0,0,.06);}
+`;
+    document.head.appendChild(s);
+  }
+
+  function calcStarsFromCoins(coins) {
+    const c = Math.max(0, Math.floor(Number(coins) || 0));
+    if (c < CFG.MIN_COINS_TO_PRESTIGE) return 0;
+    const stars = Math.floor(Math.sqrt(c / Math.max(1, CFG.STAR_BASE_COINS)));
+    return Math.max(0, stars);
+  }
+
+  function nextCoinsForStar(targetStars) {
+    const s = Math.max(0, Math.floor(targetStars));
+    return Math.max(0, Math.floor(CFG.STAR_BASE_COINS * (s * s)));
+  }
+
+  /* =========================
+   * 転生ゲージ（累計獲得コイン）
+   * ========================= */
+  function loadEarned() {
+    try {
+      const v = Number(localStorage.getItem(CFG.LS_EARNED) || "0");
+      return Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+    } catch { return 0; }
+  }
+  function saveEarned(v) {
+    try { localStorage.setItem(CFG.LS_EARNED, String(Math.max(0, Math.floor(v)))); } catch {}
+  }
+
+  let earnedCoins = loadEarned();
+
+  function addEarned(delta, source = "") {
+    const d = Math.max(0, Math.floor(Number(delta) || 0));
+    if (!d) return;
+    earnedCoins = Math.max(0, earnedCoins + d);
+    saveEarned(earnedCoins);
+
+    try {
+      const p = panelEl || document.getElementById(PANEL_ID);
+      if (p && p.style.display === "block") render();
+    } catch {}
+
+    try { window.WB?.emit?.("prestige:earned", { delta: d, total: earnedCoins, source: String(source || "") }); } catch {}
+  }
+
+  function resetEarned() {
+    earnedCoins = 0;
+    saveEarned(0);
+  }
+
+  /* =========================
+   * ✅ FIX：現在コインの同期
+   * ========================= */
+  let __latestCoins = null;        // ← 0固定バグ回避（null=未確定）
+  let __lastCoinForEarn = null;    // ← 初回 coinChanged で確定する
+
+  function readCoinsDirect(WB) {
+    try { if (WB && typeof WB.getCoin === "function") return Number(WB.getCoin()) || 0; } catch {}
+    try {
+      if (WB && ("coins" in WB)) {
+        const v = Number(WB.coins);
+        if (Number.isFinite(v)) return v;
       }
-      this.render();
-    }
-    collect(){
-      if (!this.el || !this.el.isConnected) return;
-      coins += (this.tier + 1) * COIN_VALUE_MULTIPLIER;
-      saveCoins(); updateHud(); playSE(seCoin);
-      try { this.el.remove(); } catch {}
-      const idx = dropsOnField.indexOf(this);
-      if (idx >= 0) dropsOnField.splice(idx, 1);
-    }
+    } catch {}
+    const el = document.getElementById("coinValue");
+    return el ? (Number(el.textContent) || 0) : 0;
   }
 
-  function spawnCoinDropAt(x, y, tier = 0) {
-    const c = new CoinDrop(x, y, tier);
-    dropsOnField.push(c);
-    return c;
+  function getCoins(WB) {
+    if (__latestCoins !== null && Number.isFinite(__latestCoins)) return __latestCoins;
+    return readCoinsDirect(WB);
   }
 
-  function spawnClickCoins(bunny, count = 1, tierPicker = () => 0) {
-    const baseX = bunny.x + WRAP_W * 0.55;
-    const baseY = bunny.y + WRAP_H * 0.82;
-    for (let i = 0; i < count; i++) {
-      spawnCoinDropAt(baseX + rand(-14, 14), baseY + rand(-6, 6), tierPicker());
-    }
-  }
+  function setCoinsZero(WB) {
+    __latestCoins = 0;
+    __lastCoinForEarn = 0;
 
-  /* =========================
-   * Bunny
-   * ========================= */
-  class Bunny {
-    constructor(bornAt, kind = "bunny1") {
-      this.bornAt = Number(bornAt) || Date.now();
-      this.kind   = safeKind(kind);
-      this.isBaby = (Date.now() - this.bornAt) < BABY_DURATION_MS;
-
-      this.wrap = document.createElement("div");
-      this.wrap.className = "bunnyWrap";
-
-      this.el = document.createElement("img");
-      this.el.className = "bunny";
-      this.el.draggable = false;
-
-      this.wrap.appendChild(this.el);
-      bunnyLayer.appendChild(this.wrap);
-
-      this.charge = 0;
-      this.chargeReady = false;
-      this.hartEl = null;
-
-      const { minX, maxX, minY, maxY, gy } = worldBounds();
-      this.x = rand(minX, maxX);
-      this.y = clamp(gy - WRAP_H, minY, maxY);
-
-      this.dir = Math.random() < 0.5 ? -1 : 1;
-      this.baseSpeed = 45 + Math.random() * 55;
-
-      this.evolveIfNeeded(true);
-      this.syncSprite();
-
-      // ✅ クリックでコイン（“確実”版）
-      const tap = (e) => {
-        try { e?.preventDefault?.(); } catch {}
-        try { e?.stopPropagation?.(); } catch {}
-
-        playSE(this.isBaby ? seBaby : sePoyo);
-
-        const plan = this.getDropPlanFromOwnCharge();
-        spawnClickCoins(this, plan.count, plan.pickTier);
-
-        this.consumeOwnCharge();
-        this.addOwnCharge(CHARGE_GAIN_ON_TAP_AFTER_CONSUME);
-      };
-
-      this.wrap.addEventListener("pointerdown", tap, { passive: false });
-      this.wrap.addEventListener("click", tap);
-
-      this.el.addEventListener("load", () => {
-        this.hardClamp(true);
-        this.applyPos();
-        this.positionHeart();
-      });
-
-      this.hardClamp(true);
-      this.applyPos();
-    }
-
-    syncSprite() {
-      this.el.src = this.isBaby ? ASSETS.babyBunny : (BUNNY_DEFS[this.kind]?.img || BUNNY_DEFS.bunny1.img);
-    }
-
-    ensureHeartEl() {
-      if (this.hartEl && this.hartEl.isConnected) return this.hartEl;
-      const el = document.createElement("img");
-      el.className = "wbChargeHart";
-      el.src = ASSETS.hart;
-      el.draggable = false;
-      el.style.display = "none";
-      field.appendChild(el);
-      this.hartEl = el;
-      return el;
-    }
-    showHeart(){ const el = this.ensureHeartEl(); el.style.display="block"; this.positionHeart(); }
-    hideHeart(){ if (this.hartEl) this.hartEl.style.display="none"; }
-
-    positionHeart() {
-      if (!this.hartEl || this.hartEl.style.display === "none") return;
-      const x = this.x + WRAP_W * 0.5;
-      const y = this.y + WRAP_H * 0.08;
-      this.hartEl.style.left = `${x}px`;
-      this.hartEl.style.top  = `${y}px`;
-    }
-
-    addOwnCharge(delta) {
-      if (this.chargeReady) return;
-      delta = Number(delta) || 0;
-      if (delta <= 0) return;
-
-      this.charge = clamp(this.charge + delta, 0, CHARGE_MAX);
-      if (this.charge >= CHARGE_MAX) {
-        this.charge = CHARGE_MAX;
-        this.chargeReady = true;
-        this.showHeart();
-        emit("bunnyChargeReady", { bornAt: this.bornAt });
-      }
-    }
-
-    consumeOwnCharge() {
-      this.charge = 0;
-      this.chargeReady = false;
-      this.hideHeart();
-      emit("bunnyChargeConsumed", { bornAt: this.bornAt });
-    }
-
-    getChargeRatio() { return clamp(this.charge / CHARGE_MAX, 0, 1); }
-
-    getDropPlanFromOwnCharge() {
-      const r = this.getChargeRatio();
-      const count = 3 + Math.floor(r * 15);
-      const maxTier = Math.floor(r * 3 + 1e-9);
-
-      const pickTier = () => {
-        if (maxTier <= 0) return 0;
-        let sum = 0;
-        const w = [];
-        for (let t = 0; t <= maxTier; t++) { const wt = (t + 1) * (t + 1); w.push(wt); sum += wt; }
-        let x = Math.random() * sum;
-        for (let t = 0; t <= maxTier; t++) { x -= w[t]; if (x <= 0) return t; }
-        return maxTier;
-      };
-
-      return { count, pickTier };
-    }
-
-    evolveIfNeeded(isInit = false) {
-      if (!this.isBaby) return;
-      if (Date.now() - this.bornAt < BABY_DURATION_MS) return;
-
-      this.isBaby = false;
-      if (this.kind !== "reabunny" && Math.random() < REA_EVOLVE_RATE) this.kind = "reabunny";
-
-      this.syncSprite();
-      this.hardClamp(true);
-      if (isInit) saveBunnyMeta();
-    }
-
-    hardClamp(force = false) {
-      const { minX, maxX, minY, maxY, gy } = worldBounds();
-
-      const targetY = clamp(gy - WRAP_H, minY, maxY);
-      if (force) this.y = targetY;
-      else this.y += (targetY - this.y) * 0.35;
-
-      this.x = clamp(this.x, minX, maxX);
-      this.y = clamp(this.y, minY, maxY);
-    }
-
-    applyPos() {
-      this.wrap.classList.toggle("flip", this.dir < 0);
-      const x = Math.round(this.x);
-      const y = Math.round(this.y);
-      this.wrap.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-    }
-
-    update(dt) {
-      this.evolveIfNeeded(false);
-      this.addOwnCharge(CHARGE_PER_SEC * dt);
-
-      const speedMul = this.isBaby ? BABY_SPEED_MUL : 1.0;
-      this.x += this.dir * this.baseSpeed * speedMul * dt;
-
-      const { minX, maxX } = worldBounds();
-
-      if (this.x <= minX) { this.x = minX; this.dir = 1; }
-      else if (this.x >= maxX) { this.x = maxX; this.dir = -1; }
-
-      this.hardClamp(false);
-
-      this.applyPos();
-      if (this.chargeReady) this.positionHeart();
-    }
-  }
-
-  function spawnBunny(kind = "bunny1", bornAt = Date.now()) {
-    const b = new Bunny(bornAt, kind);
-    bunnies.push(b);
-    saveBunnyMeta();
-    emit("bunnyCountChanged", { count: bunnies.length });
-    return b;
-  }
-
-  function removeBunnyInstance(b) {
-    const idx = bunnies.indexOf(b);
-    if (idx < 0) return false;
-    try { b.wrap.remove(); } catch {}
-    try { b.hartEl?.remove(); } catch {}
-    bunnies.splice(idx, 1);
-    saveBunnyMeta();
-    emit("bunnyCountChanged", { count: bunnies.length });
+    try { if (WB && typeof WB.setCoin === "function") { WB.setCoin(0); return true; } } catch {}
+    try { if (WB && ("coins" in WB)) { WB.coins = 0; return true; } } catch {}
+    try { localStorage.setItem("wb_coins_v6", "0"); } catch {}
+    const el = document.getElementById("coinValue");
+    if (el) el.textContent = "0";
     return true;
   }
 
-  /* =========================
-   * Touch collect (coin only)
-   * ========================= */
-  let touchCollectActive = false;
-  let touchPointerId = null;
-
-  function collectAtClientPoint(clientX, clientY) {
-    const el = document.elementFromPoint(clientX, clientY);
-    if (!el) return;
-    const target = el.classList?.contains("coin") ? el : el.closest?.(".coin");
-    if (!target) return;
-    const drop = dropByEl.get(target);
-    if (drop?.collect) drop.collect();
+  function removeAllBunnies(WB) {
+    try { if (WB && typeof WB.removeAllBunnies === "function") { WB.removeAllBunnies(); return true; } } catch {}
+    try {
+      if (WB && typeof WB.removeBunnyInstance === "function" && Array.isArray(WB.bunnies)) {
+        const copy = WB.bunnies.slice();
+        copy.forEach(b => { try { WB.removeBunnyInstance(b); } catch {} });
+      }
+    } catch {}
+    try { if (WB && Array.isArray(WB.bunnies)) WB.bunnies.length = 0; } catch {}
+    try { document.querySelectorAll(".bunnyWrap, .bunny-wrap").forEach(el => { try { el.remove(); } catch {} }); } catch {}
+    try { document.querySelectorAll(".wbChargeHart").forEach(el => { try { el.remove(); } catch {} }); } catch {}
+    try { WB?.emit?.("bunnyCountChanged", { count: 0 }); } catch {}
+    return true;
   }
 
-  field.addEventListener("pointerdown", (e) => {
-    if (e.pointerType !== "touch") return;
-    touchCollectActive = true;
-    touchPointerId = e.pointerId;
-    collectAtClientPoint(e.clientX, e.clientY);
-  }, { passive: true });
-
-  field.addEventListener("pointermove", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (!touchCollectActive) return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    collectAtClientPoint(e.clientX, e.clientY);
-  }, { passive: true });
-
-  window.addEventListener("pointerup", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    touchCollectActive = false;
-    touchPointerId = null;
-  }, { passive: true });
-
-  window.addEventListener("pointercancel", (e) => {
-    if (e.pointerType !== "touch") return;
-    if (touchPointerId !== null && e.pointerId !== touchPointerId) return;
-    touchCollectActive = false;
-    touchPointerId = null;
-  }, { passive: true });
-
-  /* =========================
-   * Buttons (emit)
-   * ========================= */
-  shopBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:shop",   {}); });
-  omukaeBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:omukae", {}); });
-  departBtn?.addEventListener("click", () => { unlockAudioOnce(); emit("ui:depart", {}); });
-  rankBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:rank",   {}); });
-  slotBtn?.addEventListener("click",   () => { unlockAudioOnce(); emit("ui:slot",   {}); });
-
-  if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
-      unlockAudioOnce();
-      if (!confirm("リセットしますか？")) return;
-      localStorage.removeItem(LS.coins);
-      localStorage.removeItem(LS.bunnies);
-      localStorage.removeItem(LS.dex);
-      localStorage.removeItem(LS.unchi);
-      localStorage.removeItem(LS.title);
-      localStorage.removeItem(LS.titleList);
-      emit("resetRequested", {});
-      location.reload();
-    });
-  }
-
-  /* =========================
-   * WB merge
-   * ========================= */
-  const api = {
-    on, off, emit,
-    ASSETS, BUNNY_DEFS, LS, DEPART_COST,
-    field, bunnyLayer, coinLayer,
-    shopBtn, omukaeBtn, hanabiBtn, departBtn, rankBtn, resetBtn, slotBtn,
-
-    get coins() { return coins; },
-    set coins(v) {
-      coins = Math.max(0, Math.floor(Number(v) || 0));
-      saveCoins();
-      updateHud(); // ✅ coinChangedも出る
-    },
-
-    getCoin: () => coins,
-    spendCoin: (n) => {
-      n = Math.floor(Number(n) || 0);
-      if (n <= 0) return true;
-      if (coins < n) return false;
-      coins -= n;
-      saveCoins();
-      updateHud(); // ✅ coinChangedも出る
-      return true;
-    },
-
-    bunnies,
-    getBunnies: () => bunnies,
-    spawnBunny,
-    removeBunnyInstance,
-
-    spawnCoinDropAt,
-
-    saveCoins,
-    saveBunnyMeta,
-
-    unlockAudioOnce,
-    playSE,
-    seTabidati,
-
-    updateHud,
-
-    getBunnyCharge: (bornAt) => {
-      const t = Number(bornAt);
-      const b = bunnies.find(x => x && x.bornAt === t);
-      return b ? { charge: b.charge, ready: b.chargeReady } : null;
-    },
-  };
-  window.WB = Object.assign({}, prevWB, api);
-
-  /* =========================
-   * Init / Loop
-   * ========================= */
-  async function initBunnies() {
-    const meta = loadBunnyMeta();
-    if (meta && meta.length) {
-      meta.forEach(m => spawnBunny(m.kind, m.bornAt));
-      saveBunnyMeta();
-      return;
+  function deepWipeLocalStorage() {
+    if (!CFG.DEEP_LOCALSTORAGE_WIPE) return;
+    for (const k of CFG.WIPE_KEYS) {
+      try { localStorage.removeItem(k); } catch {}
     }
-    const t = Date.now();
-    spawnBunny("bunny1", t - BABY_DURATION_MS - 1000);
-    spawnBunny("bunny1", t - BABY_DURATION_MS - 2000);
-    saveBunnyMeta();
   }
 
-  let lastFrame = performance.now();
-  function tick(ts) {
-    const dt = Math.min(0.033, (ts - lastFrame) / 1000);
-    lastFrame = ts;
+  const PERK_MASTER = [
+    { id: "coin_sparkle", cost: 1, name: "コイン回収キラッ", desc: "コイン回収時に小さな✨演出を追加（演出のみ）" },
+    { id: "mirrorball_plus", cost: 2, name: "ミラーボール増し", desc: "ミラーボール範囲内の✨演出を少し増やす（演出のみ）" },
+    { id: "hanabi_glow", cost: 2, name: "花火発光ブースト", desc: "花火GIFの発光感を少し強化（演出のみ）" },
+    { id: "bunny_aura", cost: 3, name: "うさぎの輪郭光", desc: "うさぎにうっすら輪郭の光（演出のみ）" },
+    { id: "bg_soft", cost: 3, name: "背景ふわっと", desc: "背景に柔らかいビネットを追加（演出のみ）" },
+    { id: "coin_bonus_1", cost: 6, name: "収入+1%", desc: "放置のコイン量を+1%（控えめ）", gameplay: true },
+    { id: "coin_bonus_3", cost: 12, name: "収入+3%", desc: "放置のコイン量を+3%（控えめ）", gameplay: true },
+  ];
 
-    refreshFieldSize();
+  function defaultPrestigeState() {
+    return { ver: 1, stars: 0, spent: 0, perks: {}, history: [] };
+  }
+  function loadPrestige() {
+    const st = loadJson(LS_PRESTIGE, defaultPrestigeState());
+    if (!st || typeof st !== "object") return defaultPrestigeState();
+    st.ver = 1;
+    st.stars = Number(st.stars || 0) || 0;
+    st.spent = Number(st.spent || 0) || 0;
+    st.perks = (st.perks && typeof st.perks === "object") ? st.perks : {};
+    st.history = Array.isArray(st.history) ? st.history : [];
+    return st;
+  }
+  function savePrestige(st) { saveJson(LS_PRESTIGE, st); }
+  function format(n) { return (Number(n) || 0).toLocaleString(); }
 
-    for (const b of bunnies) b.update(dt);
-    for (const d of dropsOnField) d.update(dt);
-
-    requestAnimationFrame(tick);
+  /* =========================
+   * coinChanged 無い環境の保険
+   * ========================= */
+  let __coinWatchTimer = 0;
+  function startCoinWatchFallback(WB) {
+    stopCoinWatchFallback();
+    let last = readCoinsDirect(WB);
+    __coinWatchTimer = window.setInterval(() => {
+      const wb = window.WB || WB || null;
+      const cur = readCoinsDirect(wb);
+      const diff = cur - last;
+      if (diff > 0) addEarned(diff, "watchFallback");
+      last = cur;
+      __latestCoins = cur;
+      if (__lastCoinForEarn === null) __lastCoinForEarn = cur;
+    }, CFG.COIN_WATCH_MS);
+  }
+  function stopCoinWatchFallback() {
+    if (__coinWatchTimer) clearInterval(__coinWatchTimer);
+    __coinWatchTimer = 0;
   }
 
-  async function init() {
-    await ensureFieldReady();
-    refreshFieldSize();
-
-    await initBunnies();
-    scheduleRescueAll();
-
-    updateHud(); // ✅ 起動直後も coinChanged を出す（prestige初期同期）
-    emit("bunnyCountChanged", { count: bunnies.length });
-
-    requestAnimationFrame(tick);
+  /* =========================
+   * tennchi（地上うさぎ）：確実生成
+   * ========================= */
+  function isTennchiActive() {
+    return localStorage.getItem(CFG.TENNCHI.LS_ACTIVE) === "true";
+  }
+  function setTennchiActive(on) {
+    try { localStorage.setItem(CFG.TENNCHI.LS_ACTIVE, on ? "true" : "false"); } catch {}
   }
 
-  init();
+  function getBunnyList(WB) {
+    try {
+      const a = WB?.getBunnies?.();
+      if (Array.isArray(a)) return a;
+    } catch {}
+    try {
+      if (Array.isArray(WB?.bunnies)) return WB.bunnies;
+    } catch {}
+    return [];
+  }
+
+  function findTennchiBunny(WB) {
+    const list = getBunnyList(WB);
+    for (const b of list) {
+      const w = b?.wrap;
+      if (w?.getAttribute?.(CFG.TENNCHI.WRAP_MARK) === "1") return b;
+      if (b?.isTennchi === true) return b;
+    }
+    return null;
+  }
+
+  function markTennchi(b) {
+    try { b.isTennchi = true; } catch {}
+    try {
+      const w = b?.wrap;
+      if (w?.setAttribute) {
+        w.setAttribute(CFG.TENNCHI.WRAP_MARK, "1");
+        w.classList?.add?.(CFG.TENNCHI.className);
+      }
+    } catch {}
+  }
+
+  function skinToTennchi(b) {
+    if (!b) return false;
+    const img = b.img || b?.wrap?.querySelector?.("img") || null;
+
+    if (img && img.tagName === "IMG") {
+      try { img.src = CFG.TENNCHI.IMG; } catch {}
+      try { img.alt = "tennchi"; } catch {}
+    } else {
+      try {
+        const w = b.wrap;
+        if (w && !w.querySelector("img")) {
+          const im = document.createElement("img");
+          im.src = CFG.TENNCHI.IMG;
+          im.alt = "tennchi";
+          im.draggable = false;
+          w.appendChild(im);
+        }
+      } catch {}
+    }
+    markTennchi(b);
+
+    // 念のため地上へ救出（wrapのtransform運用でもOK）
+    try { if (typeof b.hardClamp === "function") b.hardClamp(true); } catch {}
+    try { if (typeof b.applyPos === "function") b.applyPos(); } catch {}
+
+    return true;
+  }
+
+  // ✅ spawnBunny が Bunny を返す環境なら「戻り値」を最優先で使う
+  function spawnOneNormalBunnyPreferBunny4(WB) {
+    const calls = [
+      () => WB?.spawnBunny?.("bunny4"),
+      () => WB?.createBunny?.("bunny4"),
+      () => WB?.addBunny?.("bunny4"),
+      () => WB?.omukae?.spawn?.("bunny4"),
+      () => WB?.omukae?.add?.("bunny4"),
+
+      () => WB?.spawnBunny?.(),
+      () => WB?.createBunny?.(),
+      () => WB?.addBunny?.(),
+      () => WB?.omukae?.spawn?.(),
+      () => WB?.omukae?.add?.(),
+      () => WB?.adopt?.(),
+    ];
+
+    const beforeLen = getBunnyList(WB).length;
+    for (const f of calls) {
+      try {
+        const r = f();
+        if (r && typeof r.then === "function") return { ok: true, bunny: null };
+        if (r && typeof r === "object") {
+          // Bunnyインスタンスっぽい
+          const w = r.wrap || r.el || null;
+          if (w) return { ok: true, bunny: r };
+        }
+        const afterLen = getBunnyList(WB).length;
+        if (afterLen > beforeLen) return { ok: true, bunny: null };
+      } catch {}
+    }
+    return { ok: false, bunny: null };
+  }
+
+  function pickNewestBunny(WB, prevIds) {
+    const list = getBunnyList(WB);
+    let cand = null;
+    for (const b of list) {
+      if (!b) continue;
+      const id = b.bornAt ?? b.id ?? b.uuid ?? null;
+      if (id != null && prevIds && prevIds.has(String(id))) continue;
+      if (b?.wrap?.getAttribute?.(CFG.TENNCHI.WRAP_MARK) === "1") continue;
+      cand = b;
+    }
+    return cand || list[list.length - 1] || null;
+  }
+
+  let __tennchiDropTimer = 0;
+
+  function startTennchiCoinDropLoop(WB, b) {
+    stopTennchiCoinDropLoop();
+    if (!WB?.spawnCoinDropAt) return;
+
+    const pickTier = () => {
+      const a = CFG.TENNCHI.tierMin, c = CFG.TENNCHI.tierMax;
+      return clamp(Math.floor(a + Math.random() * (c - a + 1)), 0, 3);
+    };
+
+    __tennchiDropTimer = window.setInterval(() => {
+      if (!isTennchiActive()) return;
+
+      const bb = findTennchiBunny(WB) || b;
+      const w = bb?.wrap;
+      if (!w || !w.isConnected) return;
+
+      const r = w.getBoundingClientRect();
+      const field = WB?.field || document.getElementById("field") || document.body;
+      const fr = field.getBoundingClientRect();
+
+      const baseX = (r.left - fr.left) + r.width * 0.55;
+      const baseY = (r.top - fr.top) + r.height * 0.92;
+
+      for (let i = 0; i < Math.max(1, CFG.TENNCHI.dropCount | 0); i++) {
+        const tier = pickTier();
+        WB.spawnCoinDropAt(
+          baseX + (Math.random() * 26 - 13),
+          baseY + (Math.random() * 10 - 5),
+          tier
+        );
+      }
+    }, CFG.TENNCHI.dropEveryMs);
+  }
+
+  function stopTennchiCoinDropLoop() {
+    if (__tennchiDropTimer) clearInterval(__tennchiDropTimer);
+    __tennchiDropTimer = 0;
+  }
+
+  async function ensureTennchiExists(WB) {
+    if (!WB) return null;
+    if (!isTennchiActive()) return null;
+
+    // 既に居るなら再スキン＆ドロップ継続
+    const exists = findTennchiBunny(WB);
+    if (exists) {
+      skinToTennchi(exists);
+      startTennchiCoinDropLoop(WB, exists);
+      return exists;
+    }
+
+    const before = getBunnyList(WB);
+    const prevIds = new Set(before.map(b => String(b?.bornAt ?? b?.id ?? b?.uuid ?? "")));
+
+    // ✅ 生成（戻り値が Bunny ならそれを使う）
+    const sp = spawnOneNormalBunnyPreferBunny4(WB);
+
+    // 生成直後はDOM反映待ち
+    await new Promise(r => setTimeout(r, 90));
+
+    let b = sp.bunny || pickNewestBunny(WB, prevIds);
+
+    if (!b) {
+      await new Promise(r => setTimeout(r, 140));
+      b = pickNewestBunny(WB, prevIds);
+    }
+    if (!b) return null;
+
+    skinToTennchi(b);
+    startTennchiCoinDropLoop(WB, b);
+    return b;
+  }
+
+  async function spawnTennchiOnPrestige(WB) {
+    setTennchiActive(true);
+    const b = await ensureTennchiExists(WB);
+    return b;
+  }
+
+  function removeTennchi(WB) {
+    setTennchiActive(false);
+    stopTennchiCoinDropLoop();
+
+    const b = findTennchiBunny(WB);
+    if (!b) return;
+
+    try {
+      if (WB?.removeBunnyInstance) { WB.removeBunnyInstance(b); return; }
+    } catch {}
+
+    try { b?.wrap?.remove?.(); } catch {}
+    try {
+      if (Array.isArray(WB?.bunnies)) {
+        const i = WB.bunnies.indexOf(b);
+        if (i >= 0) WB.bunnies.splice(i, 1);
+      }
+    } catch {}
+  }
+
+  /* =========================
+   * UI
+   * ========================= */
+  const PANEL_ID = "wbPrestigePanelV1";
+  let panelEl = null;
+
+  function buildPanel() {
+    ensureStyle();
+    let p = document.getElementById(PANEL_ID);
+    if (!p) {
+      p = document.createElement("div");
+      p.id = PANEL_ID;
+      document.body.appendChild(p);
+    }
+    panelEl = p;
+    if (p.querySelector(".card")) return p;
+
+    p.innerHTML = `
+      <div class="bg"></div>
+      <div class="card" role="dialog" aria-modal="true">
+        <div class="head">
+          <div class="title">${escapeHtml(CFG.LABEL.title)}</div>
+          <button class="close" type="button">${escapeHtml(CFG.LABEL.close)}</button>
+        </div>
+        <div class="body"></div>
+      </div>
+    `;
+
+    p.querySelector(".bg")?.addEventListener("click", (e) => { e.preventDefault(); close(); });
+    p.querySelector(".close")?.addEventListener("click", (e) => { e.preventDefault(); close(); });
+    p.querySelector(".card")?.addEventListener("click", (e) => e.stopPropagation());
+
+    return p;
+  }
+
+  let __liveTimer = 0;
+  function startLiveCoins() {
+    stopLiveCoins();
+    __liveTimer = window.setInterval(() => {
+      const p = panelEl || document.getElementById(PANEL_ID);
+      if (!p || p.style.display !== "block") return;
+      render();
+    }, 250);
+  }
+  function stopLiveCoins() {
+    if (__liveTimer) clearInterval(__liveTimer);
+    __liveTimer = 0;
+  }
+
+  function open() {
+    const p = buildPanel();
+    p.style.display = "block";
+    render();
+    startLiveCoins();
+  }
+
+  function close() {
+    const p = panelEl || document.getElementById(PANEL_ID);
+    if (!p) return;
+    p.style.display = "none";
+    stopLiveCoins();
+  }
+
+  function declared(x) { return !!x; }
+
+  function render() {
+    const WB = window.WB || null;
+    const p = buildPanel();
+    const body = p.querySelector(".body");
+    if (!body) return;
+
+    const st = loadPrestige();
+    const coinsNow = getCoins(WB);
+
+    const earnedNow = Math.max(earnedCoins, 0);
+    const gainStars = calcStarsFromCoins(earnedNow);
+
+    const available = Math.max(0, (st.stars - st.spent));
+
+    const nextStar = Math.max(1, gainStars + 1);
+    const needCoins = nextCoinsForStar(nextStar);
+    const pct = (needCoins > 0) ? clamp((earnedNow / needCoins) * 100, 0, 100) : 0;
+
+    const top = `
+      <div class="row">
+        <span class="pill">現在コイン：<b>🪙 ${format(coinsNow)}</b></span>
+        <span class="pill">${escapeHtml(CFG.LABEL.earned)}：<b>🪙 ${format(earnedNow)}</b></span>
+        <span class="pill">牧場の星：<b>🌟 ${format(st.stars)}</b></span>
+        <span class="pill">使用可能：<b>✨ ${format(available)}</b></span>
+      </div>
+      <div class="row">
+        <div style="flex:1; min-width:240px;">
+          <div class="pill">この状態で転生すると：<b>🌟 +${format(gainStars)}</b></div>
+          <div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+          <div class="hint">次の星（${nextStar}）目安：🪙 ${format(needCoins)}（いま ${pct.toFixed(1)}%）</div>
+          <div class="hint">※ 転生ゲージは「稼いだ総量」です（使って減っても戻りません）。</div>
+        </div>
+
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button class="btn danger hold" type="button" data-prestige="1" ${gainStars <= 0 ? "disabled" : ""}>
+            <span>${escapeHtml(CFG.LABEL.prestigeBtn)}（長押し）</span>
+            <i class="fill"></i>
+          </button>
+        </div>
+      </div>
+      <div style="height:10px"></div>
+    `;
+
+    const perkCards = PERK_MASTER.map(pk => {
+      const owned = !!st.perks[pk.id];
+      const canBuy = !owned && available >= pk.cost;
+      const badge = owned ? `<span class="badge">${escapeHtml(CFG.LABEL.unlocked)}</span>` : `<span class="badge lock">未解放</span>`;
+      const btn = owned
+        ? `<button class="btn" type="button" disabled>${escapeHtml(CFG.LABEL.unlocked)}</button>`
+        : `<button class="btn primary" type="button" data-buy="${escapeHtml(pk.id)}" ${canBuy ? "" : "disabled"}>${escapeHtml(CFG.LABEL.unlock)}（-${pk.cost}）</button>`;
+
+      return `
+        <div class="perk">
+          <div class="name">🌟 ${escapeHtml(pk.name)} <span style="opacity:.75; font-weight:900;">(cost ${pk.cost})</span></div>
+          <div class="desc">${escapeHtml(pk.desc)}${pk.gameplay ? "\n※バランス影響あり" : ""}</div>
+          <div class="foot">
+            <div>${badge}</div>
+            <div style="display:flex; gap:10px; align-items:center;">
+              ${btn}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    const history = (st.history || []).slice(-8).reverse().map(h => {
+      const t = new Date(h.t || Date.now());
+      const dt = `${t.getFullYear()}/${String(t.getMonth()+1).padStart(2,"0")}/${String(t.getDate()).padStart(2,"0")} ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
+      return `<div class="pill">🗓 ${escapeHtml(dt)}：🪙${format(h.earned ?? h.coins ?? 0)} → 🌟+${format(h.stars)}</div>`;
+    }).join(" ");
+
+    body.innerHTML = `
+      ${top}
+      <div class="row">
+        <div class="pill">恒久解放（星で購入）</div>
+        <div class="hint">他モジュールからは <b>WB.prestige.hasPerk("perkId")</b> で参照できます。</div>
+      </div>
+      <div class="grid">${perkCards}</div>
+
+      <div style="height:14px"></div>
+      <div class="row">
+        <div class="pill">転生履歴</div>
+        <div class="hint">${history || "（まだ転生していません）"}</div>
+      </div>
+    `;
+
+    body.querySelectorAll("[data-buy]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-buy") || "";
+        const pk = PERK_MASTER.find(x => x.id === id);
+        if (!declared(pk)) return;
+
+        const st2 = loadPrestige();
+        const avail2 = Math.max(0, st2.stars - st2.spent);
+        if (st2.perks[id]) { render(); return; }
+        if (avail2 < pk.cost) { render(); return; }
+
+        st2.perks[id] = true;
+        st2.spent += pk.cost;
+        savePrestige(st2);
+
+        try { (window.WB || null)?.emit?.("prestige:perk", { id, on: true }); } catch {}
+        render();
+      });
+    });
+
+    const btnPrestige = body.querySelector("[data-prestige]");
+    if (btnPrestige) {
+      const fill = btnPrestige.querySelector(".fill");
+      let downAt = 0;
+      let raf = 0;
+      let holding = false;
+
+      const stopHold = () => {
+        holding = false;
+        downAt = 0;
+        if (raf) cancelAnimationFrame(raf);
+        raf = 0;
+        if (fill) fill.style.width = "0%";
+      };
+
+      const step = () => {
+        if (!holding) return;
+        const now = Date.now();
+        const p = clamp((now - downAt) / CFG.HOLD_MS, 0, 1);
+        if (fill) fill.style.width = `${(p * 100).toFixed(1)}%`;
+
+        if (p >= 1) {
+          stopHold();
+          doPrestige();
+          return;
+        }
+        raf = requestAnimationFrame(step);
+      };
+
+      const startHold = (e) => {
+        if (btnPrestige.disabled) return;
+        e.preventDefault();
+        holding = true;
+        downAt = Date.now();
+        step();
+      };
+
+      btnPrestige.addEventListener("pointerdown", startHold);
+      btnPrestige.addEventListener("pointerup", stopHold);
+      btnPrestige.addEventListener("pointercancel", stopHold);
+      btnPrestige.addEventListener("pointerleave", stopHold);
+    }
+
+    async function doPrestige() {
+      const WB = window.WB || null;
+
+      const st = loadPrestige();
+
+      const earned = Math.max(0, loadEarned());
+      const gain = calcStarsFromCoins(earned);
+      if (gain <= 0) return;
+
+      st.stars += gain;
+      st.history = Array.isArray(st.history) ? st.history : [];
+      st.history.push({ t: Date.now(), earned, coins: getCoins(WB), stars: gain });
+      if (st.history.length > 80) st.history = st.history.slice(-80);
+      savePrestige(st);
+
+      // リセット
+      setCoinsZero(WB);
+      removeAllBunnies(WB);
+      deepWipeLocalStorage();
+
+      resetEarned();
+
+      // ✅ 地上tennchi確実生成
+      await spawnTennchiOnPrestige(WB);
+
+      // 通知（reincarnation_pet.js のトリガーにもなる）
+      try { WB?.emit?.("prestige", { stars: gain, total: st.stars }); } catch {}
+      try { WB?.emit?.("sy:add", { key: "prestige", delta: 1 }); } catch {}
+
+      render();
+    }
+  }
+
+  /* =========================
+   * ✅ coinChanged を購読して最新コイン＆ゲージに反映
+   * ========================= */
+  function hookCoinChanged(WB) {
+    let hooked = false;
+
+    try {
+      if (WB?.on && !WB.__prestigeCoinHookedV152) {
+        WB.on("coinChanged", (payload) => {
+          // payload: number または {coins: number}
+          const cur = (() => {
+            if (typeof payload === "number") return payload;
+            if (payload && typeof payload === "object" && payload.coins != null) return Number(payload.coins);
+            return Number(payload);
+          })();
+
+          if (!Number.isFinite(cur)) return;
+
+          __latestCoins = cur;
+
+          if (__lastCoinForEarn === null) __lastCoinForEarn = cur;
+
+          const diff = cur - __lastCoinForEarn;
+          if (diff > 0) addEarned(diff, "coinChanged");
+
+          __lastCoinForEarn = cur;
+
+          try {
+            const p = panelEl || document.getElementById(PANEL_ID);
+            if (p && p.style.display === "block") render();
+          } catch {}
+        });
+
+        WB.__prestigeCoinHookedV152 = true;
+        hooked = true;
+      }
+    } catch {}
+
+    return hooked;
+  }
+
+  // Public API
+  waitForWB().then(async (WB) => {
+    // 初期同期
+    try {
+      const nowRaw = readCoinsDirect(WB);
+      __latestCoins = nowRaw;
+      __lastCoinForEarn = nowRaw;
+
+      if (!loadEarned() && nowRaw > 0) {
+        earnedCoins = Math.max(earnedCoins, nowRaw);
+        saveEarned(earnedCoins);
+      }
+    } catch {}
+
+    const okHook = hookCoinChanged(WB);
+    if (!okHook) startCoinWatchFallback(WB);
+
+    const api = {
+      open,
+      close,
+      load: loadPrestige,
+      save: savePrestige,
+      hasPerk: (id) => {
+        const st = loadPrestige();
+        return !!st.perks?.[String(id || "")];
+      },
+      getStars: () => {
+        const st = loadPrestige();
+        return Number(st.stars || 0) || 0;
+      },
+      getAvailable: () => {
+        const st = loadPrestige();
+        return Math.max(0, (Number(st.stars || 0) || 0) - (Number(st.spent || 0) || 0));
+      },
+      calcStarsFromCoins,
+      config: CFG,
+      PERK_MASTER,
+
+      onCoinsGained: (delta, source = "external") => addEarned(delta, source),
+      getEarned: () => Math.max(0, loadEarned()),
+      resetEarned: () => resetEarned(),
+
+      getCoins: () => getCoins(window.WB || WB || null),
+
+      tennchi: {
+        isActive: () => isTennchiActive(),
+        ensure: () => ensureTennchiExists(window.WB || null),
+        spawn: () => spawnTennchiOnPrestige(window.WB || null),
+        remove: () => removeTennchi(window.WB || null),
+      },
+    };
+
+    if (WB) WB.prestige = api;
+    else window.WB_PRESTIGE = api;
+
+    // リロード後も常駐
+    try {
+      if (WB && isTennchiActive()) {
+        await ensureTennchiExists(WB);
+      }
+    } catch {}
+
+    console.log("[prestige] ready v1.5.2", {
+      LS_PRESTIGE,
+      earned: CFG.LS_EARNED,
+      hookCoinChanged: !!(WB?.__prestigeCoinHookedV152),
+      fallbackWatchMs: CFG.COIN_WATCH_MS,
+      tennchi: CFG.TENNCHI.IMG
+    });
+  });
 })();
