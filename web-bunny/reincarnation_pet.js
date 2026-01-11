@@ -1,21 +1,20 @@
-// reincarnation_pet.js（転生専用生物：1体だけ常駐 + 天使兎）
-// ✅ 星(牧場の星) >= 1 で出現
-// ✅ 1体だけ（重複生成しない）
-// ✅ ふわふわ漂う + キラ演出
-// ✅ 転生時に assets/tennchi.png の兎を1体出現
+// reincarnation_pet.js（転生時専用ペット：1体常駐）
+// ✅ prestige.js の WB.emit("prestige") をトリガーに出現
+// ✅ 1体のみ（重複生成なし）
+// ✅ assets/tennchi.png の兎
+// ✅ リロード後も常駐（LSでフラグ保存）
 
 (() => {
   "use strict";
-  if (window.__REINC_PET_V2__) return;
-  window.__REINC_PET_V2__ = true;
+  if (window.__REINC_PET_V3__) return;
+  window.__REINC_PET_V3__ = true;
 
   const CFG = {
-    LS_PRESTIGE: "wb_prestige_v1",   // ⭐ prestige.js と統一
-    ID: "reincarnationPetV2",
+    LS_FLAG: "milkpop_reinc_pet_unlocked_v1", // 転生済みフラグ
+    ID: "reincarnationPetV3",
     IMG: "./assets/tennchi.png",
 
     size: 72,
-    tickMs: 60,
     speed: 34,
     bobSpeed: 0.0012,
     boundsPad: 14,
@@ -24,16 +23,13 @@
   const $ = (q, p = document) => p.querySelector(q);
 
   /* =========================
-   * 星取得（prestige.js準拠）
+   * 状態
    * ========================= */
-  function getStars() {
-    try {
-      const st = JSON.parse(localStorage.getItem(CFG.LS_PRESTIGE) || "null");
-      const n = Number(st?.stars || 0);
-      return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : 0;
-    } catch {
-      return 0;
-    }
+  function isUnlocked() {
+    return localStorage.getItem(CFG.LS_FLAG) === "true";
+  }
+  function unlock() {
+    localStorage.setItem(CFG.LS_FLAG, "true");
   }
 
   function waitForWB(timeout = 12000) {
@@ -57,9 +53,9 @@
    * Style
    * ========================= */
   function ensureStyle() {
-    if (document.getElementById("reincPetStyleV2")) return;
+    if (document.getElementById("reincPetStyleV3")) return;
     const s = document.createElement("style");
-    s.id = "reincPetStyleV2";
+    s.id = "reincPetStyleV3";
     s.textContent = `
 #${CFG.ID}{
   position:absolute;
@@ -69,7 +65,6 @@
   z-index:80;
   will-change:transform;
 }
-
 #${CFG.ID} .aura{
   position:absolute;
   inset:0;
@@ -82,18 +77,14 @@
   );
   filter:drop-shadow(0 18px 28px rgba(255,255,255,.25));
 }
-
 #${CFG.ID} img{
   position:absolute;
   left:50%; top:50%;
   width:${CFG.size}px;
-  height:auto;
   transform:translate(-50%,-50%);
-  pointer-events:none;
   user-select:none;
   -webkit-user-drag:none;
 }
-
 #${CFG.ID} .ring{
   position:absolute;
   left:50%; top:50%;
@@ -105,7 +96,6 @@
   animation:reincRing 2.4s linear infinite;
   opacity:.65;
 }
-
 #${CFG.ID} .spark{
   position:absolute;
   left:50%;
@@ -116,7 +106,6 @@
   opacity:.9;
   animation:reincSpark 1.2s ease-in-out infinite;
 }
-
 @keyframes reincRing{
   from{ transform:translate(-50%,-50%) rotate(0deg); }
   to  { transform:translate(-50%,-50%) rotate(360deg); }
@@ -131,7 +120,7 @@
   }
 
   /* =========================
-   * Field
+   * DOM
    * ========================= */
   function getField(WB) {
     return WB?.field || $("#field") || document.body;
@@ -156,23 +145,16 @@
     return el;
   }
 
-  function removePet() {
-    try { document.getElementById(CFG.ID)?.remove(); } catch {}
-  }
-
   /* =========================
-   * Main
+   * Motion
    * ========================= */
-  waitForWB().then((WB) => {
+  function startFloating(WB) {
     let x = 60, y = 80;
     let vx = 1, vy = 0.7;
     let last = performance.now();
 
     function tick(now) {
-      if (getStars() < 1) {
-        removePet();
-        return;
-      }
+      if (!isUnlocked()) return;
 
       const pet = ensurePet(WB);
       const field = getField(WB);
@@ -198,35 +180,38 @@
 
       pet.style.transform =
         `translate3d(${Math.round(x)}px, ${Math.round(y + bob)}px, 0)`;
+
+      requestAnimationFrame(tick);
     }
 
-    function loop() {
-      if (getStars() < 1) {
-        removePet();
-        setTimeout(loop, 500);
-        return;
-      }
-      const raf = () => {
-        tick(performance.now());
-        requestAnimationFrame(raf);
-      };
-      requestAnimationFrame(raf);
-    }
+    requestAnimationFrame(tick);
+  }
 
-    // 転生直後に即反映
-    try { WB?.on?.("prestige", loop); } catch {}
-    try { WB?.on?.("starsChanged", loop); } catch {}
+  /* =========================
+   * Boot
+   * ========================= */
+  waitForWB().then((WB) => {
+    if (isUnlocked()) startFloating(WB);
 
-    loop();
+    // ✅ 転生イベントを正式トリガーに
+    try {
+      WB?.on?.("prestige", () => {
+        unlock();
+        startFloating(WB);
+      });
+    } catch {}
 
     // API
     if (WB) {
       WB.reincPet = {
-        remove: removePet,
-        isActive: () => getStars() >= 1,
+        isActive: () => isUnlocked(),
+        remove: () => {
+          try { document.getElementById(CFG.ID)?.remove(); } catch {}
+          localStorage.removeItem(CFG.LS_FLAG);
+        },
       };
     }
 
-    console.log("[reincarnation_pet] ready (tennchi bunny spawn)");
+    console.log("[reincarnation_pet] ready (prestige-triggered tennchi bunny)");
   });
 })();
