@@ -44,7 +44,7 @@
     TENNCHI: {
       LS_ACTIVE: "wb_tennchi_active_v1",
       WRAP_MARK: "data-tennshi",
-      IMG: "./assets/tennchi.png",
+      IMG: "./assets/tennshi.png",
 
       dropEveryMs: 2300,
       dropCount: 3,
@@ -301,13 +301,13 @@
   }
 
   /* =========================
-   * tennchi（地上うさぎ）：確実生成
+   * tennshi（地上うさぎ）：確実生成
    * ========================= */
-  function isTennchiActive() {
-    return localStorage.getItem(CFG.TENNCHI.LS_ACTIVE) === "true";
+  function isTennshiActive() {
+    return localStorage.getItem(CFG.TENNSHI.LS_ACTIVE) === "true";
   }
-  function setTennchiActive(on) {
-    try { localStorage.setItem(CFG.TENNCHI.LS_ACTIVE, on ? "true" : "false"); } catch {}
+  function setTennshiActive(on) {
+    try { localStorage.setItem(CFG.TENNSHI.LS_ACTIVE, on ? "true" : "false"); } catch {}
   }
 
   function getBunnyList(WB) {
