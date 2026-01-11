@@ -65,8 +65,11 @@
   ========================= */
   const SPECIAL_Z_INDEX = 340000; // UFO(350000)より下 / アイテムより上想定
   const SPECIAL_CHANCE_PER_SEC = 0.0016; // 0.16%/sec（目安：10分に1回くらい）
-  const SPECIAL_MIN_DURATION_SEC = 5.5;
-  const SPECIAL_MAX_DURATION_SEC = 10.0;
+
+  // ✅✅ 変更点：ランダム天気（特殊演出）を “もう少し長く” 表示
+  // 旧：5.5〜10.0秒 → 新：8〜16秒
+  const SPECIAL_MIN_DURATION_SEC = 8.0;
+  const SPECIAL_MAX_DURATION_SEC = 16.0;
 
   // ✅ さらに軽くしたいなら opacity を 0.45〜0.5 に下げると合成コストが下がることが多い
   const SPECIALS = [
