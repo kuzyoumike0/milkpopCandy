@@ -1,337 +1,600 @@
-// mirrorball_dance.js (V4.3 - for bgcolor.js V12/V13 auto + QUADS)
-// ✅ bgcolor.js の bgMirrorFXWrapV12 / V13 / etc を自動検出（存在/削除を繰り返しても追従）
-// ✅ beam は getBoxQuads() 優先で “変形後の実座標” から三角形化 → 見た目通りに当たる
-// ✅ beamが消える/出るが頻繁でも tick 毎に再検出
-// ✅ うさぎ検出：.bunnyWrap / .bunny-wrap / #bunnyLayer img の親
-//
-// 読み込み順：bgcolor.js の後（最後）推奨
+// bgcolor.js（V12.1 - itemPlace key auto-detect / spotlight always reliable）
+// ✅ 朝昼夜 背景をJSTで自動
+// ✅ mirrorball：購入済み + enabled=true + placed=true のときだけ有効
+// ✅ itemPlace の保存キー milkpop_itemplace_v* を自動検出（v8/v9/v10/v11…全部対応）
+// ✅ #itemPlace_mirrorball が存在する場合はそれを優先して光源位置に使う
+// ✅ 軽量：rAF1本 / 30秒ごと再同期 / OFF時は残骸ゼロ
+// ✅ 転生仕様（あなたのV12のまま維持）
 
 (() => {
   "use strict";
-  if (window.__MIRRORBALL_DANCE_V43__) return;
-  window.__MIRRORBALL_DANCE_V43__ = true;
 
-  const CFG = {
-    tickMs: 110,
-    padPx: 16,
-    debug: false, // true: 当たり判定の点を表示
+  const LS_OWNED = "milkpop_shop_owned_v1";
+  const LS_IP_EN = "milkpop_itemplace_enabled_v1";
+
+  // ✅ 転生フラグ
+  const LS_REINC = "milkpop_reincarnation_v1";
+
+  const BG_ID    = "bgLayer";
+  const FIELD_ID = "field";
+
+  const MIRROR_DOM_ID = "itemPlace_mirrorball"; // itemPlace が作る実物（理想）
+  const MIRROR_IMG_FALLBACK = {
+    id: "bgMirrorballImgV12",
+    src: "./assets/bg/mirrorball.png",
+    top: 8,
+    size: 140,
+    z: 40,
+  };
+
+  const FX = {
+    wrapId: "bgMirrorFXWrapV12",
+    leftId: "bgMirrorFXLeftV12",
+    rightId:"bgMirrorFXRightV12",
+    styleId:"bgMirrorFXStyleV12",
+    z: 25,
+
+    width: 520,
+    height: 860,
+    blur: 4.0,
+    opacityDay: 0.52,
+    opacityNight: 0.76,
+
+    baseAngleL: -20,
+    baseAngleR:  20,
+    swayDeg: 14,
+    swaySpeed: 0.00155,
+    hueSpeed: 0.035,
+
+    anchorX: 0.50,
+    anchorY: 0.62,
+  };
+
+  // ✅ 転生専用生物（DOM）
+  const REBORN = {
+    id: "wbReincarnatedCreatureV1",
+    styleId: "wbReincarnatedCreatureStyleV1",
+    z: 80,
+  };
+
+  const MORNING = { start: 5, end: 10 };
+  const DAY     = { start: 10, end: 17 };
+
+  const THEMES = {
+    morning: "linear-gradient(180deg, #ffe7b8 0%, #ffd6e7 55%, #ffffff 100%)",
+    day:     "linear-gradient(180deg, #bfe9ff 0%, #d9f7ff 55%, #ffffff 100%)",
+    night:   "linear-gradient(180deg, #0b1026 0%, #141b3a 55%, #2b1b44 100%)",
+    reincarnated: "radial-gradient(circle at 50% 35%, rgba(255,255,255,.95) 0%, rgba(250,210,255,.55) 22%, rgba(120,220,255,.35) 45%, rgba(20,18,38,1) 100%)",
   };
 
   const $ = (q, p = document) => p.querySelector(q);
+  function safeParse(raw) { try { return raw ? JSON.parse(raw) : null; } catch { return null; } }
 
-  function waitForWB(timeout = 12000) {
-    const start = Date.now();
-    return new Promise((resolve) => {
-      const t = setInterval(() => {
-        if (window.WB && typeof window.WB === "object") {
-          clearInterval(t);
-          resolve(window.WB);
-          return;
-        }
-        if (Date.now() - start > timeout) {
-          clearInterval(t);
-          resolve(null);
-        }
-      }, 50);
-    });
-  }
-
-  function ensureStyle() {
-    if (document.getElementById("wbMirrorballDanceStyleV43")) return;
-    const s = document.createElement("style");
-    s.id = "wbMirrorballDanceStyleV43";
-    s.textContent = `
-.wbDancing{ filter:saturate(1.06) brightness(1.07); }
-.wbDanceInner{ width:100%; height:100%; }
-.wbDancing .wbDanceInner{ animation: wbDanceHopV43 .42s ease-in-out infinite; }
-.wbDancing .wbDanceInner img{
-  transform-origin:50% 85%;
-  animation: wbDanceWiggleV43 .42s ease-in-out infinite;
-}
-@keyframes wbDanceWiggleV43{
-  0%{transform:rotate(-4deg) translateY(0) scale(1);}
-  50%{transform:rotate(4deg) translateY(-1px) scale(1.02);}
-  100%{transform:rotate(-4deg) translateY(0) scale(1);}
-}
-@keyframes wbDanceHopV43{
-  0%{transform:translateY(0);}
-  50%{transform:translateY(-2px);}
-  100%{transform:translateY(0);}
-}
-.wbDanceSparkle{
-  position:absolute; left:50%; top:-18px;
-  transform:translateX(-50%);
-  font-size:14px; font-weight:1000;
-  pointer-events:none;
-}
-.wbDanceDbgDot{
-  position:fixed;
-  width:7px; height:7px;
-  border-radius:999px;
-  background:#ff2aa6;
-  z-index:2147483647;
-  transform:translate(-50%,-50%);
-  pointer-events:none;
-}
-.wbDanceDbgDot.a{ background:#00c2ff; }
-.wbDanceDbgDot.b{ background:#00ff88; }
-.wbDanceDbgDot.c{ background:#ffd000; }
-`;
-    document.head.appendChild(s);
-  }
-
-  /* =========================
-   * Bunny wraps
-   * ========================= */
-  function findBunnyWraps() {
-    const a = Array.from(document.querySelectorAll(".bunnyWrap,.bunny-wrap"));
-    if (a.length) return a;
-
-    const layer = $("#bunnyLayer") || $("#bunnylayer");
-    if (!layer) return [];
-    return [...new Set([...layer.querySelectorAll("img")].map(i => i.parentElement).filter(Boolean))];
-  }
-
-  function ensureMotionInner(wrap) {
-    let inner = null;
-    try { inner = wrap.querySelector(":scope>.wbDanceInner"); } catch {}
-    if (inner) return inner;
-
-    const img = wrap.querySelector("img");
-    if (!img) return null;
-
-    inner = document.createElement("div");
-    inner.className = "wbDanceInner";
-    wrap.insertBefore(inner, img);
-    inner.appendChild(img);
-    return inner;
-  }
-
-  function setDancing(wrap, on) {
-    if (!wrap) return;
-    if (on) {
-      wrap.classList.add("wbDancing");
-      ensureMotionInner(wrap);
-      if (!wrap.querySelector(".wbDanceSparkle")) {
-        const z = document.createElement("div");
-        z.className = "wbDanceSparkle";
-        z.textContent = "✨";
-        wrap.appendChild(z);
-      }
-    } else {
-      wrap.classList.remove("wbDancing");
-      wrap.querySelector(".wbDanceSparkle")?.remove();
+  function getJSTHour() {
+    try {
+      const parts = new Intl.DateTimeFormat("ja-JP", {
+        timeZone: "Asia/Tokyo",
+        hour: "2-digit",
+        hour12: false,
+      }).formatToParts(new Date());
+      return Number(parts.find(p => p.type === "hour")?.value ?? 0);
+    } catch {
+      return new Date().getHours();
     }
   }
-
-  function centerOfWrap(wrap) {
-    if (!wrap?.isConnected) return null;
-    const img = wrap.querySelector("img");
-    const el = (img && img.getBoundingClientRect().width) ? img : wrap;
-    const r = el.getBoundingClientRect();
-    if (!r.width || !r.height) return null;
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  function getPhaseByHour(h) {
+    if (h >= MORNING.start && h < MORNING.end) return "morning";
+    if (h >= DAY.start && h < DAY.end) return "day";
+    return "night";
   }
 
-  /* =========================
-   * FX wrap / beams detection (V12/V13/etc)
-   * ========================= */
-  function pickFXWrap() {
-    // bgcolor.js は wrapId を bgMirrorFXWrapV12 / V13… にする
-    let w = document.querySelector('[id^="bgMirrorFXWrapV"]');
-    if (w) return w;
-
-    // 念のため広く（bgMirrorFXWrap を含む ID）
-    w = [...document.querySelectorAll("div")].find(el => /bgMirrorFXWrap/i.test(el.id || ""));
-    return w || null;
-  }
-
-  function getBeamsFromWrap(w) {
-    if (!w) return [];
-    const sel = [
-      '[id^="bgMirrorFXLeftV"]',
-      '[id^="bgMirrorFXRightV"]',
-      '[id*="bgMirrorFXLeft"]',
-      '[id*="bgMirrorFXRight"]',
-      ".beam", // bgcolor.js の beam class
-    ].join(",");
-    return [...w.querySelectorAll(sel)].filter(el => el && el.isConnected);
-  }
-
-  function isVisible(el) {
+  function ensureLayerReady(el) {
+    if (!el) return;
     try {
       const cs = getComputedStyle(el);
-      if (cs.display === "none" || cs.visibility === "hidden") return false;
-      if (Number(cs.opacity || "1") <= 0.01) return false;
-      return true;
-    } catch {
-      return true;
-    }
+      if (cs.position === "static") el.style.position = "relative";
+    } catch {}
+    el.style.overflow = "hidden";
   }
 
-  /* =========================
-   * Beam -> triangle (QUADS)
-   * ========================= */
-  function buildBeamTriangle(el) {
-    if (!el?.isConnected) return null;
-    if (!isVisible(el)) return null;
+  // ===== 転生判定 =====
+  function isReincarnated() {
+    const v = String(localStorage.getItem(LS_REINC) || "").trim().toLowerCase();
+    return v === "true" || v === "1" || v === "yes" || v === "on";
+  }
 
-    // ✅ getBoxQuads が最強（変形後の実座標）
+  // ===== mirrorball 判定 =====
+  function isOwnedMirrorball() {
+    try { if (window.WB?.shop?.isOwned?.("mirrorball")) return true; } catch {}
+    const j = safeParse(localStorage.getItem(LS_OWNED));
+    return !!j?.mirrorball;
+  }
+
+  function itemPlaceEnabledMirrorball() {
+    const en = safeParse(localStorage.getItem(LS_IP_EN)) || {};
+    if (typeof en.mirrorball !== "boolean") return true;
+    return !!en.mirrorball;
+  }
+
+  // ✅ itemPlace保存キーを自動検出
+  function detectItemPlaceStateKey() {
+    // WBが教えてくれるなら最優先（将来用）
     try {
-      if (typeof el.getBoxQuads === "function") {
-        const q = el.getBoxQuads({ box: "border" })?.[0];
-        if (q) {
-          const pts = [
-            { x: q.p1.x, y: q.p1.y },
-            { x: q.p2.x, y: q.p2.y },
-            { x: q.p3.x, y: q.p3.y },
-            { x: q.p4.x, y: q.p4.y },
-          ];
+      const k = window.WB?.itemplace?.LS_STATE_KEY;
+      if (typeof k === "string" && k) return k;
+    } catch {}
 
-          // 上2点/下2点を分ける
-          pts.sort((a, b) => a.y - b.y);
-          const top2 = pts.slice(0, 2).sort((a, b) => a.x - b.x);
-          const bot2 = pts.slice(2, 4).sort((a, b) => a.x - b.x);
-
-          const p0 = { x: (top2[0].x + top2[1].x) / 2, y: (top2[0].y + top2[1].y) / 2 };
-          const p1 = bot2[0];
-          const p2 = bot2[1];
-          return { p0, p1, p2 };
-        }
+    // localStorage の milkpop_itemplace_v* を全部見て「mirrorball.placed===true」があるキーを採用
+    const keys = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && /^milkpop_itemplace_v\d+$/i.test(k)) keys.push(k);
       }
     } catch {}
 
-    // 最終保険：rect近似
-    try {
-      const r = el.getBoundingClientRect();
-      if (!r.width || !r.height) return null;
-      return {
-        p0: { x: r.left + r.width / 2, y: r.top },
-        p1: { x: r.left, y: r.bottom },
-        p2: { x: r.right, y: r.bottom },
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  function sign(p1, p2, p3) {
-    return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
-  }
-
-  function pointInTri(pt, a, b, c, pad) {
-    const d1 = sign(pt, a, b);
-    const d2 = sign(pt, b, c);
-    const d3 = sign(pt, c, a);
-    const inside = !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
-    if (inside) return true;
-
-    const dist = (p, v, w) => {
-      const l2 = (w.x - v.x) ** 2 + (w.y - v.y) ** 2;
-      if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
-      let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
-      t = Math.max(0, Math.min(1, t));
-      const px = v.x + t * (w.x - v.x);
-      const py = v.y + t * (w.y - v.y);
-      return Math.hypot(p.x - px, p.y - py);
-    };
-
-    return (
-      dist(pt, a, b) <= pad ||
-      dist(pt, b, c) <= pad ||
-      dist(pt, c, a) <= pad
-    );
-  }
-
-  /* =========================
-   * Debug dots
-   * ========================= */
-  let dbgCenter, dbgA, dbgB, dbgC;
-  function ensureDbg() {
-    if (dbgCenter) return;
-    const mk = (cls) => {
-      const d = document.createElement("div");
-      d.className = "wbDanceDbgDot " + cls;
-      document.body.appendChild(d);
-      return d;
-    };
-    dbgCenter = mk("");
-    dbgA = mk("a");
-    dbgB = mk("b");
-    dbgC = mk("c");
-  }
-  function moveDot(el, p) {
-    el.style.left = p.x + "px";
-    el.style.top = p.y + "px";
-  }
-
-  /* =========================
-   * Main
-   * ========================= */
-  waitForWB().then((WB) => {
-    ensureStyle();
-
-    function tick() {
-      const wraps = findBunnyWraps();
-
-      // FXは tickごとに探す（bgcolor.js が消したり作ったりするため）
-      const fxWrap = pickFXWrap();
-      const beamEls = getBeamsFromWrap(fxWrap);
-
-      if (!fxWrap || !beamEls.length) {
-        wraps.forEach(w => setDancing(w, false));
-        return;
-      }
-
-      const tris = beamEls.map(buildBeamTriangle).filter(Boolean);
-      if (!tris.length) {
-        wraps.forEach(w => setDancing(w, false));
-        return;
-      }
-
-      const pad = Number(CFG.padPx) || 0;
-
-      for (const w of wraps) {
-        const c = centerOfWrap(w);
-        if (!c) { setDancing(w, false); continue; }
-
-        const hit = tris.some(t => pointInTri(c, t.p0, t.p1, t.p2, pad));
-        setDancing(w, hit);
-
-        // debug：1つ目だけ表示
-        if (CFG.debug && tris[0]) {
-          ensureDbg();
-          moveDot(dbgCenter, c);
-          moveDot(dbgA, tris[0].p0);
-          moveDot(dbgB, tris[0].p1);
-          moveDot(dbgC, tris[0].p2);
-        }
-      }
-    }
-
-    tick();
-    const timer = setInterval(tick, CFG.tickMs);
-
-    // bgcolor/itemPlace 側の更新にも追従
-    try { WB?.on?.("itemplace:state_changed", () => tick()); } catch {}
-    try { WB?.on?.("itemPlaced", () => tick()); } catch {}
-    try { WB?.on?.("itemRemoved", () => tick()); } catch {}
-    try { WB?.on?.("resize", () => tick()); } catch {}
-
-    // API
-    if (WB) {
-      WB.mirrorballDance = {
-        stop: () => { try { clearInterval(timer); } catch {} try { findBunnyWraps().forEach(w => setDancing(w, false)); } catch {} },
-        tick,
-        config: CFG,
-      };
-    }
-
-    console.log("[mirrorball_dance] ready V4.3 (for bgcolor V12)", {
-      fxFound: !!pickFXWrap(),
-      quads: !!Element.prototype.getBoxQuads,
-      tickMs: CFG.tickMs,
-      padPx: CFG.padPx,
+    // まず “最新っぽい番号が大きい順” に見る
+    keys.sort((a, b) => {
+      const na = parseInt(a.replace(/\D/g, ""), 10) || 0;
+      const nb = parseInt(b.replace(/\D/g, ""), 10) || 0;
+      return nb - na;
     });
-  });
+
+    // placed=true が見つかったキー
+    for (const k of keys) {
+      const st = safeParse(localStorage.getItem(k)) || {};
+      const s = st?.mirrorball;
+      if (s && typeof s === "object" && s.placed === true) return k;
+    }
+
+    // placedが見つからなくても、とりあえず “最新キー” を返す（デバッグ用）
+    return keys[0] || "milkpop_itemplace_v10";
+  }
+
+  function readMirrorballState() {
+    const key = detectItemPlaceStateKey();
+    const st = safeParse(localStorage.getItem(key)) || {};
+    return { key, st };
+  }
+
+  function itemPlacePlacedMirrorball() {
+    const { st } = readMirrorballState();
+    const s = st?.mirrorball;
+    return !!(s && typeof s === "object" && s.placed === true);
+  }
+
+  function shouldOn() {
+    if (!isOwnedMirrorball()) return false;
+    if (!itemPlaceEnabledMirrorball()) return false;
+
+    // ✅ DOMに実物が居るなら、それだけで「置かれている」とみなす（強い）
+    const real = document.getElementById(MIRROR_DOM_ID);
+    if (real && real.isConnected) return true;
+
+    if (!itemPlacePlacedMirrorball()) return false;
+    return true;
+  }
+
+  function cleanupFX() {
+    try { document.getElementById(FX.wrapId)?.remove(); } catch {}
+  }
+  function cleanupMirrorFallbackImg() {
+    try { document.getElementById(MIRROR_IMG_FALLBACK.id)?.remove(); } catch {}
+  }
+
+  // ===== 転生：うさぎ & ハート掃除 =====
+  function removeNodes(list) { list.forEach(el => { try { el.remove(); } catch {} }); }
+
+  function clearBunniesAndHearts() {
+    try { removeNodes(Array.from(document.querySelectorAll(".bunnyWrap, .bunny-wrap"))); } catch {}
+    try { $("#bunnyLayer")?.replaceChildren(); } catch {}
+    try { $("#bunnylayer")?.replaceChildren(); } catch {}
+
+    try { removeNodes(Array.from(document.querySelectorAll('img[src*="hart"],img[src*="heart"],img[src*="Hart"],img[src*="Heart"]'))); } catch {}
+    try { removeNodes(Array.from(document.querySelectorAll(".hart,.heart,.wbHeart,.wbHart"))); } catch {}
+
+    try {
+      if (window.WB) {
+        if (Array.isArray(window.WB.bunnies)) window.WB.bunnies.length = 0;
+        try { window.WB.emit?.("bunnyCountChanged", { count: 0 }); } catch {}
+      }
+    } catch {}
+  }
+
+  // ===== 転生：専用生物1体 =====
+  function ensureRebornStyle() {
+    if (document.getElementById(REBORN.styleId)) return;
+    const st = document.createElement("style");
+    st.id = REBORN.styleId;
+    st.textContent = `
+#${REBORN.id}{
+  position:absolute;
+  left:50%;
+  top:52%;
+  transform:translate(-50%,-50%);
+  width:96px; height:96px;
+  border-radius:999px;
+  z-index:${REBORN.z};
+  pointer-events:none;
+  user-select:none;
+  background: radial-gradient(circle at 35% 35%, rgba(255,255,255,.98) 0%, rgba(255,220,250,.85) 28%, rgba(160,230,255,.55) 52%, rgba(255,255,255,0) 70%);
+  filter: drop-shadow(0 18px 28px rgba(255,255,255,.22));
+  animation: wbRebornFloat 2.8s ease-in-out infinite;
+}
+#${REBORN.id}::after{
+  content:"✦";
+  position:absolute;
+  left:50%; top:50%;
+  transform:translate(-50%,-50%);
+  font-size:28px; font-weight:1000;
+  opacity:.92;
+  text-shadow: 0 10px 22px rgba(0,0,0,.18);
+  animation: wbRebornTwinkle 1.25s ease-in-out infinite;
+}
+@keyframes wbRebornFloat{
+  0%{ transform:translate(-50%,-50%) translateY(0) scale(1.00); }
+  50%{ transform:translate(-50%,-50%) translateY(-10px) scale(1.03); }
+  100%{ transform:translate(-50%,-50%) translateY(0) scale(1.00); }
+}
+@keyframes wbRebornTwinkle{
+  0%{ opacity:.70; transform:translate(-50%,-50%) rotate(0deg) scale(0.95); }
+  50%{ opacity:1.00; transform:translate(-50%,-50%) rotate(12deg) scale(1.05); }
+  100%{ opacity:.70; transform:translate(-50%,-50%) rotate(0deg) scale(0.95); }
+}`;
+    document.head.appendChild(st);
+  }
+
+  function ensureRebornCreature(on) {
+    const field = document.getElementById(FIELD_ID);
+    if (!field) return;
+    ensureLayerReady(field);
+    ensureRebornStyle();
+
+    let el = document.getElementById(REBORN.id);
+    if (!on) {
+      if (el) { try { el.remove(); } catch {} }
+      return;
+    }
+    if (!el) {
+      el = document.createElement("div");
+      el.id = REBORN.id;
+      field.appendChild(el);
+    } else if (el.parentElement !== field) {
+      field.appendChild(el);
+    }
+  }
+
+  // ===== mirrorball fallback =====
+  function ensureMirrorFallbackStyle() {
+    const id = "bgMirrorballStyleV12";
+    if (document.getElementById(id)) return;
+    const st = document.createElement("style");
+    st.id = id;
+    st.textContent = `
+#${MIRROR_IMG_FALLBACK.id}{
+  position:absolute;
+  left:50%;
+  top:${MIRROR_IMG_FALLBACK.top}px;
+  transform:translateX(-50%);
+  width:${MIRROR_IMG_FALLBACK.size}px;
+  height:auto;
+  z-index:${MIRROR_IMG_FALLBACK.z};
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+  filter: drop-shadow(0 16px 30px rgba(0,0,0,.25));
+}`;
+    document.head.appendChild(st);
+  }
+
+  function ensureMirrorFallbackImg(bgLayer, on) {
+    if (!bgLayer) return;
+    ensureLayerReady(bgLayer);
+    ensureMirrorFallbackStyle();
+
+    const real = document.getElementById(MIRROR_DOM_ID);
+    if (real && real.isConnected) {
+      cleanupMirrorFallbackImg();
+      return;
+    }
+
+    if (!on) { cleanupMirrorFallbackImg(); return; }
+
+    let img = document.getElementById(MIRROR_IMG_FALLBACK.id);
+    if (!img) {
+      img = document.createElement("img");
+      img.id = MIRROR_IMG_FALLBACK.id;
+      img.alt = "mirrorball";
+      img.src = MIRROR_IMG_FALLBACK.src;
+      img.draggable = false;
+      bgLayer.appendChild(img);
+    } else if (img.getAttribute("src") !== MIRROR_IMG_FALLBACK.src) {
+      img.src = MIRROR_IMG_FALLBACK.src;
+    }
+  }
+
+  function ensureFXStyle() {
+    if (document.getElementById(FX.styleId)) return;
+    const st = document.createElement("style");
+    st.id = FX.styleId;
+    st.textContent = `
+#${FX.wrapId}{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  overflow:hidden;
+  z-index:${FX.z};
+  display:none;
+}
+#${FX.wrapId} .beam{
+  position:absolute;
+  left:0; top:0;
+  transform-origin: 50% 0%;
+  pointer-events:none;
+  mix-blend-mode: screen;
+  border-radius: 18px;
+  clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+  background: linear-gradient(90deg,
+    rgba(255,0,80,.92) 0%,
+    rgba(255,140,0,.92) 14%,
+    rgba(255,230,0,.92) 28%,
+    rgba(0,255,120,.92) 42%,
+    rgba(0,210,255,.92) 56%,
+    rgba(0,120,255,.92) 70%,
+    rgba(170,70,255,.92) 84%,
+    rgba(255,0,180,.92) 100%
+  );
+  box-shadow: 0 0 40px rgba(255,255,255,.15) inset;
+}`;
+    document.head.appendChild(st);
+  }
+
+  function ensureFX(bgLayer) {
+    if (!bgLayer) return null;
+    ensureLayerReady(bgLayer);
+    ensureFXStyle();
+
+    let wrap = document.getElementById(FX.wrapId);
+    if (!wrap) {
+      wrap = document.createElement("div");
+      wrap.id = FX.wrapId;
+      wrap.innerHTML = `<div class="beam" id="${FX.leftId}"></div><div class="beam" id="${FX.rightId}"></div>`;
+      bgLayer.insertBefore(wrap, bgLayer.firstChild);
+    } else {
+      if (wrap.parentElement !== bgLayer) bgLayer.insertBefore(wrap, bgLayer.firstChild);
+      else if (bgLayer.firstChild !== wrap) bgLayer.insertBefore(wrap, bgLayer.firstChild);
+    }
+    return wrap;
+  }
+
+  function getAnchorInBg(bgLayer) {
+    const br = bgLayer.getBoundingClientRect();
+    if (!br.width || !br.height) return null;
+
+    const real = document.getElementById(MIRROR_DOM_ID);
+    if (real && real.isConnected) {
+      const r = real.getBoundingClientRect();
+      if (r.width > 2 && r.height > 2) {
+        const x = (r.left + r.width * FX.anchorX) - br.left;
+        const y = (r.top  + r.height * FX.anchorY) - br.top;
+        return { x, y };
+      }
+    }
+
+    const field = document.getElementById(FIELD_ID);
+    if (!field) return null;
+
+    const { key, st } = readMirrorballState();
+    const s = st?.mirrorball;
+    if (!s || !s.placed) return null;
+
+    const fr = field.getBoundingClientRect();
+    const x = (fr.left + Number(s.x || 0) + MIRROR_IMG_FALLBACK.size * FX.anchorX) - br.left;
+    const y = (fr.top  + Number(s.y || 0) + MIRROR_IMG_FALLBACK.size * FX.anchorY) - br.top;
+
+    // どのキーを採用してるかログに残す（デバッグ用）
+    return { x, y, __key: key };
+  }
+
+  function syncFXLayout(phase) {
+    const bgLayer = document.getElementById(BG_ID);
+    const field   = document.getElementById(FIELD_ID);
+    if (!bgLayer) return;
+
+    ensureLayerReady(bgLayer);
+    if (field) ensureLayerReady(field);
+
+    const on = shouldOn();
+
+    ensureMirrorFallbackImg(bgLayer, on);
+
+    const fxWrap = ensureFX(bgLayer);
+    if (!fxWrap) return;
+
+    if (!on) {
+      fxWrap.style.display = "none";
+      cleanupFX();
+      return;
+    }
+
+    const a = getAnchorInBg(bgLayer);
+    if (!a) {
+      fxWrap.style.display = "none";
+      return;
+    }
+
+    fxWrap.style.display = "block";
+
+    const L = document.getElementById(FX.leftId);
+    const R = document.getElementById(FX.rightId);
+    if (!L || !R) return;
+
+    const op = (phase === "night") ? FX.opacityNight : FX.opacityDay;
+
+    const common = (el) => {
+      el.style.left = `${Math.round(a.x)}px`;
+      el.style.top  = `${Math.round(a.y)}px`;
+      el.style.width  = `${FX.width}px`;
+      el.style.height = `${FX.height}px`;
+      el.style.opacity = String(op);
+      el.style.filter = `blur(${FX.blur}px) saturate(1.35)`;
+    };
+
+    common(L); common(R);
+    L.style.transform = `translateX(-50%) rotate(${FX.baseAngleL}deg)`;
+    R.style.transform = `translateX(-50%) rotate(${FX.baseAngleR}deg)`;
+
+    // ✅ どの itemplace キーを見てるかを一回だけ出す（うるさくならないように）
+    if (!syncFXLayout.__loggedKey && a.__key) {
+      syncFXLayout.__loggedKey = true;
+      console.log("[bgcolor] itemPlace key detected:", a.__key);
+    }
+  }
+
+  // ===== 転生反映 =====
+  let __prevReinc = false;
+  function applyReincarnation(force = false) {
+    const on = isReincarnated();
+    if (force || on !== __prevReinc) {
+      __prevReinc = on;
+      if (on) clearBunniesAndHearts();
+    }
+    ensureRebornCreature(on);
+    return on;
+  }
+
+  let lastPhase = "";
+  function applyBg(force = false) {
+    const bgLayer = document.getElementById(BG_ID);
+    const field   = document.getElementById(FIELD_ID);
+    if (!bgLayer) return;
+
+    ensureLayerReady(bgLayer);
+    if (field) ensureLayerReady(field);
+
+    const reinc = applyReincarnation(force);
+
+    if (reinc) {
+      const bg = THEMES.reincarnated || THEMES.night;
+      bgLayer.style.background = bg;
+      if (field) field.style.background = bg;
+      syncFXLayout("night");
+      return;
+    }
+
+    const h = getJSTHour();
+    const phase = getPhaseByHour(h);
+
+    if (force || phase !== lastPhase) {
+      lastPhase = phase;
+      const bg = THEMES[phase] || THEMES.day;
+      bgLayer.style.background = bg;
+      if (field) field.style.background = bg;
+    }
+
+    syncFXLayout(phase);
+  }
+
+  // ===== Animation loop =====
+  let __raf = 0;
+  function startLoop() {
+    cancelAnimationFrame(__raf);
+    const tick = (t) => {
+      __raf = requestAnimationFrame(tick);
+
+      if (!shouldOn()) return;
+
+      const L = document.getElementById(FX.leftId);
+      const R = document.getElementById(FX.rightId);
+      if (!L || !R) return;
+
+      const s1 = Math.sin(t * FX.swaySpeed);
+      const s2 = Math.sin(t * (FX.swaySpeed * 1.07) + 1.4);
+
+      const angL = FX.baseAngleL + s1 * FX.swayDeg;
+      const angR = FX.baseAngleR - s2 * FX.swayDeg;
+
+      L.style.transform = `translateX(-50%) rotate(${angL.toFixed(2)}deg)`;
+      R.style.transform = `translateX(-50%) rotate(${angR.toFixed(2)}deg)`;
+
+      const hue = (t * FX.hueSpeed) % 360;
+      const f = `blur(${FX.blur}px) saturate(1.35) hue-rotate(${hue.toFixed(1)}deg)`;
+      L.style.filter = f;
+      R.style.filter = f;
+    };
+    __raf = requestAnimationFrame(tick);
+  }
+
+  function hookStorageChange() {
+    try {
+      const _setItem = localStorage.setItem.bind(localStorage);
+      localStorage.setItem = (k, v) => {
+        _setItem(k, v);
+        if (k === LS_OWNED || k === LS_IP_EN || /^milkpop_itemplace_v\d+$/i.test(k) || k === LS_REINC) applyBg(true);
+      };
+    } catch {}
+
+    window.addEventListener("storage", (e) => {
+      if (!e) return;
+      if (e.key === LS_OWNED || e.key === LS_IP_EN || /^milkpop_itemplace_v\d+$/i.test(e.key || "") || e.key === LS_REINC) applyBg(true);
+    });
+  }
+
+  function hookWB() {
+    if (!window.WB?.on) return;
+    const evs = [
+      "shop:changed",
+      "itemplace:enabled_changed",
+      "itemplace:owned_changed",
+      "itemplace:state_changed",
+      "core:ready",
+      "core:reset_partial",
+    ];
+    evs.forEach(ev => {
+      try { window.WB.on(ev, () => applyBg(true)); } catch {}
+    });
+  }
+
+  function exposeReincarnationAPI() {
+    if (!window.WB) window.WB = {};
+    if (window.WB.reincarnation) return;
+
+    window.WB.reincarnation = {
+      key: LS_REINC,
+      get: () => isReincarnated(),
+      set: (on) => {
+        try { localStorage.setItem(LS_REINC, on ? "true" : "false"); } catch {}
+        applyBg(true);
+      },
+      clear: () => {
+        try { localStorage.removeItem(LS_REINC); } catch {}
+        applyBg(true);
+      },
+      purgeBunniesAndHearts: () => clearBunniesAndHearts(),
+    };
+  }
+
+  (function boot() {
+    exposeReincarnationAPI();
+    applyBg(true);
+    startLoop();
+    hookStorageChange();
+    hookWB();
+
+    setInterval(() => applyBg(false), 30_000);
+    window.addEventListener("resize", () => applyBg(true), { passive: true });
+    window.addEventListener("scroll",  () => applyBg(true), { passive: true });
+
+    // ✅ 状態ログ（最初の1回だけ）
+    try {
+      const { key } = readMirrorballState();
+      console.log("[bgcolor] V12.1 ready", {
+        owned: isOwnedMirrorball(),
+        enabled: itemPlaceEnabledMirrorball(),
+        placed: itemPlacePlacedMirrorball(),
+        stateKey: key,
+        mirrorDom: !!document.getElementById(MIRROR_DOM_ID),
+      });
+    } catch {}
+  })();
 })();
