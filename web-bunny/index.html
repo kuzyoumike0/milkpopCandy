@@ -29,7 +29,7 @@
     <div id="coin">🪙 <span id="coinValue">0</span></div>
 
     <div id="hudButtons">
-      <!-- ✅ 表に出す：お迎え / 旅立ち / 花火 -->
+      <!-- ✅ 表に出す：お迎え / 旅立ち / 花火 / おやつ -->
       <button id="omukaeBtn" type="button">お迎え</button>
       <button id="departBtn" type="button">旅立ち</button>
       <button id="hanabiBtn" type="button">🎆 花火</button>
@@ -102,6 +102,10 @@
 
   <!-- 旅立ちメッセージ -->
   <script src="./farewell_messages.js?v=20260111_2"></script>
+
+  <!-- ✅ 旅立ち（tabidati.js：HUD列にボタンを自動追加する版）
+       ※ 今回はHUDに #departBtn が既にあるので、tabidati.js 側を「既存ボタン優先」に直すのが理想 -->
+  <script src="./tabidati.js?v=20260111_2"></script>
 
   <!-- スロット -->
   <script src="./slot.js?v=20260111_2"></script>
