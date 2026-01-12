@@ -1,4 +1,4 @@
-// haikei.js（V4）
+// haikei.js（V4.1）
 // ✅ bed.png を「うさぎの後ろ」に配置（bgLayer）
 // ✅ shopで bed 購入 + bedEnabled=ON の時だけ有効
 // ✅ 変更：HUDボタンは作らない（ハンバーガーメニュー等から HAKEI.openBedPlacer() を呼ぶ）
@@ -7,6 +7,7 @@
 // ✅ 配置モード開始時：ショップモーダルを強制的に閉じて邪魔を根絶
 // ✅ 設置OFF/未購入なら完全撤去（残骸ゼロ）
 // ✅ 位置は localStorage に保存（次回も復元）
+// ✅ 追加：画像を小さくする（BED_SCALE）
 
 (() => {
   "use strict";
@@ -22,10 +23,13 @@
   const BED_ID = "haikeiBedImage";
   const PREVIEW_ID = "haikeiBedPreview";
 
-  const STYLE_ID = "haikeiBedStyleV4";
+  const STYLE_ID = "haikeiBedStyleV4_1";
 
   // うさぎより後ろ（bgLayer内）
   const Z_BEHIND_BUNNY = 6;
+
+  // ✅ 画像を小さくする倍率（ここだけ調整すればOK）
+  const BED_SCALE = 0.62;
 
   // 初期位置（未配置時）
   const DEFAULT = { x: 80, y: 220 };
@@ -99,21 +103,18 @@
   z-index:${Z_BEHIND_BUNNY};
   pointer-events:none;
 }
-#${BED_ID}{
+#${BED_ID}, #${PREVIEW_ID}{
   position:absolute;
   left:0; top:0;
   transform-origin: 0 0;
+  transform: scale(${BED_SCALE});
   user-select:none;
   -webkit-user-drag:none;
+}
+#${BED_ID}{
   pointer-events:none;
 }
 #${PREVIEW_ID}{
-  position:absolute;
-  left:0; top:0;
-  transform-origin: 0 0;
-  user-select:none;
-  -webkit-user-drag:none;
-
   /* ✅ 透明プレビュー + 赤枠 */
   opacity: .26;
   outline: 3px solid rgba(255,0,0,.85);
@@ -298,13 +299,13 @@
       const x = e.clientX - hr.left;
       const y = e.clientY - hr.top;
 
-      // ベッド画像のサイズが分かっていれば中心合わせ（未ロードなら左上合わせ）
+      // ✅ スケールを考慮して中心合わせ
       const pv = document.getElementById(PREVIEW_ID);
       let nx = x;
       let ny = y;
       try {
-        const w = pv?.naturalWidth || pv?.width || 0;
-        const h = pv?.naturalHeight || pv?.height || 0;
+        const w = (pv?.naturalWidth || pv?.width || 0) * BED_SCALE;
+        const h = (pv?.naturalHeight || pv?.height || 0) * BED_SCALE;
         if (w > 0 && h > 0) {
           nx = x - (w / 2);
           ny = y - (h / 2);
