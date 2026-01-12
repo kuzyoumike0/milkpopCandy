@@ -1,8 +1,5 @@
-// gameMenu.js（非module）V2.9
-// ✅ 🎰 スロット復活
-// ✅ 🌟 転生 / 🛒 / 🎵 / 📖 すべて維持
-// ✅ 🎀 お洒落（isyou.js）をハンバーガーメニューに追加（NEW）
-// ✅ 🔥 完全リセット（長押し1.5秒）
+// gameMenu.js（非module）V2.9.1
+// ✅ zukan.js を best-effort で確実に開く（WB.zukan / ZUKAN / 旧ボタン / emit）
 
 (() => {
   "use strict";
@@ -100,10 +97,7 @@
         <div class="list">
           <button class="item" data-act="shop">🛒 ショップ</button>
           <button class="item" data-act="itemplace">🧸 アイテム配置</button>
-
-          <!-- ✅ NEW：お洒落（isyou.js） -->
           <button class="item" data-act="isyou">🎀 お洒落</button>
-
           <button class="item" data-act="slot">🎰 スロット</button>
           <button class="item" data-act="zukan">📖 図鑑</button>
           <button class="item" data-act="bgm">🎵 BGM</button>
@@ -131,10 +125,7 @@
     const btn = document.getElementById("slotBtn");
     if (btn) {
       try { btn.click(); return; } catch {}
-      try {
-        btn.dispatchEvent(new MouseEvent("click", { bubbles:true }));
-        return;
-      } catch {}
+      try { btn.dispatchEvent(new MouseEvent("click", { bubbles:true })); return; } catch {}
     }
     console.warn("[gameMenu] slot open failed");
   }
@@ -143,14 +134,10 @@
    * 🎀 isyou best effort
    * ========================= */
   function openIsyouBestEffort() {
-    // 最優先：isyou.js が公開している API
     try { if (window.ISYOU?.openModal) return window.ISYOU.openModal(); } catch {}
-
-    // WBにぶら下げてる可能性も吸収
     try { if (window.WB?.isyou?.open) return window.WB.isyou.open(); } catch {}
     try { if (window.WB?.isyou?.openModal) return window.WB.isyou.openModal(); } catch {}
 
-    // 互換：もし旧ボタンが存在するなら押す（基本は無い想定）
     const btn = document.getElementById("isyouBtn");
     if (btn) {
       try { btn.click(); return; } catch {}
@@ -162,17 +149,45 @@
   }
 
   /* =========================
+   * 📖 zukan best effort（ここが追加）
+   * ========================= */
+  function openZukanBestEffort() {
+    // 1) 正規っぽいAPI
+    try { if (window.WB?.zukan?.open) return window.WB.zukan.open("bunny"); } catch {}
+    try { if (window.ZUKAN?.open) return window.ZUKAN.open("bunny"); } catch {}
+    try { if (window.WB?.zukan?.openModal) return window.WB.zukan.openModal("bunny"); } catch {}
+    try { if (window.ZUKAN?.openModal) return window.ZUKAN.openModal("bunny"); } catch {}
+
+    // 2) event で開く実装も吸収（zukan.js が WB.on("ui:zukan") を見てる場合）
+    try { window.WB?.emit?.("ui:zukan", { tab: "bunny" }); } catch {}
+    try { window.WB?.emit?.("zukan:open", { tab: "bunny" }); } catch {}
+    try { window.dispatchEvent(new CustomEvent("wb:zukanOpen", { detail: { tab: "bunny" } })); } catch {}
+
+    // 3) 旧ボタンが存在するなら押す（最終手段）
+    const cand =
+      document.getElementById("zukanBtn") ||
+      [...document.querySelectorAll("button")].find(b => (b.textContent || "").includes("図鑑"));
+    if (cand) {
+      try { cand.click(); return; } catch {}
+      try { cand.dispatchEvent(new MouseEvent("click", { bubbles:true })); return; } catch {}
+    }
+
+    console.warn("[gameMenu] zukan open failed (no API / no button)");
+    try { window.WB?.toast?.("図鑑がまだ読み込まれてない…！"); } catch {}
+  }
+
+  /* =========================
    * Actions
    * ========================= */
   function handleAction(act) {
     try {
-      if (act === "shop")      return window.WB?.shop?.open?.();
-      if (act === "itemplace")return window.ITEMPLACE?.open?.();
-      if (act === "isyou")    return openIsyouBestEffort(); // ✅ NEW
-      if (act === "slot")     return openSlotBestEffort();
-      if (act === "zukan")    return window.WB?.zukan?.open?.("bunny");
-      if (act === "bgm")      return window.WB?.bgm?.openModal?.();
-      if (act === "prestige") return window.WB?.prestige?.open?.();
+      if (act === "shop")       return window.WB?.shop?.open?.();
+      if (act === "itemplace")  return window.ITEMPLACE?.open?.();
+      if (act === "isyou")      return openIsyouBestEffort();
+      if (act === "slot")       return openSlotBestEffort();
+      if (act === "zukan")      return openZukanBestEffort(); // ✅ ここを差し替え
+      if (act === "bgm")        return window.WB?.bgm?.openModal?.();
+      if (act === "prestige")   return window.WB?.prestige?.open?.();
     } catch (e) {
       console.warn("[gameMenu] action failed:", act, e);
     }
@@ -246,7 +261,7 @@
       });
     });
 
-    console.log("[gameMenu] ready v2.9 (+isyou)");
+    console.log("[gameMenu] ready v2.9.1 (+zukan best-effort)");
   }
 
   if (document.readyState === "loading") {
